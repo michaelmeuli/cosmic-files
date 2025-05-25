@@ -7,6 +7,8 @@ use crate::{config::IconSizes, tab};
 
 #[cfg(feature = "gvfs")]
 mod gvfs;
+#[cfg(feature = "ssh")]
+mod ssh;
 
 #[derive(Clone)]
 pub struct MounterAuth {
