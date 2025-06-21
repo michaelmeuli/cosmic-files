@@ -1,7 +1,7 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(feature = "wayland")]
+#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced::{
     event::wayland::{Event as WaylandEvent, OutputEvent, OverlapNotifyEvent},
     platform_specific::runtime::wayland::layer_surface::{
@@ -12,7 +12,7 @@ use cosmic::iced::{
     },
     Limits,
 };
-#[cfg(feature = "wayland")]
+#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced_winit::commands::overlap_notify::overlap_notify;
 use cosmic::{
     app::{self, context_drawer, Core, Task},
@@ -63,7 +63,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use trash::TrashItem;
-#[cfg(feature = "wayland")]
+#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use wayland_client::{protocol::wl_output::WlOutput, Proxy};
 
 use crate::{
@@ -227,9 +227,7 @@ impl Action {
             Action::TabViewGrid => Message::TabView(entity_opt, tab::View::Grid),
             Action::TabViewList => Message::TabView(entity_opt, tab::View::List),
             Action::ToggleFoldersFirst => Message::ToggleFoldersFirst,
-            Action::ToggleShowHidden => {
-                Message::TabMessage(entity_opt, tab::Message::ToggleShowHidden)
-            }
+            Action::ToggleShowHidden => Message::ToggleShowHidden,
             Action::ToggleSort(sort) => {
                 Message::TabMessage(entity_opt, tab::Message::ToggleSort(*sort))
             }
@@ -312,7 +310,7 @@ pub enum Message {
     ExtractHere(Option<Entity>),
     ExtractTo(Option<Entity>),
     ExtractToResult(DialogResult),
-    #[cfg(all(feature = "desktop", feature = "wayland"))]
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     Focused(window::Id),
     Key(Modifiers, Key, Option<SmolStr>),
     LaunchUrl(String),
@@ -339,7 +337,7 @@ pub enum Message {
     OpenWithBrowse,
     OpenWithDialog(Option<Entity>),
     OpenWithSelection(usize),
-    #[cfg(all(feature = "desktop", feature = "wayland"))]
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     Overlap(OverlapNotifyEvent, window::Id),
     Paste(Option<Entity>),
     PasteContents(PathBuf, ClipboardPaste),
@@ -382,6 +380,7 @@ pub enum Message {
     TimeConfigChange(TimeConfig),
     ToggleContextPage(ContextPage),
     ToggleFoldersFirst,
+    ToggleShowHidden,
     Undo(usize),
     UndoTrash(widget::ToastId, Arc<[PathBuf]>),
     UndoTrashStart(Vec<TrashItem>),
@@ -401,7 +400,7 @@ pub enum Message {
     DndDropTab(Entity, Option<ClipboardPaste>, DndAction),
     DndDropNav(Entity, Option<ClipboardPaste>, DndAction),
     Recents,
-    #[cfg(feature = "wayland")]
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     OutputEvent(OutputEvent, WlOutput),
     Cosmic(app::Action),
     None,
@@ -583,9 +582,9 @@ pub struct App {
     failed_operations: BTreeMap<u64, (Operation, Controller, String)>,
     search_id: widget::Id,
     size: Option<Size>,
-    #[cfg(feature = "wayland")]
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     surface_ids: HashMap<WlOutput, WindowId>,
-    #[cfg(feature = "wayland")]
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     surface_names: HashMap<WindowId, String>,
     toasts: widget::toaster::Toasts<Message>,
     watcher_opt: Option<(Debouncer<RecommendedWatcher, FileIdMap>, HashSet<PathBuf>)>,
@@ -1939,9 +1938,9 @@ impl Application for App {
             failed_operations: BTreeMap::new(),
             search_id: widget::Id::unique(),
             size: None,
-            #[cfg(feature = "wayland")]
+            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             surface_ids: HashMap::new(),
-            #[cfg(feature = "wayland")]
+            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             surface_names: HashMap::new(),
             toasts: widget::toaster::Toasts::new(Message::CloseToast),
             watcher_opt: None,
@@ -3122,7 +3121,7 @@ impl Application for App {
 
                     self.complete_operations.insert(id, op);
                 }
-                // Close progress notification if all relavent operations are finished
+                // Close progress notification if all relevant operations are finished
                 if !self
                     .pending_operations
                     .iter()
@@ -3158,7 +3157,7 @@ impl Application for App {
                     self.failed_operations
                         .insert(id, (op, controller, err.to_string()));
                 }
-                // Close progress notification if all relavent operations are finished
+                // Close progress notification if all relevant operations are finished
                 if !self
                     .pending_operations
                     .iter()
@@ -3442,6 +3441,11 @@ impl Application for App {
             Message::ToggleFoldersFirst => {
                 let mut config = self.config.tab;
                 config.folders_first = !config.folders_first;
+                return self.update(Message::TabConfig(config));
+            }
+            Message::ToggleShowHidden => {
+                let mut config = self.config.tab;
+                config.show_hidden = !config.show_hidden;
                 return self.update(Message::TabConfig(config));
             }
             Message::TabMessage(entity_opt, tab_message) => {
@@ -4018,7 +4022,7 @@ impl Application for App {
             Message::Recents => {
                 return self.open_tab(Location::Recents, false, None);
             }
-            #[cfg(feature = "wayland")]
+            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             Message::OutputEvent(output_event, output) => {
                 match output_event {
                     OutputEvent::Created(output_info_opt) => {
@@ -4079,7 +4083,7 @@ impl Application for App {
                                 exclusive_zone: 0,
                                 size_limits: Limits::NONE.min_width(1.0).min_height(1.0),
                             }),
-                            #[cfg(feature = "wayland")]
+                            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
                             overlap_notify(surface_id, true),
                         ]);
                     }
@@ -4106,7 +4110,7 @@ impl Application for App {
                 return Task::perform(async move { cosmic }, cosmic::action::cosmic);
             }
             Message::None => {}
-            #[cfg(all(feature = "desktop", feature = "wayland"))]
+            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             Message::Overlap(overlap_notify_event, w_id) => match overlap_notify_event {
                 OverlapNotifyEvent::OverlapLayerAdd {
                     identifier,
@@ -4130,7 +4134,7 @@ impl Application for App {
                 self.size = Some(size);
                 self.handle_overlap();
             }
-            #[cfg(all(feature = "desktop", feature = "wayland"))]
+            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             Message::Focused(id) => {
                 if let Some(w) = self.windows.get(&id) {
                     match w {
@@ -5231,14 +5235,14 @@ impl Application for App {
                     Some(Message::ModifiersChanged(modifiers))
                 }
                 Event::Window(WindowEvent::Unfocused) => Some(Message::WindowUnfocus),
-                #[cfg(all(feature = "desktop", feature = "wayland"))]
+                #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
                 Event::Window(WindowEvent::Focused) => Some(Message::Focused(window_id)),
                 Event::Window(WindowEvent::CloseRequested) => Some(Message::WindowClose),
                 Event::Window(WindowEvent::Opened { position: _, size }) => {
                     Some(Message::Size(size))
                 }
                 Event::Window(WindowEvent::Resized(s)) => Some(Message::Size(s)),
-                #[cfg(feature = "wayland")]
+                #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
                 Event::PlatformSpecific(event::PlatformSpecific::Wayland(wayland_event)) => {
                     match wayland_event {
                         WaylandEvent::Output(output_event, output) => {
