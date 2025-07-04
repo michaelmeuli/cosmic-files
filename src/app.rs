@@ -16,7 +16,8 @@ use cosmic::iced::{
 use cosmic::iced_winit::commands::overlap_notify::overlap_notify;
 use cosmic::{
     app::{self, context_drawer, Core, Task},
-    cosmic_config, cosmic_theme, executor,
+    cosmic_config::{self, ConfigSet},
+    cosmic_theme, executor,
     iced::{
         self,
         clipboard::dnd::DndAction,
@@ -66,7 +67,6 @@ use trash::TrashItem;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use wayland_client::{protocol::wl_output::WlOutput, Proxy};
 
-use crate::dialog::DialogSettings;
 use crate::{
     clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
     config::{
@@ -86,8 +86,11 @@ use crate::{
         ReplaceResult,
     },
     spawn_detached::spawn_detached,
-    tab::{self, HeadingOptions, ItemMetadata, Location, Tab, HOVER_DURATION},
+    tab::{
+        self, HeadingOptions, ItemMetadata, Location, Tab, HOVER_DURATION, SORT_OPTION_FALLBACK,
+    },
 };
+use crate::{config::State, dialog::DialogSettings};
 
 #[derive(Clone, Debug)]
 pub enum Mode {
@@ -99,6 +102,8 @@ pub enum Mode {
 pub struct Flags {
     pub config_handler: Option<cosmic_config::Config>,
     pub config: Config,
+    pub state_handler: Option<cosmic_config::Config>,
+    pub state: State,
     pub mode: Mode,
     pub locations: Vec<Location>,
 }
@@ -358,6 +363,7 @@ pub enum Message {
     Rename(Option<Entity>),
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
+    SaveSortNames,
     ScrollTab(i16),
     SearchActivate,
     SearchClear,
@@ -562,7 +568,9 @@ pub struct App {
     nav_model: segmented_button::SingleSelectModel,
     tab_model: segmented_button::Model<segmented_button::SingleSelect>,
     config_handler: Option<cosmic_config::Config>,
+    state_handler: Option<cosmic_config::Config>,
     config: Config,
+    state: State,
     mode: Mode,
     app_themes: Vec<String>,
     compio_tx: mpsc::Sender<Pin<Box<dyn Future<Output = ()> + Send>>>,
@@ -574,6 +582,7 @@ pub struct App {
     mime_app_cache: MimeAppCache,
     modifiers: Modifiers,
     mounter_items: HashMap<MounterKey, MounterItems>,
+    must_save_sort_names: bool,
     network_drive_connecting: Option<(MounterKey, String)>,
     network_drive_input: String,
     #[cfg(feature = "notify")]
@@ -873,7 +882,11 @@ impl App {
         activate: bool,
         selection_paths: Option<Vec<PathBuf>>,
     ) -> (Entity, Task<Message>) {
-        let mut tab = Tab::new(location.clone(), self.config.tab);
+        let mut tab = Tab::new(
+            location.clone(),
+            self.config.tab,
+            Some(&self.state.sort_names),
+        );
         tab.mode = match self.mode {
             Mode::App => tab::Mode::App,
             Mode::Desktop => {
@@ -1937,7 +1950,9 @@ impl Application for App {
             nav_model: segmented_button::ModelBuilder::default().build(),
             tab_model: segmented_button::ModelBuilder::default().build(),
             config_handler: flags.config_handler,
+            state_handler: flags.state_handler,
             config: flags.config,
+            state: flags.state,
             mode: flags.mode,
             app_themes,
             compio_tx,
@@ -1949,6 +1964,7 @@ impl Application for App {
             mime_app_cache: MimeAppCache::new(),
             modifiers: Modifiers::empty(),
             mounter_items: HashMap::new(),
+            must_save_sort_names: false,
             network_drive_connecting: None,
             network_drive_input: String::new(),
             #[cfg(feature = "notify")]
@@ -3587,6 +3603,46 @@ impl Application for App {
                                 commands.push(window::toggle_maximize(*window_id));
                             }
                         }
+                        tab::Command::SetSort(location, heading_options, direction) => {
+                            let default_sort = tab::SORT_OPTION_FALLBACK
+                                .get(&location)
+                                .cloned()
+                                .unwrap_or((HeadingOptions::Name, true));
+                            let changed = if default_sort == (heading_options, direction) {
+                                self.state.sort_names.remove(&location).is_some()
+                            } else {
+                                // force reordering of inserted values so new settings are not dropped in the truncation step
+                                _ = self.state.sort_names.remove(&location);
+                                _ = self
+                                    .state
+                                    .sort_names
+                                    .insert(location, (heading_options, direction))
+                                    .is_none_or(|old| old != (heading_options, direction));
+
+                                const MAX_SORT_NAMES: usize = 999;
+                                // TODO potentially configurable limit on max size?
+                                if self.state.sort_names.len() > MAX_SORT_NAMES {
+                                    // truncate is not a good fit because it drops the items at the end, which are newest...
+                                    self.state.sort_names = self
+                                        .state
+                                        .sort_names
+                                        .split_off(self.state.sort_names.len() - MAX_SORT_NAMES);
+                                }
+
+                                true
+                            };
+
+                            if !self.must_save_sort_names & changed {
+                                self.must_save_sort_names = true;
+                                return cosmic::Task::perform(
+                                    async move {
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                        cosmic::action::app(Message::SaveSortNames)
+                                    },
+                                    |x| x,
+                                );
+                            }
+                        }
                     }
                 }
                 return Task::batch(commands);
@@ -3599,11 +3655,24 @@ impl Application for App {
                 };
                 return self.open_tab(location, true, None);
             }
-            Message::TabRescan(entity, location, parent_item_opt, items, selection_paths) => {
+            Message::TabRescan(entity, mut location, parent_item_opt, items, selection_paths) => {
+                location = location.normalize();
                 if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {
+                    tab.location = tab.location.normalize();
                     if location == tab.location {
                         tab.parent_item_opt = parent_item_opt;
                         tab.set_items(items);
+                        let location_str = location.to_string();
+                        let sort = self
+                            .state
+                            .sort_names
+                            .get(&location_str)
+                            .or_else(|| SORT_OPTION_FALLBACK.get(&location_str))
+                            .unwrap_or_else(|| &(HeadingOptions::Name, true));
+
+                        tab.sort_name = sort.0;
+                        tab.sort_direction = sort.1;
+
                         if let Some(selection_paths) = selection_paths {
                             tab.select_paths(selection_paths);
                         }
@@ -4193,6 +4262,19 @@ impl Application for App {
                 return cosmic::task::message(cosmic::Action::Cosmic(
                     cosmic::app::Action::Surface(a),
                 ));
+            }
+            Message::SaveSortNames => {
+                self.must_save_sort_names = false;
+                if let Some(state_handler) = self.state_handler.as_ref() {
+                    if let Err(err) =
+                        state_handler.set::<ordermap::OrderMap<String, (HeadingOptions, bool)>>(
+                            "sort_names",
+                            self.state.sort_names.clone(),
+                        )
+                    {
+                        log::warn!("Failed to save sort names: {:?}", err);
+                    }
+                }
             }
         }
 
@@ -5764,7 +5846,7 @@ pub(crate) mod test_utils {
         // New tab with items
         let location = Location::Path(path.to_owned());
         let (parent_item_opt, items) = location.scan(IconSizes::default());
-        let mut tab = Tab::new(location, TabConfig::default());
+        let mut tab = Tab::new(location, TabConfig::default(), None);
         tab.parent_item_opt = parent_item_opt;
         tab.set_items(items);
 
