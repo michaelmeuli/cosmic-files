@@ -65,6 +65,7 @@ slotmap = "1.0.7"
 recently-used-xbel = "1.1.0"
 zip = "2.2.2"
 uzers = "0.12.1"
+async-ssh2-tokio = { version = "0.8.15", optional = true }
 
 # Completion-based IO runtime to enable io_uring / IOCP file IO support.
 [dependencies.compio]
@@ -93,6 +94,7 @@ default = [
     "wgpu",
     "wayland",
     "xz2",
+    "ssh",
 ]
 dbus-config = ["libcosmic/dbus-config"]
 desktop = ["libcosmic/desktop", "dep:cosmic-mime-apps", "dep:xdg"]
@@ -104,6 +106,7 @@ jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]
 wayland = ["libcosmic/wayland", "dep:wayland-client"]
 wgpu = ["libcosmic/wgpu"]
+ssh = ["async-ssh2-tokio"]
 
 [profile.dev]
 opt-level = 1

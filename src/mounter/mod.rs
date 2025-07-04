@@ -7,6 +7,8 @@ use crate::{config::IconSizes, tab};
 
 #[cfg(feature = "gvfs")]
 mod gvfs;
+#[cfg(feature = "ssh")]
+mod ssh;
 
 #[derive(Clone)]
 pub struct MounterAuth {
@@ -42,6 +44,8 @@ impl fmt::Debug for MounterAuth {
 pub enum MounterItem {
     #[cfg(feature = "gvfs")]
     Gvfs(gvfs::Item),
+    #[cfg(feature = "ssh")]
+    Ssh(ssh::Item),
     #[allow(dead_code)]
     None,
 }
@@ -51,6 +55,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.name(),
+            Self::Ssh(item) => item.name(),
             Self::None => unreachable!(),
         }
     }
@@ -59,6 +64,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.is_mounted(),
+            Self::Ssh(item) => item.is_mounted(),
             Self::None => unreachable!(),
         }
     }
@@ -67,6 +73,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.icon(symbolic),
+            Self::Ssh(item) => item.icon(symbolic),
             Self::None => unreachable!(),
         }
     }
@@ -75,6 +82,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.path(),
+            Self::Ssh(item) => item.path(),
             Self::None => unreachable!(),
         }
     }
