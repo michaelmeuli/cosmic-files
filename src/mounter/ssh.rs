@@ -1,4 +1,4 @@
-use async_ssh2_tokio::client::{Client, AuthMethod, ServerCheckMethod};
+use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
 use cosmic::{iced::Subscription, widget, Task};
 use std::{any::TypeId, collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
@@ -9,9 +9,6 @@ use crate::{
     err_str,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
-
-
-
 
 pub async fn get_raw_reads(
     client: &Client,
@@ -112,8 +109,6 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
     Ok(items)
 }
 
-
-
 #[derive(Clone, Debug)]
 pub struct Item {
     name: String,
@@ -146,22 +141,14 @@ impl Item {
     }
 }
 
-
 pub struct Ssh {
-    client: Arc<Mutex<Client>>,
+    client: Arc<Mutex<Option<Client>>>,
 }
 
 impl Ssh {
     pub async fn new() -> Self {
-        let client = Client::connect(
-            ("localhost", 22),
-            "root",
-            AuthMethod::with_password("root"),
-            ServerCheckMethod::NoCheck,
-        ).await.unwrap();
-
         Self {
-            client: Arc::new(Mutex::new(client)),
+            client: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -179,16 +166,32 @@ impl Mounter for Ssh {
         Some(items)
     }
 
-    fn mount(&self, item: MounterItem) -> Task<()> {
-        let command_tx = self.command_tx.clone();
+    fn mount(&self, _item: MounterItem) -> Task<()> {
+        let client_arc = Arc::clone(&self.client);
+
         Task::perform(
             async move {
-                command_tx.send(Cmd::Mount(item)).unwrap();
+                match Client::connect(
+                    ("localhost", 22),
+                    "root",
+                    AuthMethod::with_password("root"),
+                    ServerCheckMethod::NoCheck,
+                )
+                .await
+                {
+                    Ok(client) => {
+                        let mut guard = client_arc.lock().await;
+                        *guard = Some(client);
+                        println!("SSH connection stored.");
+                    }
+                    Err(err) => {
+                        eprintln!("SSH connection failed: {:?}", err);
+                    }
+                }
             },
-            |x| x,
+            |_| (),
         )
     }
-
 
     fn network_drive(&self, uri: String) -> Task<()> {
         let command_tx = self.command_tx.clone();
@@ -249,5 +252,4 @@ impl Mounter for Ssh {
             }),
         )
     }
-
 }

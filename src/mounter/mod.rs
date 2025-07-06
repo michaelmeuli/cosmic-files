@@ -121,6 +121,10 @@ pub fn mounters() -> Mounters {
     {
         mounters.insert(MounterKey("gvfs"), Box::new(gvfs::Gvfs::new()));
     }
+    #[cfg(feature = "ssh")]
+    {
+        mounters.insert(MounterKey("ssh"), Box::new(ssh::Ssh::new()));
+    }
 
     Mounters::new(mounters)
 }
