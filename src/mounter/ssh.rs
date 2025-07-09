@@ -146,7 +146,7 @@ pub struct Ssh {
 }
 
 impl Ssh {
-    pub async fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
         }
@@ -194,13 +194,7 @@ impl Mounter for Ssh {
     }
 
     fn network_drive(&self, uri: String) -> Task<()> {
-        let command_tx = self.command_tx.clone();
-        Task::perform(
-            async move {
-                command_tx.send(Cmd::NetworkDrive(uri)).unwrap();
-            },
-            |x| x,
-        )
+        Task::perform(async move {}, |x| x)
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
@@ -212,44 +206,10 @@ impl Mounter for Ssh {
     }
 
     fn unmount(&self, item: MounterItem) -> Task<()> {
-        let command_tx = self.command_tx.clone();
-        Task::perform(
-            async move {
-                command_tx.send(Cmd::Unmount(item)).unwrap();
-            },
-            |x| x,
-        )
+        Task::perform(async move {}, |x| x)
     }
 
     fn subscription(&self) -> Subscription<MounterMessage> {
-        let command_tx = self.command_tx.clone();
-        let event_rx = self.event_rx.clone();
-        Subscription::run_with_id(
-            TypeId::of::<Self>(),
-            stream::channel(1, |mut output| async move {
-                command_tx.send(Cmd::Rescan).unwrap();
-                while let Some(event) = event_rx.lock().await.recv().await {
-                    match event {
-                        Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
-                        Event::Items(items) => {
-                            output.send(MounterMessage::Items(items)).await.unwrap()
-                        }
-                        Event::MountResult(item, res) => output
-                            .send(MounterMessage::MountResult(item, res))
-                            .await
-                            .unwrap(),
-                        Event::NetworkAuth(uri, auth, auth_tx) => output
-                            .send(MounterMessage::NetworkAuth(uri, auth, auth_tx))
-                            .await
-                            .unwrap(),
-                        Event::NetworkResult(uri, res) => output
-                            .send(MounterMessage::NetworkResult(uri, res))
-                            .await
-                            .unwrap(),
-                    }
-                }
-                pending().await
-            }),
-        )
+        Subscription::none()
     }
 }
