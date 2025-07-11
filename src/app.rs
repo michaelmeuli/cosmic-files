@@ -30,7 +30,7 @@ use cosmic::{
         Alignment, Event, Length, Point, Rectangle, Size, Subscription,
     },
     iced_runtime::clipboard,
-    style, theme,
+    style, surface, theme,
     widget::{
         self,
         dnd_destination::DragId,
@@ -41,7 +41,6 @@ use cosmic::{
     },
     Application, ApplicationExt, Element,
 };
-use cosmic::{iced::mouse::Event::CursorMoved, surface};
 use mime_guess::Mime;
 use notify_debouncer_full::{
     new_debouncer,
@@ -148,6 +147,7 @@ pub enum Action {
     PermanentlyDelete,
     Preview,
     Reload,
+    RemoveFromRecents,
     Rename,
     RestoreFromTrash,
     SearchActivate,
@@ -218,6 +218,7 @@ impl Action {
             Action::PermanentlyDelete => Message::PermanentlyDelete(entity_opt),
             Action::Preview => Message::Preview(entity_opt),
             Action::Reload => Message::TabMessage(entity_opt, tab::Message::Reload),
+            Action::RemoveFromRecents => Message::RemoveFromRecents(entity_opt),
             Action::Rename => Message::Rename(entity_opt),
             Action::RestoreFromTrash => Message::RestoreFromTrash(entity_opt),
             Action::SearchActivate => Message::SearchActivate,
@@ -299,18 +300,19 @@ impl MenuAction for NavMenuAction {
 pub enum Message {
     AddToSidebar(Option<Entity>),
     AppTheme(AppTheme),
+    CloseId(window::Id),
     CloseToast(widget::ToastId),
     Compress(Option<Entity>),
     Config(Config),
     Copy(Option<Entity>),
     CosmicSettings(&'static str),
-    CursorMoved(Point),
     Cut(Option<Entity>),
     Delete(Option<Entity>),
     DesktopConfig(DesktopConfig),
     DesktopViewOptions,
     DialogCancel,
     DialogComplete,
+    DragId(window::Id),
     Eject,
     FileDialogMessage(DialogMessage),
     DialogPush(DialogPage),
@@ -360,6 +362,7 @@ pub enum Message {
     PermanentlyDelete(Option<Entity>),
     Preview(Option<Entity>),
     RescanTrash,
+    RemoveFromRecents(Option<Entity>),
     Rename(Option<Entity>),
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
@@ -1106,6 +1109,23 @@ impl App {
             if let Some(tab) = self.tab_model.data::<Tab>(entity) {
                 if let Location::Trash = &tab.location {
                     needs_reload.push((entity, Location::Trash));
+                }
+            }
+        }
+
+        let mut commands = Vec::with_capacity(needs_reload.len());
+        for (entity, location) in needs_reload {
+            commands.push(self.update_tab(entity, location, None));
+        }
+        Task::batch(commands)
+    }
+
+    fn rescan_recents(&mut self) -> Task<Message> {
+        let mut needs_reload = Vec::new();
+        for entity in self.tab_model.iter() {
+            if let Some(tab) = self.tab_model.data::<Tab>(entity) {
+                if let Location::Recents = &tab.location {
+                    needs_reload.push((entity, Location::Recents));
                 }
             }
         }
@@ -2327,13 +2347,6 @@ impl Application for App {
                 let contents = ClipboardCopy::new(ClipboardKind::Copy, &paths);
                 return clipboard::write_data(contents);
             }
-            Message::CursorMoved(pos) => {
-                let entity = self.tab_model.active();
-                return self.update(Message::TabMessage(
-                    Some(entity),
-                    tab::Message::CursorMoved(pos),
-                ));
-            }
             Message::Cut(entity_opt) => {
                 self.set_cut(entity_opt);
                 let paths = self.selected_paths(entity_opt);
@@ -2396,7 +2409,7 @@ impl Application for App {
             }
             Message::DesktopViewOptions => {
                 let mut settings = window::Settings {
-                    decorations: true,
+                    decorations: false,
                     min_size: Some(Size::new(360.0, 180.0)),
                     resizable: true,
                     size: Size::new(480.0, 444.0),
@@ -3159,6 +3172,10 @@ impl Application for App {
                         }
                     }
 
+                    if matches!(op, Operation::RemoveFromRecents { .. }) {
+                        commands.push(self.rescan_recents());
+                    }
+
                     self.complete_operations.insert(id, op);
                 }
                 // Close progress notification if all relevant operations are finished
@@ -3175,6 +3192,7 @@ impl Application for App {
                 commands.push(self.rescan_operation_selection(op_sel));
                 // Manually rescan any trash tabs after any operation is completed
                 commands.push(self.rescan_trash());
+
                 return Task::batch(commands);
             }
             Message::PendingDismiss => {
@@ -3246,7 +3264,7 @@ impl Application for App {
                         let mut commands = Vec::with_capacity(selected_paths.len());
                         for path in selected_paths {
                             let mut settings = window::Settings {
-                                decorations: true,
+                                decorations: false,
                                 min_size: Some(Size::new(360.0, 180.0)),
                                 resizable: true,
                                 size: Size::new(480.0, 600.0),
@@ -3274,6 +3292,10 @@ impl Application for App {
                         return Task::batch(commands);
                     }
                 }
+            }
+            Message::RemoveFromRecents(entity_opt) => {
+                let paths = self.selected_paths(entity_opt);
+                return self.operation(Operation::RemoveFromRecents { paths });
             }
             Message::RescanTrash => {
                 // Update trash icon if empty/full
@@ -4275,6 +4297,12 @@ impl Application for App {
                         log::warn!("Failed to save sort names: {:?}", err);
                     }
                 }
+            }
+            Message::CloseId(id) => {
+                return window::close(id);
+            }
+            Message::DragId(id) => {
+                return window::drag(id);
             }
         }
 
@@ -5335,17 +5363,27 @@ impl Application for App {
             }
         };
 
-        widget::container(widget::scrollable(content))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .class(theme::Container::WindowBackground)
-            .into()
+        widget::container(
+            widget::column::column()
+                .push(Element::from(
+                    widget::header_bar()
+                        .on_close(Message::CloseId(id))
+                        .on_drag(Message::DragId(id))
+                        .build(),
+                ))
+                .push(widget::scrollable(content))
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .class(theme::Container::WindowBackground)
+        .into()
     }
 
     fn system_theme_update(
         &mut self,
         _keys: &[&'static str],
-        new_theme: &cosmic::cosmic_theme::Theme,
+        _new_theme: &cosmic::cosmic_theme::Theme,
     ) -> Task<Self::Message> {
         self.update(Message::SystemThemeModeChange)
     }
@@ -5390,7 +5428,6 @@ impl Application for App {
                         _ => None,
                     }
                 }
-                Event::Mouse(CursorMoved { position: pos }) => Some(Message::CursorMoved(pos)),
                 _ => None,
             }),
             Config::subscription().map(|update| {
