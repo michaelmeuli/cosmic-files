@@ -152,11 +152,15 @@ pub fn context_menu<'a>(
     match (&tab.mode, &tab.location) {
         (
             tab::Mode::App | tab::Mode::Desktop,
-            Location::Desktop(..) | Location::Path(..) | Location::Search(..) | Location::Recents,
+            Location::Desktop(..)
+            | Location::Path(..)
+            | Location::Search(..)
+            | Location::Recents
+            | Location::Network(_, _, Some(_)),
         ) => {
             if selected_trash_only {
                 children.push(menu_item(fl!("open"), Action::Open).into());
-                if tab::trash_entries() > 0 {
+                if !trash::os_limited::is_empty().unwrap_or(true) {
                     children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash).into());
                 }
             } else if let Some(entry) = selected_desktop_entry {
@@ -298,7 +302,11 @@ pub fn context_menu<'a>(
         }
         (
             tab::Mode::Dialog(dialog_kind),
-            Location::Desktop(..) | Location::Path(..) | Location::Search(..) | Location::Recents,
+            Location::Desktop(..)
+            | Location::Path(..)
+            | Location::Search(..)
+            | Location::Recents
+            | Location::Network(_, _, Some(_)),
         ) => {
             if selected > 0 {
                 if selected_dir == 1 && selected == 1 || selected_dir == 0 {
