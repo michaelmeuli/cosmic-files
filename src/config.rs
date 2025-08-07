@@ -69,6 +69,10 @@ pub enum Favorite {
         name: String,
         path: PathBuf,
     },
+    Tbprofiler {
+        uri: String,
+        name: String,
+    },
 }
 
 impl Favorite {

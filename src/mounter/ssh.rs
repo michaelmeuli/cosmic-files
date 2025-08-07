@@ -111,6 +111,7 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
 
 #[derive(Clone, Debug)]
 pub struct Item {
+    uri: String,
     name: String,
     is_mounted: bool,
     icon_opt: Option<PathBuf>,
@@ -154,9 +155,10 @@ impl Ssh {
 }
 
 impl Mounter for Ssh {
-    fn items(&self, sizes: IconSizes) -> Option<MounterItems> {
+    fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
         let mut items = MounterItems::new();
         items.push(MounterItem::Ssh(Item {
+            uri: "ssh://michael@localhost".to_string(),
             name: "Tbprofiler".to_string(),
             is_mounted: true,
             icon_opt: None,
