@@ -111,7 +111,9 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
 
 #[derive(Clone, Debug)]
 pub struct Item {
-    uri: String,
+    host: String,
+    port: u16,
+    username: String,
     name: String,
     is_mounted: bool,
     icon_opt: Option<PathBuf>,
@@ -157,10 +159,13 @@ impl Ssh {
 impl Mounter for Ssh {
     fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
         let mut items = MounterItems::new();
+
         items.push(MounterItem::Ssh(Item {
-            uri: "ssh://michael@localhost".to_string(),
+            host: "localhost".to_string(),
+            port: 22,
+            username: "michael".to_string(),
             name: "Tbprofiler".to_string(),
-            is_mounted: true,
+            is_mounted: false,
             icon_opt: None,
             icon_symbolic_opt: None,
             path_opt: None,
@@ -168,27 +173,31 @@ impl Mounter for Ssh {
         Some(items)
     }
 
-    fn mount(&self, _item: MounterItem) -> Task<()> {
+    fn mount(&self, item: MounterItem) -> Task<()> {
         let client_arc = Arc::clone(&self.client);
 
         Task::perform(
             async move {
-                match Client::connect(
-                    ("localhost", 22),
-                    "root",
-                    AuthMethod::with_password("root"),
-                    ServerCheckMethod::NoCheck,
-                )
-                .await
-                {
-                    Ok(client) => {
-                        let mut guard = client_arc.lock().await;
-                        *guard = Some(client);
-                        println!("SSH connection stored.");
+                if let MounterItem::Ssh(item) = item {
+                    match Client::connect(
+                        (item.host.as_str(), item.port),
+                        item.username.as_str(),
+                        AuthMethod::with_password("michael"),
+                        ServerCheckMethod::NoCheck,
+                    )
+                    .await
+                    {
+                        Ok(client) => {
+                            let mut guard = client_arc.lock().await;
+                            *guard = Some(client);
+                            println!("SSH connection stored.");
+                        }
+                        Err(err) => {
+                            eprintln!("SSH connection failed: {:?}", err);
+                        }
                     }
-                    Err(err) => {
-                        eprintln!("SSH connection failed: {:?}", err);
-                    }
+                } else {
+                    eprintln!("Invalid MounterItem variant for SSH mount.");
                 }
             },
             |_| (),
