@@ -1,6 +1,7 @@
-use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
+use async_ssh2_tokio::client::{self, AuthMethod, Client, ServerCheckMethod};
 use cosmic::{iced::Subscription, widget, Task};
 use std::{any::TypeId, collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::cell::Cell;
 use tokio::sync::{mpsc, Mutex};
 
 use super::{Mounter, MounterAuth, MounterItem, MounterItems, MounterMessage};
@@ -10,104 +11,10 @@ use crate::{
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 
-pub async fn get_raw_reads(
-    client: &Client,
-    config: &TbguiConfig,
-) -> Result<RemoteState, async_ssh2_tokio::Error> {
-    let remote_raw_dir: &str = config.remote_raw_dir.as_str();
-    check_if_dir_exists(client, remote_raw_dir).await?;
-    let command = format!("ls {}", remote_raw_dir);
-    let result = client.execute(&command).await.map_err(|e| {
-        log_error(&format!(
-            "Failed to list files in remote directory: {:?}",
-            e
-        ));
-        async_ssh2_tokio::Error::from(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to list files in remote directory: {:?}", e),
-        ))
-    })?;
-    let stdout = result.stdout;
+use tokio::runtime::Handle;
+use url::Url;
+use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 
-    let raw_reads: Vec<String> = stdout.lines().map(String::from).collect();
-    let tasks = create_tasks(raw_reads);
-    Ok(RemoteState { items: tasks })
-}
-
-fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
-    let file = gio::File::for_uri(uri);
-    let mut items = Vec::new();
-    for info_res in file
-        .enumerate_children("*", gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE)
-        .map_err(err_str)?
-    {
-        let info = info_res.map_err(err_str)?;
-        let name = info.name().to_string_lossy().to_string();
-        let display_name = info.display_name().to_string();
-
-        //TODO: what is the best way to resolve shortcuts?
-        let location = Location::Network(
-            if let Some(target_uri) = info.attribute_string(gio::FILE_ATTRIBUTE_STANDARD_TARGET_URI)
-            {
-                target_uri.to_string()
-            } else {
-                file.child(info.name()).uri().to_string()
-            },
-            display_name.clone(),
-        );
-
-        //TODO: support dir or file
-        let metadata = ItemMetadata::SimpleDir { entries: 0 };
-
-        let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
-            let file_icon = |size| {
-                info.icon()
-                    .as_ref()
-                    .and_then(|icon| gio_icon_to_path(icon, size))
-                    .map(widget::icon::from_path)
-                    .unwrap_or(
-                        widget::icon::from_name(if metadata.is_dir() {
-                            "folder"
-                        } else {
-                            "text-x-generic"
-                        })
-                        .size(size)
-                        .handle(),
-                    )
-            };
-            (
-                //TODO: get mime from content_type?
-                "inode/directory".parse().unwrap(),
-                file_icon(sizes.grid()),
-                file_icon(sizes.list()),
-                file_icon(sizes.list_condensed()),
-            )
-        };
-
-        items.push(tab::Item {
-            name,
-            display_name,
-            metadata,
-            hidden: false,
-            location_opt: Some(location),
-            mime,
-            icon_handle_grid,
-            icon_handle_list,
-            icon_handle_list_condensed,
-            thumbnail_opt: Some(ItemThumbnail::NotImage),
-            button_id: widget::Id::unique(),
-            pos_opt: Cell::new(None),
-            rect_opt: Cell::new(None),
-            selected: false,
-            highlighted: false,
-            overlaps_drag_rect: false,
-            //TODO: scan directory size on gvfs mounts?
-            dir_size: DirSize::NotDirectory,
-            cut: false,
-        });
-    }
-    Ok(items)
-}
 
 #[derive(Clone, Debug)]
 pub struct Item {
@@ -204,16 +111,133 @@ impl Mounter for Ssh {
         )
     }
 
-    fn network_drive(&self, uri: String) -> Task<()> {
+    fn network_drive(&self, _uri: String) -> Task<()> {
         Task::perform(async move {}, |x| x)
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
-        let (items_tx, mut items_rx) = mpsc::channel(1);
-        self.command_tx
-            .send(Cmd::NetworkScan(uri.to_string(), sizes, items_tx))
-            .unwrap();
-        items_rx.blocking_recv()
+        // Only handle ssh/sftp here; otherwise say "this mounter doesn't support it".
+        let url = match Url::parse(uri) {
+            Ok(u) => u,
+            Err(e) => return Some(Err(format!("bad uri: {e}"))),
+        };
+        match url.scheme() {
+            "ssh" | "sftp" => {}
+            _ => return None, // let other mounters try
+        }
+
+        // Non-blocking check for a live client.
+        let client_opt = match self.client.try_lock() {
+            Ok(g) => g.clone(), // Option<Client>
+            Err(_) => None,     // busy; treat as not connected here
+        };
+        let Some(client) = client_opt else {
+            return Some(Err("SSH not connected".into()));
+        };
+
+        // From here: do async SFTP work by *blocking* inside this sync fn.
+        let res: Result<Vec<tab::Item>, String> = tokio::task::block_in_place(|| {
+            let handle = Handle::current();
+            handle.block_on(async {
+
+                let mut path = url.path().to_string();
+                if path.is_empty() {
+                    path = "/".into();
+                }
+
+                let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+                channel.request_subsystem(true, "sftp").await.map_err(|e| e.to_string())?;
+                let sftp = SftpSession::new(channel.into_stream()).await.map_err(|e| e.to_string())?;
+
+                let entries = sftp
+                    .read_dir(&path)
+                    .await
+                    .map_err(|e| format!("read_dir {path}: {e:?}"))?;
+
+                // 4) Map to tab::Item
+                let mut items = Vec::new();
+                for entry in entries {
+                    let child_path = PathBuf::from(entry.file_name());
+                    let stat = entry.metadata();
+
+                    let name = child_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    let is_dir = stat.is_dir(); // adapt to your API
+
+                    let child_uri = {
+                        // Rebuild user@host[:port]
+                        let mut auth = String::new();
+                        if let Some(user) =
+                            url.username().strip_prefix("").filter(|u| !u.is_empty())
+                        {
+                            auth.push_str(user);
+                            if let Some(pass) = url.password() {
+                                let _ = pass; // avoid embedding password in URIs
+                            }
+                            auth.push('@');
+                        }
+                        let hostport = match (url.host_str(), url.port()) {
+                            (Some(h), Some(p)) => format!("{h}:{p}"),
+                            (Some(h), None) => h.to_string(),
+                            _ => "localhost".into(),
+                        };
+                        format!(
+                            "{}://{}{}",
+                            url.scheme(),
+                            auth + &hostport,
+                            child_path.to_string_lossy()
+                        )
+                    };
+
+                    let location = Location::Network(child_uri, name.clone(), None);
+
+                    let icon = |sz| {
+                        widget::icon::from_name(if is_dir { "folder" } else { "text-x-generic" })
+                            .size(sz)
+                            .handle()
+                    };
+
+                    let metadata = if is_dir {
+                        ItemMetadata::SimpleDir { entries: 0 }
+                    } else {
+                        ItemMetadata::GvfsPath {
+                            mtime: stat.mtime.unwrap_or(0) as u64,
+                            size_opt: stat.size.map(|s| s as u64),
+                            children_opt: None,
+                        }
+                    };
+
+                    items.push(tab::Item {
+                        name: name.clone(),
+                        is_mount_point: false,
+                        display_name: name,
+                        metadata,
+                        hidden: false,
+                        location_opt: Some(location),
+                        mime: "inode/directory".parse().unwrap(), // tweak if you compute real mime
+                        icon_handle_grid: icon(sizes.grid()),
+                        icon_handle_list: icon(sizes.list()),
+                        icon_handle_list_condensed: icon(sizes.list_condensed()),
+                        thumbnail_opt: Some(ItemThumbnail::NotImage),
+                        button_id: widget::Id::unique(),
+                        pos_opt: Cell::new(None),
+                        rect_opt: Cell::new(None),
+                        selected: false,
+                        highlighted: false,
+                        overlaps_drag_rect: false,
+                        dir_size: DirSize::NotDirectory,
+                        cut: false,
+                    });
+                }
+                Ok(items)
+            })
+        });
+
+        Some(res)
     }
 
     fn unmount(&self, item: MounterItem) -> Task<()> {
