@@ -61,27 +61,10 @@ impl Ssh {
             client: Arc::new(Mutex::new(None)),
         }
     }
-}
 
-impl Mounter for Ssh {
-    fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
-        let mut items = MounterItems::new();
-
-        items.push(MounterItem::Ssh(Item {
-            host: "localhost".to_string(),
-            port: 22,
-            username: "michael".to_string(),
-            name: "Tbprofiler".to_string(),
-            is_mounted: false,
-            icon_opt: None,
-            icon_symbolic_opt: None,
-            path_opt: None,
-        }));
-        Some(items)
-    }
-
-    fn mount(&self, item: MounterItem) -> Task<()> {
+    pub fn connect(&self) -> Task<()> {
         let client_arc = Arc::clone(&self.client);
+        let item = self.items(IconSizes::default()).unwrap().get(0).cloned().unwrap_or(MounterItem::None);
 
         Task::perform(
             async move {
@@ -110,23 +93,46 @@ impl Mounter for Ssh {
             |_| (),
         )
     }
+}
+
+impl Mounter for Ssh {
+    fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
+        let mut items = MounterItems::new();
+
+        items.push(MounterItem::Ssh(Item {
+            host: "localhost".to_string(),
+            port: 22,
+            username: "michael".to_string(),
+            name: "Tbprofiler".to_string(),
+            is_mounted: false,
+            icon_opt: None,
+            icon_symbolic_opt: None,
+            path_opt: None,
+        }));
+        Some(items)
+    }
+
+    fn mount(&self, _item: MounterItem) -> Task<()> {
+        Task::perform(async move {}, |x| x)
+    }
 
     fn network_drive(&self, _uri: String) -> Task<()> {
         Task::perform(async move {}, |x| x)
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
-        // Only handle ssh/sftp here; otherwise say "this mounter doesn't support it".
+        // connect with Ssh::connect if not already connected
+        self.connect();
+
         let url = match Url::parse(uri) {
             Ok(u) => u,
             Err(e) => return Some(Err(format!("bad uri: {e}"))),
         };
         match url.scheme() {
             "ssh" | "sftp" => {}
-            _ => return None, // let other mounters try
+            _ => return None, 
         }
 
-        // Non-blocking check for a live client.
         let client_opt = match self.client.try_lock() {
             Ok(g) => g.clone(), // Option<Client>
             Err(_) => None,     // busy; treat as not connected here
