@@ -1,23 +1,22 @@
-use async_ssh2_tokio::client::{self, AuthMethod, Client, ServerCheckMethod};
+use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
 use cosmic::{iced::Subscription, widget, Task};
-use std::{any::TypeId, collections::BTreeMap, path::PathBuf, sync::Arc};
 use std::cell::Cell;
-use tokio::sync::{mpsc, Mutex};
+use std::{path::PathBuf, sync::Arc};
+use tokio::sync::Mutex;
 
-use super::{Mounter, MounterAuth, MounterItem, MounterItems, MounterMessage};
+use super::{Mounter, MounterItem, MounterItems, MounterMessage};
 use crate::{
     config::IconSizes,
-    err_str,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 
+use russh_sftp::client::SftpSession;
 use tokio::runtime::Handle;
 use url::Url;
-use russh_sftp::{client::SftpSession, protocol::OpenFlags};
-
 
 #[derive(Clone, Debug)]
 pub struct Item {
+    uri: String,
     host: String,
     port: u16,
     username: String,
@@ -35,6 +34,10 @@ impl Item {
 
     pub fn is_mounted(&self) -> bool {
         self.is_mounted
+    }
+
+    pub fn uri(&self) -> String {
+        self.uri.clone()
     }
 
     pub fn icon(&self, symbolic: bool) -> Option<widget::icon::Handle> {
@@ -64,7 +67,12 @@ impl Ssh {
 
     pub fn connect(&self) -> Task<()> {
         let client_arc = Arc::clone(&self.client);
-        let item = self.items(IconSizes::default()).unwrap().get(0).cloned().unwrap_or(MounterItem::None);
+        let item = self
+            .items(IconSizes::default())
+            .unwrap()
+            .get(0)
+            .cloned()
+            .unwrap_or(MounterItem::None);
 
         Task::perform(
             async move {
@@ -100,6 +108,7 @@ impl Mounter for Ssh {
         let mut items = MounterItems::new();
 
         items.push(MounterItem::Ssh(Item {
+            uri: "ssh://michael@localhost:22/".to_string(),
             host: "localhost".to_string(),
             port: 22,
             username: "michael".to_string(),
@@ -130,7 +139,7 @@ impl Mounter for Ssh {
         };
         match url.scheme() {
             "ssh" | "sftp" => {}
-            _ => return None, 
+            _ => return None,
         }
 
         let client_opt = match self.client.try_lock() {
@@ -145,22 +154,24 @@ impl Mounter for Ssh {
         let res: Result<Vec<tab::Item>, String> = tokio::task::block_in_place(|| {
             let handle = Handle::current();
             handle.block_on(async {
-
                 let mut path = url.path().to_string();
                 if path.is_empty() {
                     path = "/".into();
                 }
 
                 let channel = client.get_channel().await.map_err(|e| e.to_string())?;
-                channel.request_subsystem(true, "sftp").await.map_err(|e| e.to_string())?;
-                let sftp = SftpSession::new(channel.into_stream()).await.map_err(|e| e.to_string())?;
-
+                channel
+                    .request_subsystem(true, "sftp")
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let sftp = SftpSession::new(channel.into_stream())
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let entries = sftp
                     .read_dir(&path)
                     .await
                     .map_err(|e| format!("read_dir {path}: {e:?}"))?;
 
-                // 4) Map to tab::Item
                 let mut items = Vec::new();
                 for entry in entries {
                     let child_path = PathBuf::from(entry.file_name());
@@ -172,7 +183,7 @@ impl Mounter for Ssh {
                         .unwrap_or("")
                         .to_string();
 
-                    let is_dir = stat.is_dir(); // adapt to your API
+                    let is_dir = stat.is_dir();
 
                     let child_uri = {
                         // Rebuild user@host[:port]
@@ -201,20 +212,29 @@ impl Mounter for Ssh {
 
                     let location = Location::Network(child_uri, name.clone(), None);
 
-                    let icon = |sz| {
-                        widget::icon::from_name(if is_dir { "folder" } else { "text-x-generic" })
-                            .size(sz)
-                            .handle()
-                    };
-
                     let metadata = if is_dir {
                         ItemMetadata::SimpleDir { entries: 0 }
                     } else {
-                        ItemMetadata::GvfsPath {
-                            mtime: stat.mtime.unwrap_or(0) as u64,
-                            size_opt: stat.size.map(|s| s as u64),
-                            children_opt: None,
-                        }
+                        ItemMetadata::SimpleFile { size: 0 }
+                    };
+
+                    let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+                        let file_icon = |size| {
+                            widget::icon::from_name(if metadata.is_dir() {
+                                "folder"
+                            } else {
+                                "text-x-generic"
+                            })
+                            .size(size)
+                            .handle()
+                        };
+                        (
+                            //TODO: get mime from content_type?
+                            "inode/directory".parse().unwrap(),
+                            file_icon(sizes.grid()),
+                            file_icon(sizes.list()),
+                            file_icon(sizes.list_condensed()),
+                        )
                     };
 
                     items.push(tab::Item {
@@ -224,10 +244,10 @@ impl Mounter for Ssh {
                         metadata,
                         hidden: false,
                         location_opt: Some(location),
-                        mime: "inode/directory".parse().unwrap(), // tweak if you compute real mime
-                        icon_handle_grid: icon(sizes.grid()),
-                        icon_handle_list: icon(sizes.list()),
-                        icon_handle_list_condensed: icon(sizes.list_condensed()),
+                        mime,
+                        icon_handle_grid,
+                        icon_handle_list,
+                        icon_handle_list_condensed,
                         thumbnail_opt: Some(ItemThumbnail::NotImage),
                         button_id: widget::Id::unique(),
                         pos_opt: Cell::new(None),
@@ -246,7 +266,7 @@ impl Mounter for Ssh {
         Some(res)
     }
 
-    fn unmount(&self, item: MounterItem) -> Task<()> {
+    fn unmount(&self, _item: MounterItem) -> Task<()> {
         Task::perform(async move {}, |x| x)
     }
 

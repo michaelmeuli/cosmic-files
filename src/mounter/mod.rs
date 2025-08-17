@@ -55,6 +55,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.name(),
+            #[cfg(feature = "ssh")]
             Self::Ssh(item) => item.name(),
             Self::None => unreachable!(),
         }
@@ -64,6 +65,8 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.uri(),
+            #[cfg(feature = "ssh")]
+            Self::Ssh(item) => item.uri(),
             Self::None => unreachable!(),
         }
     }
@@ -72,6 +75,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.is_mounted(),
+            #[cfg(feature = "ssh")]
             Self::Ssh(item) => item.is_mounted(),
             Self::None => unreachable!(),
         }
@@ -81,6 +85,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.icon(symbolic),
+            #[cfg(feature = "ssh")]
             Self::Ssh(item) => item.icon(symbolic),
             Self::None => unreachable!(),
         }
@@ -90,6 +95,7 @@ impl MounterItem {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.path(),
+            #[cfg(feature = "ssh")]
             Self::Ssh(item) => item.path(),
             Self::None => unreachable!(),
         }
