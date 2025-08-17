@@ -36,7 +36,7 @@ use std::{
 
 use crate::{
     app::{Action, ContextPage, Message as AppMessage, PreviewItem, PreviewKind},
-    config::{Config, DialogConfig, Favorite, TabConfig, ThumbCfg, TimeConfig, TIME_CONFIG_ID},
+    config::{Config, DialogConfig, Favorite, ThumbCfg, TimeConfig, TIME_CONFIG_ID},
     fl, home_dir,
     key_bind::key_binds,
     localize::LANGUAGE_SORTER,
@@ -704,8 +704,8 @@ impl App {
 
     fn search_set(&mut self, term_opt: Option<String>) -> Task<Message> {
         let location_opt = match term_opt {
-            Some(term) => match &self.tab.location {
-                Location::Path(path) | Location::Search(path, ..) => Some((
+            Some(term) => self.tab.location.path_opt().map(|path| {
+                (
                     Location::Search(
                         path.to_path_buf(),
                         term,
@@ -713,9 +713,8 @@ impl App {
                         Instant::now(),
                     ),
                     true,
-                )),
-                _ => None,
-            },
+                )
+            }),
             None => match &self.tab.location {
                 Location::Search(path, ..) => Some((Location::Path(path.to_path_buf()), false)),
                 _ => None,
@@ -950,6 +949,7 @@ impl Application for App {
             flags.config.dialog_tab(),
             ThumbCfg::default(),
             None,
+            widget::Id::unique(),
             None,
         );
         tab.mode = tab::Mode::Dialog(flags.kind.clone());
