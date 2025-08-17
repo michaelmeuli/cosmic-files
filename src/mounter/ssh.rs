@@ -17,9 +17,6 @@ use url::Url;
 #[derive(Clone, Debug)]
 pub struct Item {
     uri: String,
-    host: String,
-    port: u16,
-    username: String,
     name: String,
     is_mounted: bool,
     icon_opt: Option<PathBuf>,
@@ -109,9 +106,6 @@ impl Mounter for Ssh {
 
         items.push(MounterItem::Ssh(Item {
             uri: "ssh://michael@localhost:22/".to_string(),
-            host: "localhost".to_string(),
-            port: 22,
-            username: "michael".to_string(),
             name: "Tbprofiler".to_string(),
             is_mounted: false,
             icon_opt: None,

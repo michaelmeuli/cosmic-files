@@ -69,9 +69,10 @@ pub enum Favorite {
         name: String,
         path: PathBuf,
     },
-    Tbprofiler {
+    Virtual {
         uri: String,
         name: String,
+        path: PathBuf,
     },
 }
 
@@ -105,6 +106,7 @@ impl Favorite {
             Self::Videos => dirs::video_dir(),
             Self::Path(path) => Some(path.clone()),
             Self::Network { path, .. } => Some(path.clone()),
+            Self::Virtual { path, .. } => Some(path.clone()),
         }
     }
 }
@@ -233,6 +235,11 @@ impl Default for Config {
                 Favorite::Music,
                 Favorite::Pictures,
                 Favorite::Videos,
+                Favorite::Virtual {
+                    uri: "ssh://michael@localhost:22/".to_string(),
+                    name: "Tbprofiler".to_string(),
+                    path: PathBuf::from("/home/michael/Tbprofiler"),
+                },
             ],
             show_details: false,
             tab: TabConfig::default(),
