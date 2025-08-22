@@ -5469,26 +5469,20 @@ impl Tab {
         };
 
         let tab_location = self.location.clone();
-        let mut mouse_area = mouse_area::MouseArea::new(item_view)
+        let mouse_area = mouse_area::MouseArea::new(item_view)
             .on_press(move |_point_opt| Message::Click(None))
             .on_release(|_| Message::ClickRelease(None))
             .on_resize(Message::Resize)
             .on_back_press(move |_point_opt| Message::GoPrevious)
             .on_forward_press(move |_point_opt| Message::GoNext)
-            .on_scroll(|delta| respond_to_scroll_direction(delta, self.modifiers));
-
-        if self.context_menu.is_some() {
-            mouse_area = mouse_area
-                .on_right_press(move |point_opt| {
-                    Message::ContextMenu(point_opt, self.window_id.clone())
-                })
-                .wayland_on_right_press_window_position();
-        } else {
-            let window_id = self.window_id.clone();
-            mouse_area = mouse_area
-                .on_right_press(move |p| Message::ContextMenu(p, window_id))
-                .wayland_on_right_press_window_position();
-        }
+            .on_scroll(|delta| respond_to_scroll_direction(delta, self.modifiers))
+            .on_right_press(move |p| {
+                Message::ContextMenu(
+                    if self.context_menu.is_some() { None } else { p },
+                    self.window_id.clone(),
+                )
+            })
+            .wayland_on_right_press_window_position();
 
         let mut popover = widget::popover(mouse_area);
         if let Some(point) = self.context_menu {
@@ -6107,7 +6101,7 @@ fn text_editor_class(
 mod tests {
     use std::{fs, io, path::PathBuf};
 
-    use cosmic::{iced::mouse::ScrollDelta, iced_runtime::keyboard::Modifiers};
+    use cosmic::{iced::mouse::ScrollDelta, iced_runtime::keyboard::Modifiers, widget};
     use log::{debug, trace};
     use tempfile::TempDir;
     use test_log::test;
@@ -6118,7 +6112,7 @@ mod tests {
             assert_eq_tab_path, empty_fs, eq_path_item, filter_dirs, read_dir_sorted, simple_fs,
             tab_click_new, NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED,
         },
-        config::{IconSizes, TabConfig},
+        config::{IconSizes, TabConfig, ThumbCfg},
     };
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
@@ -6162,8 +6156,9 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(path.into()),
             TabConfig::default(),
-            None,
             ThumbCfg::default(),
+            None,
+            widget::Id::unique(),
             None,
         );
 
@@ -6265,8 +6260,9 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(path.to_owned()),
             TabConfig::default(),
-            None,
             ThumbCfg::default(),
+            None,
+            widget::Id::unique(),
             None,
         );
         debug!(
@@ -6403,8 +6399,9 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(path.into()),
             TabConfig::default(),
-            None,
             ThumbCfg::default(),
+            None,
+            widget::Id::unique(),
             None,
         );
 
@@ -6431,8 +6428,9 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(next_dir.clone()),
             TabConfig::default(),
-            None,
             ThumbCfg::default(),
+            None,
+            widget::Id::unique(),
             None,
         );
         // This will eventually yield false once root is hit
@@ -6470,7 +6468,9 @@ mod tests {
         Tab::new(
             Location::Path(path.into()),
             TabConfig::default(),
+            ThumbCfg::default(),
             None,
+            widget::Id::unique(),
             None,
         );
 
