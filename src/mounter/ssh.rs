@@ -1,10 +1,12 @@
 use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
-use cosmic::{iced::Subscription, widget, Task};
-use std::cell::Cell;
-use std::{path::PathBuf, sync::Arc};
-use tokio::sync::Mutex;
+use cosmic::{
+    iced::{futures::SinkExt, stream, Subscription},
+    widget, Task,
+};
+use dashmap::DashMap;
+use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
 
-use super::{Mounter, MounterItem, MounterItems, MounterMessage};
+use super::{Mounter, MounterAuth, MounterItem, MounterItems, MounterMessage};
 use crate::{
     config::IconSizes,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
@@ -12,7 +14,52 @@ use crate::{
 
 use russh_sftp::client::SftpSession;
 use tokio::runtime::Handle;
+use tokio::sync::{mpsc, Mutex};
 use url::Url;
+
+
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct EndpointKey(String); // e.g. "ssh://user@host:22"
+
+fn endpoint_key_from_uri(uri: &str) -> Option<EndpointKey> {
+    let url = url::Url::parse(uri).ok()?;
+    if url.scheme() != "ssh" && url.scheme() != "sftp" {
+        return None;
+    }
+    let user = url.username();
+    let host = url.host_str()?;
+    let port = url.port().unwrap_or(22);
+    let auth = if user.is_empty() {
+        format!("{host}:{port}")
+    } else {
+        format!("{user}@{host}:{port}")
+    };
+    Some(EndpointKey(format!("ssh://{auth}")))
+}
+enum Cmd {
+    Items(IconSizes, mpsc::Sender<MounterItems>),
+    Rescan,
+    Mount(
+        MounterItem,
+        tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+    ),
+    NetworkDrive(String, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
+    NetworkScan(
+        String,
+        IconSizes,
+        mpsc::Sender<Result<Vec<tab::Item>, String>>,
+    ),
+    Unmount(MounterItem),
+}
+
+enum Event {
+    Changed,
+    Items(MounterItems),
+    MountResult(MounterItem, Result<bool, String>),
+    NetworkAuth(String, MounterAuth, mpsc::Sender<MounterAuth>),
+    NetworkResult(String, Result<bool, String>),
+}
 
 #[derive(Clone, Debug)]
 pub struct Item {
@@ -52,51 +99,29 @@ impl Item {
 }
 
 pub struct Ssh {
-    client: Arc<Mutex<Option<Client>>>,
+    sessions: Arc<DashMap<EndpointKey, Arc<Client>>>,
+    command_tx: mpsc::UnboundedSender<Cmd>,
+    event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
 }
 
 impl Ssh {
     pub fn new() -> Self {
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
         Self {
-            client: Arc::new(Mutex::new(None)),
+            sessions: Arc::new(DashMap::new()),
+            command_tx,
+            event_rx: Arc::new(Mutex::new(event_rx)),
         }
     }
 
-    pub fn connect(&self) -> Task<()> {
-        let client_arc = Arc::clone(&self.client);
-        let item = self
-            .items(IconSizes::default())
-            .unwrap()
-            .get(0)
-            .cloned()
-            .unwrap_or(MounterItem::None);
+    pub fn has_session(&self, key: &EndpointKey) -> bool {
+        self.sessions.contains_key(key)
+    }
 
-        Task::perform(
-            async move {
-                if let MounterItem::Ssh(item) = item {
-                    match Client::connect(
-                        (item.host.as_str(), item.port),
-                        item.username.as_str(),
-                        AuthMethod::with_password("michael"),
-                        ServerCheckMethod::NoCheck,
-                    )
-                    .await
-                    {
-                        Ok(client) => {
-                            let mut guard = client_arc.lock().await;
-                            *guard = Some(client);
-                            println!("SSH connection stored.");
-                        }
-                        Err(err) => {
-                            eprintln!("SSH connection failed: {:?}", err);
-                        }
-                    }
-                } else {
-                    eprintln!("Invalid MounterItem variant for SSH mount.");
-                }
-            },
-            |_| (),
-        )
+    fn get_session(&self, key: &EndpointKey) -> Option<Arc<Client>> {
+        self.sessions.get(key).map(|r| r.clone())
     }
 }
 
@@ -115,8 +140,52 @@ impl Mounter for Ssh {
         Some(items)
     }
 
-    fn mount(&self, _item: MounterItem) -> Task<()> {
-        Task::perform(async move {}, |x| x)
+    fn mount(&self, item: MounterItem) -> Task<()> {
+        // Expect your MounterItem::Ssh(...) to carry host/port/username
+        let sessions = self.sessions.clone();
+        Task::perform(
+            async move {
+                let MounterItem::Ssh(it) = item else {
+                    return;
+                };
+                let url = match url::Url::parse(&it.uri) {
+                    Ok(parsed_url) => parsed_url,
+                    Err(_) => return,
+                };
+                if url.scheme() != "ssh" && url.scheme() != "sftp" {
+                    return;
+                }
+                let user = url.username();
+                let host = url.host_str();
+                let port = url.port().unwrap_or(22);
+                let key = EndpointKey(format!(
+                    "ssh://{}@{}:{}",
+                    user,
+                    host.unwrap_or("unknown_host"),
+                    port
+                ));
+
+                // TODO: get auth from keyring/UI. Password shown only as example.
+                let client = Client::connect(
+                    (host.unwrap_or("unknown_host"), port),
+                    user,
+                    AuthMethod::with_password("your_password_here"),
+                    ServerCheckMethod::NoCheck,
+                )
+                .await
+                .map(Arc::new);
+
+                match client {
+                    Ok(cli) => {
+                        sessions.insert(key, cli);
+                    }
+                    Err(err) => {
+                        log::warn!("ssh mount failed: {err:?}");
+                    }
+                }
+            },
+            |_| (),
+        )
     }
 
     fn network_drive(&self, _uri: String) -> Task<()> {
@@ -124,8 +193,6 @@ impl Mounter for Ssh {
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
-        // connect with Ssh::connect if not already connected
-        self.connect();
 
         let url = match Url::parse(uri) {
             Ok(u) => u,
@@ -136,10 +203,7 @@ impl Mounter for Ssh {
             _ => return None,
         }
 
-        let client_opt = match self.client.try_lock() {
-            Ok(g) => g.clone(), // Option<Client>
-            Err(_) => None,     // busy; treat as not connected here
-        };
+        let client_opt = self.sessions.get(&EndpointKey(uri.to_string())).map(|entry| entry.clone());
         let Some(client) = client_opt else {
             return Some(Err("SSH not connected".into()));
         };
@@ -265,6 +329,34 @@ impl Mounter for Ssh {
     }
 
     fn subscription(&self) -> Subscription<MounterMessage> {
-        Subscription::none()
+        let command_tx = self.command_tx.clone();
+        let event_rx = self.event_rx.clone();
+        Subscription::run_with_id(
+            TypeId::of::<Self>(),
+            stream::channel(1, |mut output| async move {
+                command_tx.send(Cmd::Rescan).unwrap();
+                while let Some(event) = event_rx.lock().await.recv().await {
+                    match event {
+                        Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
+                        Event::Items(items) => {
+                            output.send(MounterMessage::Items(items)).await.unwrap()
+                        }
+                        Event::MountResult(item, res) => output
+                            .send(MounterMessage::MountResult(item, res))
+                            .await
+                            .unwrap(),
+                        Event::NetworkAuth(uri, auth, auth_tx) => output
+                            .send(MounterMessage::NetworkAuth(uri, auth, auth_tx))
+                            .await
+                            .unwrap(),
+                        Event::NetworkResult(uri, res) => output
+                            .send(MounterMessage::NetworkResult(uri, res))
+                            .await
+                            .unwrap(),
+                    }
+                }
+                pending().await
+            }),
+        )
     }
 }
