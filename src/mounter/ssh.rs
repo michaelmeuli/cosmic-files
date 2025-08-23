@@ -141,7 +141,6 @@ impl Mounter for Ssh {
     }
 
     fn mount(&self, item: MounterItem) -> Task<()> {
-        // Expect your MounterItem::Ssh(...) to carry host/port/username
         let sessions = self.sessions.clone();
         Task::perform(
             async move {

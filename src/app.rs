@@ -2368,6 +2368,26 @@ impl Application for App {
                         entity,
                     });
                 }
+
+                #[cfg(feature = "ssh")]
+                Location::Network(uri, name, None) => {
+                    let mut found = false;
+
+                    if let Some(mounter) = MOUNTERS.get(&MounterKey("ssh")) {
+                        return mounter.network_drive(uri.clone()).map(move |_| {
+                            cosmic::Action::App(Message::NetworkDriveOpenEntityAfterMount {
+                                entity,
+                            })
+                        });
+                    }
+
+                    log::warn!("failed to open favorite, path does not exist: {:?}", path);
+                    return self.dialog_pages.push_back(DialogPage::FavoritePathError {
+                        path: path.clone(),
+                        entity,
+                    });
+                }
+
                 Location::Path(path) | Location::Network(_, _, Some(path)) => {
                     match path.try_exists() {
                         Ok(true) => true,
