@@ -106,7 +106,7 @@ impl Favorite {
             Self::Videos => dirs::video_dir(),
             Self::Path(path) => Some(path.clone()),
             Self::Network { path, .. } => Some(path.clone()),
-            Self::Virtual { path, .. } => Some(path.clone()),
+            Self::Virtual { .. } => None,
         }
     }
 }
