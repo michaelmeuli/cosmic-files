@@ -1230,6 +1230,19 @@ pub fn scan_network(uri: &str, sizes: IconSizes) -> Vec<Item> {
     Vec::new()
 }
 
+pub fn scan_ssh(uri: &str, sizes: IconSizes) -> Vec<Item> {
+    if let Some(mounter) = MOUNTERS.get(&crate::mounter::MounterKey("ssh")) {
+        match mounter.network_scan(uri, sizes) {
+            Some(Ok(items)) => return items,
+            Some(Err(err)) => {
+                log::warn!("failed to scan {:?}: {}", uri, err);
+            }
+            None => {}
+        }
+    }
+    Vec::new()
+}
+
 //TODO: organize desktop items based on display
 pub fn scan_desktop(
     tab_path: &PathBuf,
@@ -1374,6 +1387,7 @@ impl From<Location> for EditLocation {
 pub enum Location {
     Desktop(PathBuf, String, DesktopConfig),
     Network(String, String, Option<PathBuf>),
+    Ssh(String, String),
     Path(PathBuf),
     Recents,
     Search(PathBuf, String, bool, Instant),
@@ -1387,6 +1401,7 @@ impl std::fmt::Display for Location {
                 write!(f, "{} on display {display}", path.display())
             }
             Self::Network(uri, ..) => write!(f, "{}", uri),
+            Self::Ssh(uri, ..) => write!(f, "{}", uri),
             Self::Path(path) => write!(f, "{}", path.display()),
             Self::Recents => write!(f, "recents"),
             Self::Search(path, term, ..) => write!(f, "search {} for {}", path.display(), term),
@@ -1458,6 +1473,7 @@ impl Location {
             Self::Trash => scan_trash(sizes),
             Self::Recents => scan_recents(sizes),
             Self::Network(uri, _, _) => scan_network(uri, sizes),
+            Self::Ssh(uri, _) => scan_ssh(uri, sizes),
         };
         let parent_item_opt = match self.path_opt() {
             Some(path) => match item_from_path(path, sizes) {
@@ -1495,6 +1511,7 @@ impl Location {
                 fl!("recents")
             }
             Self::Network(display_name, ..) => display_name.clone(),
+            Self::Ssh(display_name, ..) => display_name.clone(),
         }
     }
 }
@@ -4616,6 +4633,18 @@ impl Tab {
                             uri.clone(),
                             display_name.clone(),
                             path.clone(),
+                        )))
+                        .class(theme::Button::Text)
+                        .into(),
+                );
+            }
+            Location::Ssh(uri, display_name) => {
+                children.push(
+                    widget::button::custom(widget::text::heading(display_name))
+                        .padding(space_xxxs)
+                        .on_press(Message::Location(Location::Ssh(
+                            uri.clone(),
+                            display_name.clone(),
                         )))
                         .class(theme::Button::Text)
                         .into(),

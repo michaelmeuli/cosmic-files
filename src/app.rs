@@ -1492,6 +1492,19 @@ impl App {
                     ))
                     .divider_above()
             });
+            nav_model = nav_model.insert(|b| {
+                b.text(fl!("networks"))
+                    .icon(widget::icon::icon(
+                        widget::icon::from_name("network-workgroup-symbolic")
+                            .size(16)
+                            .handle(),
+                    ))
+                    .data(Location::Ssh(
+                        "ssh:///".to_string(),
+                        fl!("networks"),
+                    ))
+                    .divider_above()
+            });
         }
 
         // Collect all mounter items
@@ -2370,9 +2383,7 @@ impl Application for App {
                 }
 
                 #[cfg(feature = "ssh")]
-                Location::Network(uri, name, None) => {
-                    let mut found = false;
-
+                Location::Ssh(uri, _) => {
                     if let Some(mounter) = MOUNTERS.get(&MounterKey("ssh")) {
                         return mounter.network_drive(uri.clone()).map(move |_| {
                             cosmic::Action::App(Message::NetworkDriveOpenEntityAfterMount {
@@ -2381,9 +2392,9 @@ impl Application for App {
                         });
                     }
 
-                    log::warn!("failed to open favorite, path does not exist: {:?}", path);
+                    log::warn!("failed to open ssh");
                     return self.dialog_pages.push_back(DialogPage::FavoritePathError {
-                        path: path.clone(),
+                        path: PathBuf::from(uri),
                         entity,
                     });
                 }
