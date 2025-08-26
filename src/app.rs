@@ -1500,7 +1500,7 @@ impl App {
                             .handle(),
                     ))
                     .data(Location::Ssh(
-                        "ssh:///".to_string(),
+                        "ssh://michael@localhost:22/".to_string(),
                         fl!("networks"),
                     ))
                     .divider_above()
@@ -2383,21 +2383,7 @@ impl Application for App {
                 }
 
                 #[cfg(feature = "ssh")]
-                Location::Ssh(uri, _) => {
-                    if let Some(mounter) = MOUNTERS.get(&MounterKey("ssh")) {
-                        return mounter.network_drive(uri.clone()).map(move |_| {
-                            cosmic::Action::App(Message::NetworkDriveOpenEntityAfterMount {
-                                entity,
-                            })
-                        });
-                    }
-
-                    log::warn!("failed to open ssh");
-                    return self.dialog_pages.push_back(DialogPage::FavoritePathError {
-                        path: PathBuf::from(uri),
-                        entity,
-                    });
-                }
+                Location::Ssh(_uri, _) => true,
 
                 Location::Path(path) | Location::Network(_, _, Some(path)) => {
                     match path.try_exists() {
