@@ -38,6 +38,7 @@ use cosmic::{
         horizontal_space,
         menu::{action::MenuAction, key_bind::KeyBind},
         segmented_button::{self, Entity},
+        settings::item,
         vertical_space,
     },
     Application, ApplicationExt, Element,
@@ -1500,7 +1501,7 @@ impl App {
                             .handle(),
                     ))
                     .data(Location::Ssh(
-                        "ssh://michael@localhost:22/".to_string(),
+                        "ssh:///".to_string(),
                         fl!("networks"),
                     ))
                     .divider_above()
@@ -1518,25 +1519,58 @@ impl App {
         nav_items.sort_by(|a, b| LANGUAGE_SORTER.compare(&a.1.name(), &b.1.name()));
         // Add items to nav model
         for (i, (key, item)) in nav_items.into_iter().enumerate() {
-            nav_model = nav_model.insert(|mut b| {
-                b = b.text(item.name()).data(MounterData(key, item.clone()));
-                let uri = item.uri().to_string();
-                if let Some(path) = item.path() {
-                    b = b.data(Location::Network(uri, item.name(), Some(path)));
-                } else if !uri.is_empty() {
-                    b = b.data(Location::Network(uri, item.name(), None));
+            match item {
+                #[cfg(feature = "gvfs")]
+                MounterItem::Gvfs(_) => {
+                    nav_model = nav_model.insert(|mut b| {
+                        b = b.text(item.name()).data(MounterData(key, item.clone()));
+                        let uri = item.uri().to_string();
+                        if let Some(path) = item.path() {
+                            b = b.data(Location::Network(uri, item.name(), Some(path)));
+                        } else if !uri.is_empty() {
+                            b = b.data(Location::Network(uri, item.name(), None));
+                        }
+                        if let Some(icon) = item.icon(true) {
+                            b = b.icon(widget::icon::icon(icon).size(16));
+                        }
+                        if item.is_mounted() {
+                            b = b.closable();
+                        }
+                        if i == 0 {
+                            b = b.divider_above();
+                        }
+                        b
+                    });
                 }
-                if let Some(icon) = item.icon(true) {
-                    b = b.icon(widget::icon::icon(icon).size(16));
+                #[cfg(feature = "ssh")]
+                MounterItem::Ssh(_) => {
+                    nav_model = nav_model.insert(|mut b| {
+                        b = b.text(item.name()).data(MounterData(key, item.clone()));
+                        let uri = item.uri().to_string();
+                        if let Some(path) = item.path() {
+                            b = b.data(Location::Network(uri, item.name(), Some(path)));
+                        } else if !uri.is_empty() {
+                            b = b.data(Location::Network(uri, item.name(), None));
+                        }
+                        if let Some(icon) = item.icon(true) {
+                            b = b.icon(widget::icon::icon(icon).size(16));
+                        }
+                        if item.is_mounted() {
+                            b = b.closable();
+                        }
+                        if i == 0 {
+                            b = b.divider_above();
+                        }
+                        b
+                    });
                 }
-                if item.is_mounted() {
-                    b = b.closable();
+                MounterItem::None => {
+                    nav_model = nav_model.insert(|mut b| {
+                        b = b.text("Unmounted").data(MounterData(key, item.clone()));
+                        b
+                    });
                 }
-                if i == 0 {
-                    b = b.divider_above();
-                }
-                b
-            });
+            }
         }
 
         self.nav_model = nav_model.build();

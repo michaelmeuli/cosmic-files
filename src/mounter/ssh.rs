@@ -17,8 +17,6 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, Mutex};
 use url::Url;
 
-
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct EndpointKey(String); // e.g. "ssh://user@host:22"
 
@@ -37,6 +35,65 @@ fn endpoint_key_from_uri(uri: &str) -> Option<EndpointKey> {
     };
     Some(EndpointKey(format!("ssh://{auth}")))
 }
+
+//                                                  Option<Result<Vec<tab::Item>, String>>
+fn virtual_network_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
+    struct V {
+        name: String,
+        display_name: String,
+        uri: String,
+    }
+
+    let entries = vec![V {
+        name: "Remote".into(),
+        display_name: "Remote".into(),
+        uri: "ssh://michael@localhost:22/".into(),
+    }];
+
+    let mut items = Vec::new();
+
+    for v in entries {
+        let name = v.name;
+        let uri = v.uri;
+        let display_name = v.display_name;
+        let location = Location::Ssh(uri, display_name.clone());
+
+        let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+            let file_icon = |size| widget::icon::from_name("folder").size(size).handle();
+            (
+                //TODO: get mime from content_type?
+                "inode/directory".parse().unwrap(),
+                file_icon(sizes.grid()),
+                file_icon(sizes.list()),
+                file_icon(sizes.list_condensed()),
+            )
+        };
+
+        items.push(tab::Item {
+            name,
+            is_mount_point: false,
+            display_name,
+            metadata: ItemMetadata::SimpleDir { entries: 0 },
+            hidden: false,
+            location_opt: Some(location),
+            mime,
+            icon_handle_grid,
+            icon_handle_list,
+            icon_handle_list_condensed,
+            thumbnail_opt: Some(ItemThumbnail::NotImage),
+            button_id: widget::Id::unique(),
+            pos_opt: Cell::new(None),
+            rect_opt: Cell::new(None),
+            selected: false,
+            highlighted: false,
+            overlaps_drag_rect: false,
+            dir_size: DirSize::NotDirectory,
+            cut: false,
+        });
+    }
+    Ok(items)
+}
+
 enum Cmd {
     Items(IconSizes, mpsc::Sender<MounterItems>),
     Rescan,
@@ -192,6 +249,9 @@ impl Mounter for Ssh {
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+        if uri == "network:///" {
+            return Some(virtual_network_root_items(sizes));
+        }
 
         let url = match Url::parse(uri) {
             Ok(u) => u,
@@ -202,7 +262,10 @@ impl Mounter for Ssh {
             _ => return None,
         }
 
-        let client_opt = self.sessions.get(&EndpointKey(uri.to_string())).map(|entry| entry.clone());
+        let client_opt = self
+            .sessions
+            .get(&EndpointKey(uri.to_string()))
+            .map(|entry| entry.clone());
         let Some(client) = client_opt else {
             return Some(Err("SSH not connected".into()));
         };
