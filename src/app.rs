@@ -1547,14 +1547,11 @@ impl App {
                     nav_model = nav_model.insert(|mut b| {
                         b = b.text(item.name()).data(MounterData(key, item.clone()));
                         let uri = item.uri().to_string();
-                        if let Some(path) = item.path() {
-                            b = b.data(Location::Network(uri, item.name(), Some(path)));
-                        } else if !uri.is_empty() {
-                            b = b.data(Location::Network(uri, item.name(), None));
-                        }
+                        b = b.data(Location::Ssh(uri, item.name()));
                         if let Some(icon) = item.icon(true) {
                             b = b.icon(widget::icon::icon(icon).size(16));
                         }
+                        // Todo: is_connected instead of is_mounted?
                         if item.is_mounted() {
                             b = b.closable();
                         }
