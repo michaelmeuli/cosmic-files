@@ -176,6 +176,7 @@ impl Ssh {
         self.sessions.get(key).map(|r| r.clone())
     }
 
+    // TODO:somehow use MounterAuth instead of MounterItem?
     fn connect(&self, item: MounterItem) -> Task<()> {
         let sessions = self.sessions.clone();
         Task::perform(
