@@ -2414,7 +2414,16 @@ impl Application for App {
                 }
 
                 #[cfg(feature = "ssh")]
-                Location::Ssh(_uri, _) => true,
+                Location::Ssh(_uri, _) => {
+                    if let Some(data) = self.nav_model.data::<MounterData>(entity) {
+                        if let Some(mounter) = MOUNTERS.get(&data.0) {
+                            return mounter
+                                .mount(data.1.clone())
+                                .map(|_| cosmic::action::none());
+                        }
+                    }
+                    true
+                },
 
                 Location::Path(path) | Location::Network(_, _, Some(path)) => {
                     match path.try_exists() {

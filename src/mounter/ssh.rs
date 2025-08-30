@@ -175,23 +175,8 @@ impl Ssh {
     fn get_session(&self, key: &EndpointKey) -> Option<Arc<Client>> {
         self.sessions.get(key).map(|r| r.clone())
     }
-}
 
-impl Mounter for Ssh {
-    fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
-        let mut items = MounterItems::new();
-
-        items.push(MounterItem::Ssh(Item {
-            uri: "ssh://michael@localhost:22/".to_string(),
-            name: "Tbprofiler".to_string(),
-            is_connected: false,
-            icon_opt: None,
-            icon_symbolic_opt: None,
-        }));
-        Some(items)
-    }
-
-    fn mount(&self, item: MounterItem) -> Task<()> {
+    fn connect(&self, item: MounterItem) -> Task<()> {
         let sessions = self.sessions.clone();
         Task::perform(
             async move {
@@ -236,6 +221,25 @@ impl Mounter for Ssh {
             },
             |_| (),
         )
+    }
+}
+
+impl Mounter for Ssh {
+    fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
+        let mut items = MounterItems::new();
+
+        items.push(MounterItem::Ssh(Item {
+            uri: "ssh://michael@localhost:22/".to_string(),
+            name: "Tbprofiler".to_string(),
+            is_connected: false,
+            icon_opt: None,
+            icon_symbolic_opt: None,
+        }));
+        Some(items)
+    }
+
+    fn mount(&self, item: MounterItem) -> Task<()> {
+        self.connect(item)
     }
 
     fn network_drive(&self, _uri: String) -> Task<()> {
