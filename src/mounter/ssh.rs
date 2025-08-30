@@ -122,10 +122,9 @@ enum Event {
 pub struct Item {
     uri: String,
     name: String,
-    is_mounted: bool,
+    is_connected: bool,
     icon_opt: Option<PathBuf>,
     icon_symbolic_opt: Option<PathBuf>,
-    path_opt: Option<PathBuf>,
 }
 
 impl Item {
@@ -133,8 +132,8 @@ impl Item {
         self.name.clone()
     }
 
-    pub fn is_mounted(&self) -> bool {
-        self.is_mounted
+    pub fn is_connected(&self) -> bool {
+        self.is_connected
     }
 
     pub fn uri(&self) -> String {
@@ -148,10 +147,6 @@ impl Item {
             self.icon_opt.as_ref()
         }
         .map(|icon| widget::icon::from_path(icon.clone()))
-    }
-
-    pub fn path(&self) -> Option<PathBuf> {
-        self.path_opt.clone()
     }
 }
 
@@ -189,10 +184,9 @@ impl Mounter for Ssh {
         items.push(MounterItem::Ssh(Item {
             uri: "ssh://michael@localhost:22/".to_string(),
             name: "Tbprofiler".to_string(),
-            is_mounted: false,
+            is_connected: false,
             icon_opt: None,
             icon_symbolic_opt: None,
-            path_opt: None,
         }));
         Some(items)
     }
@@ -249,7 +243,7 @@ impl Mounter for Ssh {
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
-        if uri == "network:///" {
+        if uri == "ssh:///" {
             return Some(virtual_network_root_items(sizes));
         }
 

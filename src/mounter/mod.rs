@@ -76,7 +76,17 @@ impl MounterItem {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.is_mounted(),
             #[cfg(feature = "ssh")]
-            Self::Ssh(item) => item.is_mounted(),
+            Self::Ssh(_item) => false,
+            Self::None => unreachable!(),
+        }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        match self {
+            #[cfg(feature = "gvfs")]
+            Self::Gvfs(_item) => false,
+            #[cfg(feature = "ssh")]
+            Self::Ssh(item) => item.is_connected(),
             Self::None => unreachable!(),
         }
     }
@@ -96,7 +106,7 @@ impl MounterItem {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.path(),
             #[cfg(feature = "ssh")]
-            Self::Ssh(item) => item.path(),
+            Self::Ssh(_item) => None,
             Self::None => unreachable!(),
         }
     }
