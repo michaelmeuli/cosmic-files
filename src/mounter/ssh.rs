@@ -9,6 +9,7 @@ use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
 use super::{Mounter, MounterAuth, MounterItem, MounterItems, MounterMessage};
 use crate::{
     config::IconSizes,
+    mounter::ssh,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 
@@ -136,6 +137,10 @@ impl Item {
         self.is_connected
     }
 
+    pub fn set_connected(&mut self, connected: bool) {
+        self.is_connected = connected;
+    }
+
     pub fn uri(&self) -> String {
         self.uri.clone()
     }
@@ -177,12 +182,13 @@ impl Ssh {
     }
 
     // TODO:somehow use MounterAuth instead of MounterItem?
-    fn connect(&self, item: MounterItem) -> Task<()> {
+    fn connect(&self, mut item: MounterItem) -> Task<()> {
         let sessions = self.sessions.clone();
         Task::perform(
             async move {
-                let MounterItem::Ssh(it) = item else {
-                    return;
+                let it: &mut ssh::Item = match &mut item {
+                    MounterItem::Ssh(ref mut it) => it,
+                    _ => return,
                 };
                 let url = match url::Url::parse(&it.uri) {
                     Ok(parsed_url) => parsed_url,
@@ -210,6 +216,10 @@ impl Ssh {
                 )
                 .await
                 .map(Arc::new);
+
+                // If you need to update is_connected, you must make item mutable and pass ownership.
+                // Otherwise, remove this block or handle connection state elsewhere.
+                it.set_connected(true);
 
                 match client {
                     Ok(cli) => {

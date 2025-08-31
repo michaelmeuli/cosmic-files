@@ -1500,10 +1500,7 @@ impl App {
                             .size(16)
                             .handle(),
                     ))
-                    .data(Location::Ssh(
-                        "ssh:///".to_string(),
-                        fl!("networks"),
-                    ))
+                    .data(Location::Ssh("ssh:///".to_string(), fl!("networks")))
                     .divider_above()
             });
         }
@@ -2414,7 +2411,60 @@ impl Application for App {
                 }
 
                 #[cfg(feature = "ssh")]
-                Location::Ssh(_uri, _) => true,
+                Location::Ssh(uri, name) => {
+                    let mut found = false;
+
+                    if let Some(key) = self
+                        .mounter_items
+                        .iter()
+                        .find_map(|(k, items)| {
+                            if items
+                                .iter()
+                                .any(|item| item.name() == *name || item.uri() == *uri)
+                            {
+                                found = true;
+                                Some(*k)
+                            } else {
+                                None
+                            }
+                        })
+                        .or(if found {
+                            None
+                        } else {
+                            self.mounter_items.iter().map(|(k, _)| *k).next()
+                        })
+                    {
+                        if let Some(mounter) = MOUNTERS.get(&key) {
+                            if let Some(item) = self.mounter_items.get(&key).and_then(|items| {
+                                items
+                                    .iter()
+                                    .find(|item| item.name() == *name || item.uri() == *uri)
+                            }) {
+                                if item.is_connected() {
+                                    let message = Message::TabMessage(
+                                        None,
+                                        tab::Message::Location(location.clone()),
+                                    );
+                                    return self.update(message);
+                                } else {
+                                    return mounter.mount(item.clone()).map(move |_| {
+                                        cosmic::Action::App(
+                                            Message::NetworkDriveOpenEntityAfterMount { entity },
+                                        )
+                                    });
+                                }
+                            } else {
+                                log::warn!("No matching MounterItem found for mount");
+                            }
+                        }
+                    }
+                    // TODO: Diffrent DialogPage?
+                    log::warn!("failed to open favorite, path does not exist");
+                    return self.dialog_pages.push_back(DialogPage::FavoritePathError {
+                        path: uri.into(),
+                        entity,
+                    });
+                }
 
                 Location::Path(path) | Location::Network(_, _, Some(path)) => {
                     match path.try_exists() {
