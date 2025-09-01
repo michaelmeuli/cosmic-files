@@ -2412,6 +2412,15 @@ impl Application for App {
 
                 #[cfg(feature = "ssh")]
                 Location::Ssh(uri, name) => {
+                    log::warn!("ssh location: uri={uri:?}, name={name:?}");
+                    if uri == "ssh:///" {
+                        // handle SSH root (e.g., open SSH “home” or do nothing)
+                        return self.update(Message::TabMessage(
+                            None,
+                            tab::Message::Location(location.clone()),
+                        ));
+                    }
+
                     let mut found = false;
 
                     if let Some(key) = self
