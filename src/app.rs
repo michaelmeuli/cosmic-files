@@ -2411,69 +2411,7 @@ impl Application for App {
                 }
 
                 #[cfg(feature = "ssh")]
-                Location::Ssh(uri, name) => {
-                    log::warn!("ssh location: uri={uri:?}, name={name:?}");
-                    if uri == "ssh:///" {
-                        // handle SSH root (e.g., open SSH “home” or do nothing)
-                        return self.update(Message::TabMessage(
-                            None,
-                            tab::Message::Location(location.clone()),
-                        ));
-                    }
-
-                    let mut found = false;
-
-                    if let Some(key) = self
-                        .mounter_items
-                        .iter()
-                        .find_map(|(k, items)| {
-                            if items
-                                .iter()
-                                .any(|item| item.name() == *name || item.uri() == *uri)
-                            {
-                                found = true;
-                                Some(*k)
-                            } else {
-                                None
-                            }
-                        })
-                        .or(if found {
-                            None
-                        } else {
-                            self.mounter_items.iter().map(|(k, _)| *k).next()
-                        })
-                    {
-                        if let Some(mounter) = MOUNTERS.get(&key) {
-                            if let Some(item) = self.mounter_items.get(&key).and_then(|items| {
-                                items
-                                    .iter()
-                                    .find(|item| item.name() == *name || item.uri() == *uri)
-                            }) {
-                                if item.is_connected() {
-                                    let message = Message::TabMessage(
-                                        None,
-                                        tab::Message::Location(location.clone()),
-                                    );
-                                    return self.update(message);
-                                } else {
-                                    return mounter.mount(item.clone()).map(move |_| {
-                                        cosmic::Action::App(
-                                            Message::NetworkDriveOpenEntityAfterMount { entity },
-                                        )
-                                    });
-                                }
-                            } else {
-                                log::warn!("No matching MounterItem found for mount");
-                            }
-                        }
-                    }
-                    // TODO: Diffrent DialogPage?
-                    log::warn!("failed to open favorite, path does not exist");
-                    return self.dialog_pages.push_back(DialogPage::FavoritePathError {
-                        path: uri.into(),
-                        entity,
-                    });
-                }
+                Location::Ssh(_uri, _name) => true,
 
                 Location::Path(path) | Location::Network(_, _, Some(path)) => {
                     match path.try_exists() {

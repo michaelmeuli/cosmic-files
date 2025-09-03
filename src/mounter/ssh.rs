@@ -258,6 +258,7 @@ impl Mounter for Ssh {
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+        let sessions = self.sessions.clone();
         if uri == "ssh:///" {
             return Some(virtual_network_root_items(sizes));
         }
@@ -271,12 +272,39 @@ impl Mounter for Ssh {
             _ => return None,
         }
 
-        let client_opt = self
-            .sessions
-            .get(&EndpointKey(uri.to_string()))
-            .map(|entry| entry.clone());
-        let Some(client) = client_opt else {
-            return Some(Err("SSH not connected".into()));
+        let endpoint_key = endpoint_key_from_uri(uri)?;
+        let client_opt = self.sessions.get(&endpoint_key).map(|entry| entry.clone());
+        let client = match client_opt {
+            Some(client) => client,
+            None => {
+                // TODO: get auth from keyring/UI. Password shown only as example.
+                // Run async connect in a blocking context
+                let client_result = tokio::task::block_in_place(|| {
+                    let user = url.username();
+                    let host = url.host_str();
+                    let port = url.port().unwrap_or(22);
+                    let handle = Handle::current();
+                    handle.block_on(Client::connect(
+                        (host.unwrap_or("unknown_host"), port),
+                        user,
+                        AuthMethod::with_password("your_password_here"),
+                        ServerCheckMethod::NoCheck,
+                    ))
+                })
+                .map(Arc::new);
+
+                match client_result {
+                    Ok(cli) => {
+                        let key = endpoint_key_from_uri(uri)?;
+                        sessions.insert(key, cli.clone());
+                        cli
+                    }
+                    Err(err) => {
+                        log::warn!("ssh mount failed: {err:?}");
+                        return Some(Err(format!("ssh mount failed: {err:?}")));
+                    }
+                }
+            }
         };
 
         // From here: do async SFTP work by *blocking* inside this sync fn.
