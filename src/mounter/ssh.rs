@@ -13,11 +13,11 @@ use crate::{
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 
+use crate::home_dir;
 use russh_sftp::client::SftpSession;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, Mutex};
 use url::Url;
-use crate::home_dir;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct EndpointKey(String); // e.g. "ssh://user@host:22"
@@ -208,9 +208,7 @@ impl Ssh {
                     port
                 ));
 
-                let key_path = home_dir()
-                    .join(".ssh")
-                    .join("id_rsa");
+                let key_path = home_dir().join(".ssh").join("id_rsa");
                 let auth_method = AuthMethod::with_key_file(key_path, None);
                 let client = Client::connect(
                     (host.unwrap_or("unknown_host"), port),
@@ -241,20 +239,11 @@ impl Ssh {
 
 impl Mounter for Ssh {
     fn items(&self, _sizes: IconSizes) -> Option<MounterItems> {
-        let mut items = MounterItems::new();
-
-        items.push(MounterItem::Ssh(Item {
-            uri: "ssh://michael@localhost:22/".to_string(),
-            name: "Tbprofiler".to_string(),
-            is_connected: false,
-            icon_opt: None,
-            icon_symbolic_opt: None,
-        }));
-        Some(items)
+        None
     }
 
-    fn mount(&self, item: MounterItem) -> Task<()> {
-        self.connect(item)
+    fn mount(&self, _item: MounterItem) -> Task<()> {
+        Task::perform(async move {}, |x| x)
     }
 
     fn network_drive(&self, _uri: String) -> Task<()> {
