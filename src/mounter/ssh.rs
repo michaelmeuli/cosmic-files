@@ -17,6 +17,7 @@ use russh_sftp::client::SftpSession;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, Mutex};
 use url::Url;
+use crate::home_dir;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct EndpointKey(String); // e.g. "ssh://user@host:22"
@@ -207,11 +208,14 @@ impl Ssh {
                     port
                 ));
 
-                // TODO: get auth from keyring/UI. Password shown only as example.
+                let key_path = home_dir()
+                    .join(".ssh")
+                    .join("id_rsa");
+                let auth_method = AuthMethod::with_key_file(key_path, None);
                 let client = Client::connect(
                     (host.unwrap_or("unknown_host"), port),
                     user,
-                    AuthMethod::with_password("your_password_here"),
+                    auth_method,
                     ServerCheckMethod::NoCheck,
                 )
                 .await
