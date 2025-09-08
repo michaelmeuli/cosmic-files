@@ -270,27 +270,31 @@ impl Mounter for Ssh {
         let client = match client_opt {
             Some(client) => client,
             None => {
-                // TODO: get auth from keyring/UI. Password shown only as example.
-                // Run async connect in a blocking context
                 let client_result = tokio::task::block_in_place(|| {
-                    let user = url.username();
-                    let host = url.host_str();
-                    let port = url.port().unwrap_or(22);
                     let handle = Handle::current();
-                    handle.block_on(Client::connect(
-                        (host.unwrap_or("unknown_host"), port),
-                        user,
-                        AuthMethod::with_password("your_password_here"),
-                        ServerCheckMethod::NoCheck,
-                    ))
-                })
-                .map(Arc::new);
+                    handle.block_on(async {
+                        let user = url.username();
+                        let host = url.host_str();
+                        let port = url.port().unwrap_or(22);
+                        let key_path = home_dir().join(".ssh").join("id_ed25519");
+                        println!("Using SSH key path: {:?}", key_path);
+                        let auth_method = AuthMethod::with_key_file(key_path, None);
+                        Client::connect(
+                            (host.unwrap_or("unknown_host"), port),
+                            user,
+                            auth_method,
+                            ServerCheckMethod::NoCheck,
+                        )
+                        .await
+                    })
+                });
 
                 match client_result {
                     Ok(cli) => {
                         let key = endpoint_key_from_uri(uri)?;
-                        sessions.insert(key, cli.clone());
-                        cli
+                        let arc_cli = Arc::new(cli);
+                        sessions.insert(key, arc_cli.clone());
+                        arc_cli
                     }
                     Err(err) => {
                         log::warn!("ssh mount failed: {err:?}");
