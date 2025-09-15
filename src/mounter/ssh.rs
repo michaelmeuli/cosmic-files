@@ -181,60 +181,6 @@ impl Ssh {
     fn get_session(&self, key: &EndpointKey) -> Option<Arc<Client>> {
         self.sessions.get(key).map(|r| r.clone())
     }
-
-    // TODO:somehow use MounterAuth instead of MounterItem?
-    fn connect(&self, mut item: MounterItem) -> Task<()> {
-        let sessions = self.sessions.clone();
-        Task::perform(
-            async move {
-                let it: &mut ssh::Item = match &mut item {
-                    MounterItem::Ssh(ref mut it) => it,
-                    _ => return,
-                };
-                let url = match url::Url::parse(&it.uri) {
-                    Ok(parsed_url) => parsed_url,
-                    Err(_) => return,
-                };
-                if url.scheme() != "ssh" && url.scheme() != "sftp" {
-                    return;
-                }
-                let user = url.username();
-                let host = url.host_str();
-                let port = url.port().unwrap_or(22);
-                let key = EndpointKey(format!(
-                    "ssh://{}@{}:{}",
-                    user,
-                    host.unwrap_or("unknown_host"),
-                    port
-                ));
-
-                let key_path = home_dir().join(".ssh").join("id_rsa");
-                let auth_method = AuthMethod::with_key_file(key_path, None);
-                let client = Client::connect(
-                    (host.unwrap_or("unknown_host"), port),
-                    user,
-                    auth_method,
-                    ServerCheckMethod::NoCheck,
-                )
-                .await
-                .map(Arc::new);
-
-                // If you need to update is_connected, you must make item mutable and pass ownership.
-                // Otherwise, remove this block or handle connection state elsewhere.
-                it.set_connected(true);
-
-                match client {
-                    Ok(cli) => {
-                        sessions.insert(key, cli);
-                    }
-                    Err(err) => {
-                        log::warn!("ssh mount failed: {err:?}");
-                    }
-                }
-            },
-            |_| (),
-        )
-    }
 }
 
 impl Mounter for Ssh {

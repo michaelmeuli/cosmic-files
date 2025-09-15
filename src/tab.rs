@@ -1,6 +1,16 @@
 use cosmic::{
-    cosmic_theme, font,
+    Apply, Element, cosmic_theme, font,
     iced::{
+        Alignment,
+        Border,
+        Color,
+        ContentFit,
+        Length,
+        Point,
+        Rectangle,
+        Size,
+        Subscription,
+        Vector,
         advanced::{
             graphics,
             text::{self, Paragraph},
@@ -17,37 +27,24 @@ use cosmic::{
             scrollable::{self, AbsoluteOffset, Viewport},
         },
         window,
-        Alignment,
-        Border,
-        Color,
-        ContentFit,
-        Length,
-        Point,
-        Rectangle,
-        Size,
-        Subscription,
-        Vector,
     },
     iced_core::{mouse::ScrollDelta, widget::tree},
     theme,
     widget::{
-        self,
+        self, DndDestination, DndSource, Id, Space, Widget,
         menu::{action::MenuAction, key_bind::KeyBind},
-        DndDestination, DndSource, Id, Space, Widget,
     },
-    Element,
 };
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use i18n_embed::LanguageLoader;
 use icu::datetime::{
-    options::{components, preferences},
     DateTimeFormatter, DateTimeFormatterOptions,
+    options::{components, preferences},
 };
 use image::ImageDecoder;
 use jxl_oxide::integration::JxlDecoder;
-use mime_guess::{mime, Mime};
-use once_cell::sync::Lazy;
+use mime_guess::{Mime, mime};
 use ordermap::OrderMap;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -62,7 +59,7 @@ use std::{
     io::{BufRead, BufReader},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
-    sync::{atomic, Arc, LazyLock, Mutex, RwLock},
+    sync::{Arc, LazyLock, Mutex, RwLock, atomic},
     time::{Duration, Instant, SystemTime},
 };
 use tempfile::NamedTempFile;
@@ -73,7 +70,7 @@ use walkdir::WalkDir;
 use crate::{
     app::{Action, PreviewItem, PreviewKind},
     clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
-    config::{DesktopConfig, IconSizes, TabConfig, ThumbCfg, ICON_SCALE_MAX, ICON_SIZE_GRID},
+    config::{DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig, ThumbCfg},
     dialog::DialogKind,
     fl,
     localize::{LANGUAGE_SORTER, LOCALE},
@@ -81,7 +78,7 @@ use crate::{
     mime_icon::{mime_for_path, mime_icon},
     mounter::MOUNTERS,
     mouse_area,
-    operation::Controller,
+    operation::{Controller, OperationError},
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
 };
@@ -108,7 +105,7 @@ pub(crate) static SORT_OPTION_FALLBACK: LazyLock<HashMap<String, (HeadingOptions
         }))
     });
 
-static MODE_NAMES: Lazy<Vec<String>> = Lazy::new(|| {
+static MODE_NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
     vec![
         // Mode 0
         fl!("none"),
@@ -129,7 +126,7 @@ static MODE_NAMES: Lazy<Vec<String>> = Lazy::new(|| {
     ]
 });
 
-static SPECIAL_DIRS: Lazy<HashMap<PathBuf, &'static str>> = Lazy::new(|| {
+static SPECIAL_DIRS: LazyLock<HashMap<PathBuf, &'static str>> = LazyLock::new(|| {
     let mut special_dirs = HashMap::new();
     if let Some(dir) = dirs::document_dir() {
         special_dirs.insert(dir, "folder-documents");
@@ -535,7 +532,7 @@ pub enum FsKind {
 pub fn fs_kind(metadata: &Metadata) -> FsKind {
     //TODO: method to reload remote filesystems dynamically
     //TODO: fix for https://github.com/eminence/procfs/issues/262
-    static DEVICES: Lazy<HashMap<u64, FsKind>> = Lazy::new(|| {
+    static DEVICES: LazyLock<HashMap<u64, FsKind>> = LazyLock::new(|| {
         let mut devices = HashMap::new();
         match procfs::process::Process::myself() {
             Ok(process) => match process.mountinfo() {
@@ -2090,7 +2087,7 @@ impl Item {
         }
     }
 
-    pub fn preview_header(&self) -> Vec<Element<Message>> {
+    pub fn preview_header(&self) -> Vec<Element<'_, Message>> {
         let mut row = Vec::with_capacity(3);
         row.push(
             widget::button::icon(widget::icon::from_name("go-previous-symbolic"))
@@ -2486,10 +2483,13 @@ pub struct Tab {
     window_id: Option<window::Id>,
 }
 
-async fn calculate_dir_size(path: &Path, controller: Controller) -> Result<u64, String> {
+async fn calculate_dir_size(path: &Path, controller: Controller) -> Result<u64, OperationError> {
     let mut total = 0;
     for entry_res in WalkDir::new(path) {
-        controller.check().await?;
+        controller
+            .check()
+            .await
+            .map_err(|s| OperationError::from_state(s, &controller))?;
 
         //TODO: report more errors?
         if let Ok(entry) = entry_res {
@@ -4034,11 +4034,7 @@ impl Tab {
 
     fn column_sort(&self) -> Option<Vec<(usize, &Item)>> {
         let check_reverse = |ord: Ordering, sort: bool| {
-            if sort {
-                ord
-            } else {
-                ord.reverse()
-            }
+            if sort { ord } else { ord.reverse() }
         };
         let mut items: Vec<_> = self.items_opt.as_ref()?.iter().enumerate().collect();
         let (sort_name, sort_direction, folders_first) = self.sort_options();
@@ -4188,7 +4184,7 @@ impl Tab {
         container.into()
     }
 
-    pub fn gallery_view(&self) -> Element<Message> {
+    pub fn gallery_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxs,
             space_xs,
@@ -4319,7 +4315,7 @@ impl Tab {
             .into()
     }
 
-    pub fn location_view(&self) -> Element<Message> {
+    pub fn location_view(&self) -> Element<'_, Message> {
         //TODO: responsiveness is done in a hacky way, potentially move this to a custom widget?
         fn text_width<'a>(
             content: &'a str,
@@ -4681,37 +4677,45 @@ impl Tab {
         popover.into()
     }
 
-    pub fn empty_view(&self, has_hidden: bool) -> Element<Message> {
+    pub fn empty_view(&self, has_hidden: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
 
-        mouse_area::MouseArea::new(widget::column::with_children(vec![widget::container(
-            widget::column::with_children(match self.mode {
-                Mode::App | Mode::Dialog(_) => vec![
-                    widget::icon::from_name("folder-symbolic")
-                        .size(64)
-                        .icon()
+        mouse_area::MouseArea::new(widget::column::with_children(vec![
+            widget::container(
+                widget::column::with_children(match self.mode {
+                    Mode::App | Mode::Dialog(_) => vec![
+                        widget::icon::from_name("folder-symbolic")
+                            .size(64)
+                            .icon()
+                            .into(),
+                        widget::text::body(if has_hidden {
+                            fl!("empty-folder-hidden")
+                        } else if matches!(self.location, Location::Search(..)) {
+                            fl!("no-results")
+                        } else {
+                            fl!("empty-folder")
+                        })
                         .into(),
-                    widget::text::body(if has_hidden {
-                        fl!("empty-folder-hidden")
-                    } else if matches!(self.location, Location::Search(..)) {
-                        fl!("no-results")
-                    } else {
-                        fl!("empty-folder")
-                    })
-                    .into(),
-                ],
-                Mode::Desktop => Vec::new(),
-            })
-            .align_x(Alignment::Center)
-            .spacing(space_xxs),
-        )
-        .center(Length::Fill)
-        .into()]))
+                    ],
+                    Mode::Desktop => Vec::new(),
+                })
+                .align_x(Alignment::Center)
+                .spacing(space_xxs),
+            )
+            .center(Length::Fill)
+            .into(),
+        ]))
         .on_press(|_| Message::Click(None))
         .into()
     }
 
-    pub fn grid_view(&self) -> (Option<Element<'static, Message>>, Element<Message>, bool) {
+    pub fn grid_view(
+        &self,
+    ) -> (
+        Option<Element<'static, Message>>,
+        Element<'_, Message>,
+        bool,
+    ) {
         let cosmic_theme::Spacing {
             space_xxs,
             space_xxxs,
@@ -5045,7 +5049,13 @@ impl Tab {
         (drag_list, mouse_area.into(), true)
     }
 
-    pub fn list_view(&self) -> (Option<Element<'static, Message>>, Element<Message>, bool) {
+    pub fn list_view(
+        &self,
+    ) -> (
+        Option<Element<'static, Message>>,
+        Element<'_, Message>,
+        bool,
+    ) {
         let cosmic_theme::Spacing {
             space_s, space_xxs, ..
         } = theme::active().cosmic().spacing;
@@ -5435,7 +5445,7 @@ impl Tab {
         &self,
         key_binds: &HashMap<KeyBind, Action>,
         size: Size,
-    ) -> Element<Message> {
+    ) -> Element<'_, Message> {
         // Update cached size
         self.size_opt.set(Some(size));
 
@@ -5550,7 +5560,9 @@ impl Tab {
                                     .into(),
                             ]))
                             .padding([space_xxs, space_xs])
-                            .layer(cosmic_theme::Layer::Primary),
+                            .layer(cosmic_theme::Layer::Primary)
+                            .apply(widget::container)
+                            .padding([0, 0, 7, 0]),
                         );
                     }
                 }
@@ -5564,7 +5576,9 @@ impl Tab {
                             .into(),
                     ]))
                     .padding([space_xxs, space_xs])
-                    .layer(cosmic_theme::Layer::Primary),
+                    .layer(cosmic_theme::Layer::Primary)
+                    .apply(widget::container)
+                    .padding([0, 0, 7, 0]),
                 );
             }
             _ => {}
@@ -5746,7 +5760,7 @@ impl Tab {
                                             );
                                                 Message::DirectorySize(
                                                     path.clone(),
-                                                    DirSize::Error(err),
+                                                    DirSize::Error(err.to_string()),
                                                 )
                                             }
                                         }
@@ -6135,11 +6149,11 @@ mod tests {
     use tempfile::TempDir;
     use test_log::test;
 
-    use super::{respond_to_scroll_direction, scan_path, Location, Message, Tab};
+    use super::{Location, Message, Tab, respond_to_scroll_direction, scan_path};
     use crate::{
         app::test_utils::{
-            assert_eq_tab_path, empty_fs, eq_path_item, filter_dirs, read_dir_sorted, simple_fs,
-            tab_click_new, NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED,
+            NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
+            eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
         },
         config::{IconSizes, TabConfig, ThumbCfg},
     };
@@ -6192,12 +6206,16 @@ mod tests {
         );
 
         // All directories (simple_fs only produces one nested layer)
-        let dirs: Vec<PathBuf> = filter_dirs(path)?
-            .flat_map(|dir| {
-                filter_dirs(&dir).map(|nested_dirs| std::iter::once(dir).chain(nested_dirs))
-            })
-            .flatten()
-            .collect();
+        let dirs: Vec<PathBuf> = {
+            let top_level = filter_dirs(path)?;
+            let mut result = Vec::new();
+            for dir in top_level {
+                let nested_dirs: Vec<PathBuf> = filter_dirs(&dir)?.collect();
+                result.push(dir);
+                result.extend(nested_dirs);
+            }
+            result
+        };
         assert!(
             dirs.len() == NUM_DIRS + NUM_DIRS * NUM_NESTED,
             "Sanity check: Have {} dirs instead of {}",
@@ -6236,10 +6254,12 @@ mod tests {
         assert_eq!(entries.len(), actual.len());
 
         // Correct files should be scanned
-        assert!(entries
-            .into_iter()
-            .zip(actual.into_iter())
-            .all(|(path, item)| eq_path_item(&path, &item)));
+        assert!(
+            entries
+                .into_iter()
+                .zip(actual.into_iter())
+                .all(|(path, item)| eq_path_item(&path, &item))
+        );
 
         Ok(())
     }
@@ -6509,7 +6529,7 @@ mod tests {
     #[test]
     fn mode_calculations() {
         use super::{
-            get_mode_part, set_mode_part, MODE_SHIFT_GROUP, MODE_SHIFT_OTHER, MODE_SHIFT_USER,
+            MODE_SHIFT_GROUP, MODE_SHIFT_OTHER, MODE_SHIFT_USER, get_mode_part, set_mode_part,
         };
         for user in 0..=7 {
             for group in 0..=7 {
