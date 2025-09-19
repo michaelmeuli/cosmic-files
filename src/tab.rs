@@ -57,11 +57,15 @@ use std::{
     fs::{self, File, Metadata},
     hash::Hash,
     io::{BufRead, BufReader},
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock, Mutex, RwLock, atomic},
     time::{Duration, Instant, SystemTime},
 };
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
 use trash::TrashItemSize;
