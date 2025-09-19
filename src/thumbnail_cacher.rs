@@ -5,11 +5,13 @@ use std::{
     error::Error,
     fs::{self, File},
     io::{self, BufReader, BufWriter},
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::LazyLock,
     time::UNIX_EPOCH,
 };
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use tempfile::NamedTempFile;
 use url::Url;
 
