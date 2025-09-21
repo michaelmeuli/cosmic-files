@@ -186,7 +186,7 @@ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
             #[cfg(windows)]
             {
                 let Ok(target) = String::from_utf8(target) else {
-                    return Err(ZipError::InvalidArchive("Invalid UTF-8 as symlink target"));
+                    return Err(ZipError::InvalidArchive("Invalid UTF-8 as symlink target".into()));
                 };
                 let target = target.into_boxed_str();
                 let target_is_dir_from_archive =
