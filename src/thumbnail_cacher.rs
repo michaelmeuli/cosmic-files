@@ -1,5 +1,7 @@
 use image::DynamicImage;
 use md5::{Digest, Md5};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     error::Error,
@@ -9,8 +11,6 @@ use std::{
     sync::LazyLock,
     time::UNIX_EPOCH,
 };
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 
 use tempfile::NamedTempFile;
 use url::Url;
@@ -91,7 +91,14 @@ impl ThumbnailCacher {
     }
 
     pub fn update_with_temp_file(&self, temp_file: NamedTempFile) -> Result<&Path, Box<dyn Error>> {
+        #[cfg(unix)]
         fs::set_permissions(temp_file.path(), fs::Permissions::from_mode(0o600))?;
+        #[cfg(not(unix))]
+        {
+            let mut permissions = fs::metadata(temp_file.path())?.permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(temp_file.path(), permissions)?;
+        }
         self.update_thumbnail_text_metadata(temp_file.path())?;
         fs::rename(temp_file.path(), &self.thumbnail_path)?;
 
@@ -125,7 +132,14 @@ impl ThumbnailCacher {
     pub fn create_fail_marker(&self) -> Result<(), Box<dyn Error>> {
         if let Some(dir) = self.thumbnail_fail_marker_path.parent() {
             fs::create_dir_all(dir)?;
+            #[cfg(unix)]
             fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+            #[cfg(windows)]
+            {
+                let mut perms = fs::metadata(dir)?.permissions();
+                perms.set_readonly(false);
+                fs::set_permissions(dir, perms)?;
+            }
         }
 
         let file = File::create(&self.thumbnail_fail_marker_path)?;
