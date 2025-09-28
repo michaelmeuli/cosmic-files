@@ -19,6 +19,7 @@ struct MimeIconKey {
 
 struct MimeIconCache {
     cache: HashMap<MimeIconKey, Option<icon::Handle>>,
+    #[cfg(unix)]
     shared_mime_info: xdg_mime::SharedMimeInfo,
 }
 
@@ -26,6 +27,7 @@ impl MimeIconCache {
     pub fn new() -> Self {
         Self {
             cache: HashMap::new(),
+            #[cfg(unix)]
             shared_mime_info: xdg_mime::SharedMimeInfo::new(),
         }
     }
@@ -34,7 +36,13 @@ impl MimeIconCache {
         self.cache
             .entry(key)
             .or_insert_with_key(|key| {
+                #[cfg(unix)]
                 let mut icon_names = self.shared_mime_info.lookup_icon_names(&key.mime);
+                #[cfg(not(unix))]
+                let mut icon_names = match guess_generic_icon_name(&key.mime) {
+                    Some(name) => vec![name],
+                    None => vec![],
+                };
                 if icon_names.is_empty() {
                     return None;
                 }
@@ -61,25 +69,54 @@ pub fn mime_for_path<P: AsRef<Path>>(
     remote: bool,
 ) -> Mime {
     let path = path.as_ref();
-    let mime_icon_cache = MIME_ICON_CACHE.lock().unwrap();
-    // Try the shared mime info cache first
-    let mut gb = mime_icon_cache.shared_mime_info.guess_mime_type();
-    if remote {
-        if let Some(file_name) = path.file_name().and_then(|x| x.to_str()) {
-            gb.file_name(file_name);
+
+    #[cfg(unix)]
+    {
+        let mime_icon_cache = MIME_ICON_CACHE.lock().unwrap();
+        // Try the shared mime info cache first
+        let mut gb = mime_icon_cache.shared_mime_info.guess_mime_type();
+        if remote {
+            if let Some(file_name) = path.file_name().and_then(|x| x.to_str()) {
+                gb.file_name(file_name);
+            }
+        } else {
+            gb.path(&path);
         }
-    } else {
-        gb.path(&path);
+        if let Some(metadata) = metadata_opt {
+            gb.metadata(metadata.clone());
+        }
+        let guess = gb.guess();
+        if guess.uncertain() {
+            // If uncertain, try mime_guess. This could happen on platforms without shared-mime-info
+            mime_guess::from_path(&path).first_or_octet_stream()
+        } else {
+            guess.mime_type().clone()
+        }
     }
-    if let Some(metadata) = metadata_opt {
-        gb.metadata(metadata.clone());
-    }
-    let guess = gb.guess();
-    if guess.uncertain() {
-        // If uncertain, try mime_guess. This could happen on platforms without shared-mime-info
+    #[cfg(not(unix))]
+    {
         mime_guess::from_path(&path).first_or_octet_stream()
-    } else {
-        guess.mime_type().clone()
+    }
+}
+
+fn guess_generic_icon_name(mime: &Mime) -> Option<&'static str> {
+    let ty = mime.type_().as_str();
+    let sub = mime.subtype().as_str();
+
+    match ty {
+        "text" => Some("text-x-generic"),
+        "image" => Some("image-x-generic"),
+        "audio" => Some("audio-x-generic"),
+        "video" => Some("video-x-generic"),
+        "application" => match sub {
+            "pdf" => Some("application-pdf"),
+            "zip" | "x-7z-compressed" | "x-rar-compressed" | "x-xz" | "x-bzip2" => {
+                Some("package-x-generic")
+            }
+            "json" | "xml" | "x-yaml" => Some("text-x-generic"),
+            _ => Some("application-x-executable"), // or "application-x-generic"
+        },
+        _ => None,
     }
 }
 
@@ -92,7 +129,19 @@ pub fn mime_icon(mime: Mime, size: u16) -> icon::Handle {
 }
 
 pub fn parent_mime_types(mime: &Mime) -> Option<Vec<Mime>> {
-    let mime_icon_cache = MIME_ICON_CACHE.lock().unwrap();
-
-    mime_icon_cache.shared_mime_info.get_parents_aliased(mime)
+    #[cfg(unix)]
+    {
+        let mime_icon_cache = MIME_ICON_CACHE.lock().unwrap();
+        mime_icon_cache.shared_mime_info.get_parents_aliased(mime)
+    }
+    #[cfg(not(unix))]
+    {
+        let (ty, _sub) = (mime.type_().as_str(), mime.subtype().as_str());
+        let generic = format!("{ty}/*");
+        if let Ok(m) = generic.parse::<Mime>() {
+            return Some(vec![m]);
+        }
+        None
+    }
 }
+
