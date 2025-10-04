@@ -22,7 +22,7 @@ grid-spacing = Espaçamento entre ícones
 # List view
 name = Nome
 modified = Modificação
-trashed-on = Exclusão
+trashed-on = Enviado à lixeira
 size = Tamanho
 # Progress footer
 details = Detalhes
@@ -226,27 +226,27 @@ progress-paused = { $percent }%, pausado
 failed = Com falha
 complete = Concluído
 compressing =
-    Compactando { $items } { $items ->
+    Comprimindo { $items } { $items ->
         [one] item
        *[other] itens
     } de "{ $from }" para "{ $to }" ({ $progress })...
 compressed =
-    Compactado(s) { $items } { $items ->
-        [one] item
-       *[other] itens
+    { $items } { $items ->
+        [one] item comprimido
+       *[other] itens comprimidos
     } de "{ $from }" para "{ $to }"
 copy_noun = Copiado
-creating = Criando { $name } em { $parent }
-created = Criado { $name } em { $parent }
+creating = Criando "{ $name }" em "{ $parent }"
+created = "{ $name }" criado em "{ $parent }"
 copying =
     Copiando { $items } { $items ->
         [one] item
        *[other] itens
     } de "{ $from }" para "{ $to }" ({ $progress })...
 copied =
-    Copiado(s) { $items } { $items ->
-        [one] item
-       *[other] itens
+    { $items } { $items ->
+        [one] item copiado
+       *[other] itens copiados
     } de "{ $from }" para "{ $to }"
 deleting =
     Excluindo { $items } { $items ->
@@ -254,24 +254,24 @@ deleting =
        *[other] itens
     } da { trash } ({ $progress })...
 deleted =
-    Excluído(s) { $items } { $items ->
-        [one] item
-       *[other] itens
+    { $items } { $items ->
+        [one] item excluído
+       *[other] itens excluídos
     } da { trash }
 emptying-trash = Esvaziando a { trash } ({ $progress })...
-emptied-trash = { trash } vazia
+emptied-trash = { trash } esvaziada
 extracting =
     Extraindo { $items } { $items ->
         [one] item
        *[other] itens
     } de "{ $from }" para "{ $to }" ({ $progress })...
 extracted =
-    Extraído(s) { $items } { $items ->
-        [one] item
-       *[other] itens
+    { $items } { $items ->
+        [one] item extraído
+       *[other] itens extraídos
     } de "{ $from }" para "{ $to }"
 setting-executable-and-launching = Marcando "{ $name }" como executável e iniciando
-set-executable-and-launched = Marcado "{ $name }" como executável e iniciado
+set-executable-and-launched = "{ $name }" marcado como executável e iniciado
 setting-permissions = Definindo permissões de "{ $name }" para { $mode }
 set-permissions = Definir permissões de "{ $name }" para { $mode }
 moving =
@@ -280,20 +280,20 @@ moving =
        *[other] itens
     } de "{ $from }" para "{ $to }" ({ $progress })...
 moved =
-    Movido(s) { $items } { $items ->
-        [one] item
-       *[other] itens
+    { $items } { $items ->
+        [one] item movido
+       *[other] itens movidos
     } de "{ $from }" para "{ $to }"
 permanently-deleting =
-    Excluindo permanentemente "{ $items }" "{ $items ->
-        [one] item
-       *[other] itens
-    }"
-permanently-deleted =
-    Excluído(s) permanentemente "{ $items }" "{ $items ->
+    Excluindo permanentemente { $items } { $items ->
         [one] item
        *[other] itens
     }
+permanently-deleted =
+    { $items } { $items ->
+        [one] item excluído
+       *[other] itens excluídos
+    } permanentemente
 removing-from-recents =
     Removendo { $items } { $items ->
         [one] item
@@ -301,11 +301,11 @@ removing-from-recents =
     } de { recents }
 removed-from-recents =
     { $items } { $items ->
-        [one] item
-       *[other] itens
-    } removido(s) de { recents }
+        [one] item removido
+       *[other] itens removidos
+    } de { recents }
 renaming = Renomeando "{ $from }" para "{ $to }"
-renamed = Renomeado(s) "{ $from }" para "{ $to }"
+renamed = "{ $from }" renomeado para "{ $to }"
 restoring =
     Restaurando { $items } { $items ->
         [one] item
@@ -354,7 +354,7 @@ type-to-search-recursive = Pesquisa na pasta atual e em todas as subpastas
 type-to-search-enter-path = Insere o caminho do diretório ou arquivo
 # Context menu
 add-to-sidebar = Adicionar à barra lateral
-compress = Compactar
+compress = Comprimir
 delete-permanently = Excluir permanentemente
 eject = Desmontar
 extract-here = Extrair

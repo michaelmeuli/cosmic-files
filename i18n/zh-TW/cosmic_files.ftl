@@ -121,29 +121,29 @@ pending = 待處理
 failed = 失敗
 complete = 完成
 compressing =
-    正在壓縮 { $items } 項目 { $items ->
+    正在壓縮 { $items } { $items ->
         [one] 項目
        *[other] 項目
     } 從「{ $from }」到 「{ $to }」（{ $progress }）...
 compressed =
-    已壓縮 { $items } 項目 { $items ->
+    已壓縮 { $items } { $items ->
         [one] 項目
        *[other] 項目
-    } 從 { $from } 到 { $to }
+    }從「{ $from }」到「{ $to }」
 copy_noun = 複製
-creating = 正在建立 { $name } 於 { $parent }
-created = 已建立 { $name } 於 { $parent }
+creating = 正在建立「{ $name }」於「{ $parent }」
+created = 已建立「{ $name }」於「{ $parent }」
 copying =
-    正在複製 { $items } 項目 { $items ->
+    正在複製 { $items } { $items ->
         [one] 項目
        *[other] 項目
     } 從「{ $from }」到「{ $to }」（{ $progress }）...
 copied =
-    已複製 { $items } 項目 { $items ->
+    已複製 { $items } { $items ->
         [one] 項目
        *[other] 項目
-    } 從 { $from } 到 { $to }
-emptying-trash = 正在清空{ trash }（{ $progress }）...
+    }從「{ $from }」到「{ $to }」
+emptying-trash = 正在清空{ trash }（{ $progress }）…
 emptied-trash = 已清空{ trash }
 extracting =
     正在解壓縮 { $items } 項目 { $items ->
@@ -156,16 +156,16 @@ extracted =
        *[other] 項目
     } 從 { $from } 到 { $to }
 moving =
-    正在移動 { $items } 項目 { $items ->
+    正在移動 { $items } { $items ->
         [one] 項目
        *[other] 項目
     } 從「{ $from }」到「{ $to }」（{ $progress }）...
 moved =
-    已移動 { $items } 項目 { $items ->
+    已移動 { $items } { $items ->
         [one] 項目
        *[other] 項目
-    } 從 { $from } 到 { $to }
-renaming = 正在重新命名 { $from } 為 { $to }
+    } 從「{ $from }」到「{ $to }」
+renaming = 正在重新命名「{ $from }」為「{ $to }」
 renamed = 已重新命名 { $from } 為 { $to }
 restoring =
     正在還原 { $items } 項目 { $items ->
@@ -256,3 +256,33 @@ sort-newest-first = 最新的在前
 sort-oldest-first = 最舊的在前
 sort-smallest-to-largest = 由小至大
 sort-largest-to-smallest = 由大至小
+deleted =
+    已刪除 { $items } { $items ->
+        [one] 項目
+       *[other] 項目
+    }從{ trash }
+permanently-deleting =
+    正在永久刪除 { $items } { $items ->
+        [one] 项目
+       *[other] 项目
+    }
+permanently-deleted =
+    已永久刪除 { $items } { $items ->
+        [one] 项目
+       *[other] 项目
+    }
+removing-from-recents =
+    正在從{ recents }中移除 { $items } { $items ->
+        [one] 项目
+       *[other] 项目
+    }
+deleting =
+    正在刪除 { $items } { $items ->
+        [one] 项目
+       *[other] 项目
+    }從{ trash }（{ $progress }）…
+removed-from-recents =
+    已從{ recents }中移除 { $items } { $items ->
+        [one] 项目
+       *[other] 项目
+    }

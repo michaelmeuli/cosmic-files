@@ -33,7 +33,7 @@ create-archive = Crear archivo comprimido
 
 ## Empty Trash Dialog
 
-empty-trash = Papelera vacía
+empty-trash = Vaciar la papelera
 empty-trash-warning = ¿Estás seguro de que deseas eliminar permanentemente todos los elementos de la papelera?
 
 ## New File/Folder Dialog
@@ -149,24 +149,24 @@ compressing =
        *[other] elementos
     } de "{ $from }" a "{ $to }" ({ $progress })...
 compressed =
-    Comprimido { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } de { $from } a { $to }
+    { $items ->
+        [one] Se ha comprimido un elemento
+       *[other] Se han comprimidos { $items } elementos
+    } de "{ $from }" a "{ $to }"
 copy_noun = Copiar
-creating = Creando { $name } en { $parent }
-created = Se ha creado { $name } en { $parent }
+creating = Creando "{ $name }" en "{ $parent }"
+created = Se ha creado "{ $name }" en "{ $parent }"
 copying =
     Copiando { $items } { $items ->
         [one] elemento
        *[other] elementos
-    } desde "{ $from }" a "{ $to }" ({ $progress })...
+    } de "{ $from }" a "{ $to }" ({ $progress })...
 copied =
-    Se han copiado { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } desde { $from } a { $to }
-emptying-trash = Vaciando { trash } ({ $progress })...
+    { $items ->
+        [one] Se ha copiado un elemento
+       *[other] Se han copiado { $items } elementos
+    } de "{ $from }" a "{ $to }"
+emptying-trash = Vaciando la { trash } ({ $progress })...
 emptied-trash = Se ha vaciado la { trash }
 extracting =
     Extrayendo { $items } { $items ->
@@ -174,22 +174,22 @@ extracting =
        *[other] elementos
     } de "{ $from }" a "{ $to }" ({ $progress })...
 extracted =
-    Extraído { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } de { $from } a { $to }
+    { $items ->
+        [one] Se ha extraído un elemento
+       *[other] Se han extraído { $items } elementos
+    } de "{ $from }" a "{ $to }"
 setting-executable-and-launching = Estableciendo "{ $name }" como ejecutable y abriendo
 set-executable-and-launched = Se ha establecido "{ $name }" como ejecutable y se ha abierto
 moving =
     Moviendo { $items } { $items ->
         [one] elemento
        *[other] elementos
-    } desde "{ $from }" a "{ $to }" ({ $progress })...
+    } de "{ $from }" a "{ $to }" ({ $progress })...
 moved =
-    Se han movido { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } desde { $from } a { $to }
+    { $items ->
+        [one] Se ha movido un elemento
+       *[other] Se han movido { $items } elementos
+    } de "{ $from }" a "{ $to }"
 renaming = Cambiando el nombre de "{ $from }" a "{ $to }"
 renamed = Se ha cambiado el nombre de "{ $from }" a "{ $to }"
 restoring =
@@ -198,10 +198,10 @@ restoring =
        *[other] elementos
     } de la { trash } ({ $progress })...
 restored =
-    Se ha restaurado { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } from { trash }
+    { $items ->
+        [one] Se ha restaurado un elemento
+       *[other] Se han restaurado { $items } elementos
+    } de la { trash }
 unknown-folder = carpeta desconocida
 
 ## Open with
@@ -232,7 +232,7 @@ new-file = Archivo nuevo...
 new-folder = Carpeta nueva...
 open-in-terminal = Abrir en una terminal
 move-to-trash = Mover a la papelera
-restore-from-trash = Restaurar desde la papelera
+restore-from-trash = Restaurar de la papelera
 remove-from-sidebar = Quitar de la barra lateral
 sort-by-name = Ordenar por nombre
 sort-by-modified = Ordenar por modificado
@@ -255,7 +255,7 @@ new-tab = Nueva pestaña
 new-window = Nueva ventana
 rename = Cambiar nombre...
 close-tab = Cerrar pestaña
-quit = Salir
+quit = Cerrar
 
 ## Edit
 
@@ -350,25 +350,25 @@ deleting =
        *[other] elementos
     } de la { trash } ({ $progress })...
 deleted =
-    { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } de la { trash } eliminados
+    { $items ->
+        [one] Se ha eliminado un elemento
+       *[other] Se han eliminado { $items } elementos
+    } de la { trash }
 permanently-deleted =
-    { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } eliminados de forma permanente
+    { $items ->
+        [one] Se ha eliminado un elemento
+       *[other] Se han eliminado { $items } elementos
+    } de forma permanente
 removing-from-recents =
     Quitando { $items } { $items ->
         [one] elemento
        *[other] elementos
     } de { recents }
 removed-from-recents =
-    { $items } { $items ->
-        [one] elemento
-       *[other] elementos
-    } quitados de { recents }
+    { $items ->
+        [one] Se ha quitado elemento
+       *[other] Se han quitado { $items } elementos
+    } de { recents }
 reload-folder = Recargar la carpeta
 remove-from-recents = Quitar de recientes
 calculating = Calculando...
