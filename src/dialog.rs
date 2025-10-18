@@ -6,7 +6,9 @@ use cosmic::{
     app::{Core, Task, context_drawer, cosmic::Cosmic},
     cosmic_config, cosmic_theme, executor,
     iced::{
-        self, Alignment, Event, Length, Size, Subscription, event,
+        self, Alignment, Event, Length, Size, Subscription,
+        core::SmolStr,
+        event,
         futures::{self, SinkExt},
         keyboard::{Event as KeyEvent, Key, Modifiers},
         stream, window,
@@ -35,7 +37,7 @@ use std::{
 
 use crate::{
     app::{Action, ContextPage, Message as AppMessage, PreviewItem, PreviewKind},
-    config::{Config, DialogConfig, Favorite, TIME_CONFIG_ID, ThumbCfg, TimeConfig},
+    config::{Config, DialogConfig, Favorite, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch},
     fl, home_dir,
     key_bind::key_binds,
     localize::LANGUAGE_SORTER,
@@ -342,7 +344,7 @@ impl<M: Send + 'static> Dialog<M> {
         self.cosmic.app.filter_selected = filter_selected;
         self.cosmic
             .app
-            .rescan_tab()
+            .rescan_tab(None)
             .map(DialogMessage)
             .map(move |message| cosmic::action::app(mapper(message)))
     }
@@ -413,7 +415,7 @@ enum Message {
     DialogUpdate(DialogPage),
     Filename(String),
     Filter(usize),
-    Key(Modifiers, Key),
+    Key(Modifiers, Key, Option<SmolStr>),
     ModifiersChanged(Modifiers),
     MounterItems(MounterKey, MounterItems),
     NewFolder,
@@ -429,7 +431,12 @@ enum Message {
     Surface(cosmic::surface::Action),
     #[allow(clippy::enum_variant_names)]
     TabMessage(tab::Message),
-    TabRescan(Location, Option<tab::Item>, Vec<tab::Item>),
+    TabRescan(
+        Location,
+        Option<tab::Item>,
+        Vec<tab::Item>,
+        Option<Vec<PathBuf>>,
+    ),
     TabView(tab::View),
     TimeConfigChange(TimeConfig),
     ToggleFoldersFirst,
@@ -660,7 +667,7 @@ impl App {
         widget::column::with_children(children).into()
     }
 
-    fn rescan_tab(&self) -> Task<Message> {
+    fn rescan_tab(&self, selection_paths: Option<Vec<PathBuf>>) -> Task<Message> {
         let location = self.tab.location.clone();
         let icon_sizes = self.tab.config.icon_sizes;
         let mounter_items = self.mounter_items.clone();
@@ -683,7 +690,12 @@ impl App {
                                 }
                             }
                         }
-                        cosmic::action::app(Message::TabRescan(location, parent_item_opt, items))
+                        cosmic::action::app(Message::TabRescan(
+                            location,
+                            parent_item_opt,
+                            items,
+                            selection_paths,
+                        ))
                     }
                     Err(err) => {
                         log::warn!("failed to rescan: {}", err);
@@ -725,7 +737,7 @@ impl App {
             return Task::batch([
                 self.update_title(),
                 self.update_watcher(),
-                self.rescan_tab(),
+                self.rescan_tab(None),
                 if focus_search {
                     widget::text_input::focus(self.search_id.clone())
                 } else {
@@ -983,7 +995,7 @@ impl Application for App {
             app.update_config(),
             app.update_title(),
             app.update_watcher(),
-            app.rescan_tab(),
+            app.rescan_tab(None),
         ]);
 
         (app, commands)
@@ -1337,14 +1349,16 @@ impl Application for App {
                 } else {
                     self.filter_selected = None;
                 }
-                return self.rescan_tab();
+                return self.rescan_tab(None);
             }
-            Message::Key(modifiers, key) => {
+            Message::Key(modifiers, key, text) => {
                 for (key_bind, action) in self.key_binds.iter() {
                     if key_bind.matches(modifiers, &key) {
                         return self.update(Message::from(action.message()));
                     }
                 }
+
+                // Check key binds from accept label
                 if let Some(key_bind) = &self.accept_label.key_bind_opt {
                     if key_bind.matches(modifiers, &key) {
                         return self.update(if self.flags.kind.save() {
@@ -1352,6 +1366,36 @@ impl Application for App {
                         } else {
                             Message::Open
                         });
+                    }
+                }
+
+                // Uncaptured keys with only shift modifiers go to the search or location box
+                if !modifiers.logo()
+                    && !modifiers.control()
+                    && !modifiers.alt()
+                    && matches!(key, Key::Character(_))
+                {
+                    if let Some(text) = text {
+                        match self.flags.config.type_to_search {
+                            TypeToSearch::Recursive => {
+                                let mut term = self.search_get().unwrap_or_default().to_string();
+                                term.push_str(&text);
+                                return self.search_set(Some(term));
+                            }
+                            TypeToSearch::EnterPath => {
+                                let location = self.tab.edit_location.as_ref().map_or_else(
+                                    || self.tab.location.clone(),
+                                    |x| x.location.clone(),
+                                );
+                                // Try to add text to end of location
+                                if let Some(path) = location.path_opt() {
+                                    let mut path_string = path.to_string_lossy().to_string();
+                                    path_string.push_str(&text);
+                                    self.tab.edit_location =
+                                        Some(location.with_path(PathBuf::from(path_string)).into());
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1392,7 +1436,7 @@ impl Application for App {
                     if unmounted.contains(&self.tab.location) {
                         self.tab.change_location(&home_location, None);
                         commands.push(self.update_watcher());
-                        commands.push(self.rescan_tab());
+                        commands.push(self.rescan_tab(None));
                     }
                 }
 
@@ -1468,7 +1512,7 @@ impl Application for App {
                         }
                     }
                     if contains_change {
-                        return self.rescan_tab();
+                        return self.rescan_tab(None);
                     }
                 }
             }
@@ -1606,8 +1650,11 @@ impl Application for App {
                         tab::Command::Action(action) => {
                             commands.push(self.update(Message::from(action.message())));
                         }
-                        tab::Command::ChangeLocation(_tab_title, _tab_path, _selection_paths) => {
-                            commands.push(Task::batch([self.update_watcher(), self.rescan_tab()]));
+                        tab::Command::ChangeLocation(_tab_title, _tab_path, selection_paths) => {
+                            commands.push(Task::batch([
+                                self.update_watcher(),
+                                self.rescan_tab(selection_paths),
+                            ]));
                         }
                         tab::Command::ContextMenu(point_opt, parent_id) => {
                             #[cfg(feature = "wayland")]
@@ -1719,7 +1766,7 @@ impl Application for App {
                 }
                 return Task::batch(commands);
             }
-            Message::TabRescan(location, parent_item_opt, mut items) => {
+            Message::TabRescan(location, parent_item_opt, mut items, selection_paths) => {
                 if location == self.tab.location {
                     // Filter
                     if let Some(filter_i) = self.filter_selected {
@@ -1791,6 +1838,13 @@ impl Application for App {
 
                     self.tab.parent_item_opt = parent_item_opt;
                     self.tab.set_items(items);
+
+                    if let Some(mut selection_paths) = selection_paths {
+                        if !self.flags.kind.multiple() {
+                            selection_paths.truncate(1);
+                        }
+                        self.tab.select_paths(selection_paths);
+                    }
 
                     // Reset focus on location change
                     if self.search_get().is_some() {
@@ -1904,8 +1958,13 @@ impl Application for App {
         struct TimeSubscription;
         let mut subscriptions = vec![
             event::listen_with(|event, status, _window_id| match event {
-                Event::Keyboard(KeyEvent::KeyPressed { key, modifiers, .. }) => match status {
-                    event::Status::Ignored => Some(Message::Key(modifiers, key)),
+                Event::Keyboard(KeyEvent::KeyPressed {
+                    key,
+                    modifiers,
+                    text,
+                    ..
+                }) => match status {
+                    event::Status::Ignored => Some(Message::Key(modifiers, key, text)),
                     event::Status::Captured => None,
                 },
                 Event::Keyboard(KeyEvent::ModifiersChanged(modifiers)) => {
