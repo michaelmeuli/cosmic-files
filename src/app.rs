@@ -673,6 +673,8 @@ pub struct App {
     search_id: widget::Id,
     size: Option<Size>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
+    layer_sizes: HashMap<window::Id, Size>,
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     surface_ids: HashMap<WlOutput, WindowId>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     surface_names: HashMap<WindowId, String>,
@@ -911,28 +913,8 @@ impl App {
         }
     }
 
+    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     fn handle_overlap(&mut self) {
-        let Some((bl, br, tl, tr, mut size)) = self.size.as_ref().map(|s| {
-            (
-                Rectangle::new(
-                    Point::new(0., s.height / 2.),
-                    Size::new(s.width / 2., s.height / 2.),
-                ),
-                Rectangle::new(
-                    Point::new(s.width / 2., s.height / 2.),
-                    Size::new(s.width / 2., s.height / 2.),
-                ),
-                Rectangle::new(Point::new(0., 0.), Size::new(s.width / 2., s.height / 2.)),
-                Rectangle::new(
-                    Point::new(s.width / 2., 0.),
-                    Size::new(s.width / 2., s.height / 2.),
-                ),
-                *s,
-            )
-        }) else {
-            return;
-        };
-
         let mut overlaps: HashMap<_, _> = self
             .windows
             .keys()
@@ -943,6 +925,26 @@ impl App {
             .sort_by(|a, b| (b.1.width * b.1.height).total_cmp(&(a.1.width * b.1.height)));
 
         for (w_id, overlap) in sorted_overlaps {
+            let Some((bl, br, tl, tr, mut size)) = self.layer_sizes.get(w_id).map(|s| {
+                (
+                    Rectangle::new(
+                        Point::new(0., s.height / 2.),
+                        Size::new(s.width / 2., s.height / 2.),
+                    ),
+                    Rectangle::new(
+                        Point::new(s.width / 2., s.height / 2.),
+                        Size::new(s.width / 2., s.height / 2.),
+                    ),
+                    Rectangle::new(Point::new(0., 0.), Size::new(s.width / 2., s.height / 2.)),
+                    Rectangle::new(
+                        Point::new(s.width / 2., 0.),
+                        Size::new(s.width / 2., s.height / 2.),
+                    ),
+                    *s,
+                )
+            }) else {
+                continue;
+            };
             let tl = tl.intersects(overlap);
             let tr = tr.intersects(overlap);
             let bl = bl.intersects(overlap);
@@ -2153,6 +2155,8 @@ impl Application for App {
             tab_drag_id: DragId::new(),
             auto_scroll_speed: None,
             file_dialog_opt: None,
+            #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
+            layer_sizes: HashMap::new(),
         };
 
         let mut commands = vec![app.update_config()];
@@ -3762,32 +3766,32 @@ impl Application for App {
                 }
             }
             Message::TabClose(entity_opt) => {
-                let mut tasks = Vec::with_capacity(3);
+                let mut tasks = Vec::with_capacity(2);
 
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
 
-                // Activate closest item
-                if let Some(position) = self.tab_model.position(entity) {
-                    let new_position = if position > 0 {
-                        position - 1
-                    } else {
-                        position + 1
-                    };
+                // If the last tab is closed, close the window
+                // Otherwise, activate closest item
+                if self.tab_model.len() == 1 {
+                    tasks.push(Task::future(async move {
+                        cosmic::action::app(Message::WindowClose)
+                    }));
+                } else {
+                    if let Some(position) = self.tab_model.position(entity) {
+                        let new_position = if position > 0 {
+                            position - 1
+                        } else {
+                            position + 1
+                        };
 
-                    if let Some(new_entity) = self.tab_model.entity_at(new_position) {
-                        tasks.push(self.update(Message::TabActivate(new_entity)));
+                        if let Some(new_entity) = self.tab_model.entity_at(new_position) {
+                            tasks.push(self.update(Message::TabActivate(new_entity)));
+                        }
                     }
                 }
 
                 // Remove item
                 self.tab_model.remove(entity);
-
-                // If that was the last tab, close window
-                if self.tab_model.iter().next().is_none() {
-                    if let Some(window_id) = self.core.main_window_id() {
-                        tasks.push(window::close(window_id));
-                    }
-                }
 
                 tasks.push(self.update_watcher());
 
@@ -4360,13 +4364,19 @@ impl Application for App {
                 }
             }
             Message::NavBarContext(entity) => {
-                // Close location editing if enabled
+                self.nav_bar_context_id = entity;
+
                 let tab_entity = self.tab_model.active();
                 if let Some(tab) = self.tab_model.data_mut::<Tab>(tab_entity) {
+                    // Close location editing if enabled
                     tab.edit_location = None;
+                    // Close other context menus.
+                    tab.location_context_menu_index = None;
+                    return Task::done(cosmic::Action::App(Message::TabMessage(
+                        Some(tab_entity),
+                        tab::Message::ContextMenu(None, None),
+                    )));
                 }
-
-                self.nav_bar_context_id = entity;
             }
             Message::NavMenuAction(action) => match action {
                 NavMenuAction::Open(entity) => {
@@ -4624,7 +4634,9 @@ impl Application for App {
             Message::Size(window_id, size) => {
                 if self.core.main_window_id() == Some(window_id) {
                     self.size = Some(size);
-                    self.handle_overlap();
+                } else {
+                    #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
+                    self.layer_sizes.insert(window_id, size);
                 }
             }
             Message::Eject => {
@@ -5224,22 +5236,20 @@ impl Application for App {
                     .secondary_action(
                         widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
                     )
-                    .control(
-                        widget::scrollable(column).height(if let Some(size) = self.size {
-                            let max_size = (size.height - 256.0).min(480.0);
-                            // (32 (item_height) + 5.0 (custom button padding)) + (space_xxs (list item spacing) * 2)
-                            let scrollable_height = available_apps.len() as f32
-                                * (item_height + 5.0 + (2.0 * space_xxs as f32));
+                    .control(widget::scrollable(column).height({
+                        let max_size = self
+                            .size
+                            .map_or(480.0, |size| (size.height - 256.0).min(480.0));
+                        // (32 (item_height) + 5.0 (custom button padding)) + (space_xxs (list item spacing) * 2)
+                        let scrollable_height = available_apps.len() as f32
+                            * (item_height + 5.0 + (2.0 * space_xxs as f32));
 
-                            if scrollable_height > max_size {
-                                Length::Fixed(max_size)
-                            } else {
-                                Length::Shrink
-                            }
+                        if scrollable_height > max_size {
+                            Length::Fixed(max_size)
                         } else {
-                            Length::Fill
-                        }),
-                    );
+                            Length::Shrink
+                        }
+                    }));
 
                 if let Some(app) = store_opt {
                     dialog = dialog.tertiary_action(
