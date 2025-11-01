@@ -61,6 +61,7 @@ md-5 = "0.10.6"
 png = "0.18"
 jxl-oxide = { version = "0.12.5", features = ["image"] }
 num_cpus = "1.17.0"
+async-ssh2-tokio = { version = "0.10.0", optional = true }
 
 # Completion-based IO runtime to enable io_uring / IOCP file IO support.
 [dependencies.compio]
@@ -85,6 +86,7 @@ default = [
     "dbus-config",
     "desktop",
     "gvfs",
+    "russh",
     "io-uring",
     "lzma-rust2",
     "notify",
@@ -95,6 +97,7 @@ dbus-config = ["libcosmic/dbus-config"]
 desktop = ["libcosmic/desktop", "dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
 gvfs = ["dep:gio", "dep:glib"]
+russh = ["dep:async-ssh2-tokio"]
 io-uring = ["compio/io-uring", "dep:io-uring"]
 io-uring-bindgen = ["io-uring?/bindgen"]
 jemalloc = ["dep:tikv-jemallocator"]

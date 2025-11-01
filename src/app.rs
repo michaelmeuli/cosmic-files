@@ -81,6 +81,7 @@ use crate::{
     mime_app::{self, MimeApp, MimeAppCache},
     mime_icon,
     mounter::{MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage},
+    russh::{CLIENTS, ClientItem, ClientKey},
     operation::{
         Controller, Operation, OperationError, OperationErrorType, OperationSelection,
         ReplaceResult,
@@ -625,6 +626,7 @@ enum MimeAppMatch {
 }
 
 pub struct MounterData(MounterKey, MounterItem);
+pub struct ClientData(ClientKey, ClientItem);
 
 #[derive(Clone, Debug)]
 pub enum WindowKind {
@@ -2426,6 +2428,13 @@ impl Application for App {
             if let Some(mounter) = MOUNTERS.get(&data.0) {
                 return mounter
                     .mount(data.1.clone())
+                    .map(|_| cosmic::action::none());
+            }
+        }
+        if let Some(data) = self.nav_model.data::<ClientData>(entity) {
+            if let Some(client) = CLIENTS.get(&data.0) {
+                return client
+                    .connect(data.1.clone())
                     .map(|_| cosmic::action::none());
             }
         }

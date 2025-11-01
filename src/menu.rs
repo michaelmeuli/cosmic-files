@@ -354,6 +354,29 @@ pub fn context_menu<'a>(
                 children.push(sort_item(fl!("sort-by-size"), HeadingOptions::Size));
             }
         }
+        (_, Location::Remote(..)) => {
+            if selected > 0 {
+                if selected_dir == 1 && selected == 1 || selected_dir == 0 {
+                    children.push(menu_item(fl!("open"), Action::Open).into());
+                }
+                // All selected items are directories
+                if selected == selected_dir && matches!(tab.mode, tab::Mode::App) {
+                    children.push(menu_item(fl!("open-in-new-tab"), Action::OpenInNewTab).into());
+                    children
+                        .push(menu_item(fl!("open-in-new-window"), Action::OpenInNewWindow).into());
+                }
+            } else {
+                if tab.mode.multiple() {
+                    children.push(menu_item(fl!("select-all"), Action::SelectAll).into());
+                }
+                if !children.is_empty() {
+                    children.push(divider::horizontal::light().into());
+                }
+                children.push(sort_item(fl!("sort-by-name"), HeadingOptions::Name));
+                children.push(sort_item(fl!("sort-by-modified"), HeadingOptions::Modified));
+                children.push(sort_item(fl!("sort-by-size"), HeadingOptions::Size));
+            }
+        }
     }
 
     container(column::with_children(children))
