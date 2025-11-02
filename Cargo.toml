@@ -105,7 +105,7 @@ jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]
 wayland = ["libcosmic/wayland", "dep:cctk", "dep:wayland-client"]
 wgpu = ["libcosmic/wgpu"]
-ssh = ["async-ssh2-tokio"]
+ssh = ["dep:async-ssh2-tokio"]
 
 [profile.dev]
 opt-level = 1
