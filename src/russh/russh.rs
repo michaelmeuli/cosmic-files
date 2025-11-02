@@ -1,4 +1,4 @@
-use async_ssh2_tokio::client::{Client, AuthMethod, ServerCheckMethod};
+use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
 
 use cosmic::{
     Task,
@@ -9,26 +9,137 @@ use gio::{glib, prelude::*};
 use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 
-use super::{Connector, ClientAuth, ClientItem, ClientItems, MounterMessage};
+use super::{ClientAuth, ClientItem, ClientItems, Connector, MounterMessage};
 use crate::{
     config::IconSizes,
     err_str,
+    home_dir,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 
+fn items(sizes: IconSizes) -> ClientItems {
+    let key_path = home_dir()
+        .join(".ssh")
+        .join("id_rsa");
+    let auth_method = AuthMethod::with_key_file(key_path, None);
+    let mut items = ClientItems::new();
+    items.push(ClientItem::Russh(Item {
+        name: "S3IT".to_string(),
+        is_connected: false,
+        icon_opt: None,
+        icon_symbolic_opt: None,
+        path_opt: None,
+        uri: "130.60.24.133".to_string(),
+        port: 22,
+        username: "mimeul".to_string(),
+        auth: auth_method,
+        server_check: ServerCheckMethod::NoCheck,
+    }));
+    items
+}
 
-pub struct Russh {}
+enum Cmd {
+    Items(IconSizes, mpsc::Sender<ClientItems>),
+    Rescan,
+    Connect(ClientItem, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
+    NetworkDrive(String, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
+    NetworkScan(
+        String,
+        IconSizes,
+        mpsc::Sender<Result<Vec<tab::Item>, String>>,
+    ),
+    Unmount(ClientItem),
+}
+
+// async_ssh2_tokio::client::Client
+// pub async fn connect(addr: impl ToSocketAddrsWithHostname, username: &str, auth: AuthMethod, server_check: ServerCheckMethod) -> Result<Self, crate::Error>
+
+#[derive(Clone, Debug)]
+pub struct Item {
+    name: String,
+    is_connected: bool,
+    icon_opt: Option<PathBuf>,
+    icon_symbolic_opt: Option<PathBuf>,
+    path_opt: Option<PathBuf>,
+    uri: String,
+    port: u16,
+    username: String,
+    auth: AuthMethod,
+    server_check: ServerCheckMethod,
+}
+
+impl Item {
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.is_connected
+    }
+
+    pub fn uri(&self) -> String {
+        self.uri.clone()
+    }
+
+    pub fn icon(&self, symbolic: bool) -> Option<widget::icon::Handle> {
+        if symbolic {
+            self.icon_symbolic_opt.as_ref()
+        } else {
+            self.icon_opt.as_ref()
+        }
+        .map(|icon| widget::icon::from_path(icon.clone()))
+    }
+
+    pub fn path(&self) -> Option<PathBuf> {
+        self.path_opt.clone()
+    }
+}
+
+pub struct Russh {
+    command_tx: mpsc::UnboundedSender<Cmd>,
+    event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
+}
 
 impl Russh {
     pub fn new() -> Self {
-        Russh {}
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        std::thread::spawn(move || {
+            while let Some(command) = command_rx.recv().await {
+                match command {
+                    Cmd::Connect(client_item, complete_tx) => {
+                        let ClientItem::Russh(ref item) = client_item else {
+                            _ = complete_tx.send(Err(anyhow::anyhow!("No mounter item")));
+                            continue;
+                        };
+                        // Handle connect command
+                    }
+                }
+            }
+        });
+        Self {
+            command_tx,
+            event_rx: Arc::new(Mutex::new(event_rx)),
+        }
     }
 }
 
 impl Connector for Russh {
-
     fn connect(&self, item: ClientItem) -> Task<()> {
-        async move {}
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+
+                command_tx.send(Cmd::Connect(item, res_tx)).unwrap();
+                res_rx.await
+            },
+            |x| {
+                if let Err(err) = x {
+                    log::error!("{err:?}");
+                }
+            },
+        )
     }
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
