@@ -9,7 +9,7 @@ use gio::{glib, prelude::*};
 use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 
-use super::{ClientAuth, ClientItem, ClientItems, Connector, MounterMessage};
+use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
     config::IconSizes,
     err_str, home_dir,
@@ -69,6 +69,7 @@ pub struct Item {
     username: String,
     auth: AuthMethod,
     server_check: ServerCheckMethod,
+    client: Option<Client>,
 }
 
 impl Item {
@@ -122,8 +123,8 @@ impl Russh {
                                     .unwrap();
                             }
                             Cmd::Connect(client_item, complete_tx) => {
-                                let ClientItem::Russh(ref item) = client_item else {
-                                    _ = complete_tx.send(Err(anyhow::anyhow!("No mounter item")));
+                                let ClientItem::Russh(ref mut item) = client_item else {
+                                    _ = complete_tx.send(Err(anyhow::anyhow!("No client item")));
                                     continue;
                                 };
                                 let event_tx = event_tx.clone();
@@ -136,7 +137,9 @@ impl Russh {
                                 )
                                 .await;
                                 match res {
-                                    Ok(_client) => {
+                                    Ok(client) => {
+                                        item.is_connected = true;
+                                        item.client = Some(client);
                                         _ = complete_tx.send(Ok(()));
                                         event_tx
                                             .send(Event::ClientResult(client_item, Ok(true)))
@@ -183,5 +186,37 @@ impl Connector for Russh {
 
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
         None
+    }
+
+    fn subscription(&self) -> Subscription<ClientMessage> {
+        let command_tx = self.command_tx.clone();
+        let event_rx = self.event_rx.clone();
+        Subscription::run_with_id(
+            TypeId::of::<Self>(),
+            stream::channel(1, |mut output| async move {
+                command_tx.send(Cmd::Rescan).unwrap();
+                while let Some(event) = event_rx.lock().await.recv().await {
+                    match event {
+                        Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
+                        Event::Items(items) => {
+                            output.send(ClientMessage::Items(items)).await.unwrap()
+                        }
+                        Event::ClientResult(item, res) => output
+                            .send(ClientMessage::ClientResult(item, res))
+                            .await
+                            .unwrap(),
+                        Event::RemoteAuth(uri, auth, auth_tx) => output
+                            .send(ClientMessage::RemoteAuth(uri, auth, auth_tx))
+                            .await
+                            .unwrap(),
+                        Event::RemoteResult(uri, res) => output
+                            .send(ClientMessage::RemoteResult(uri, res))
+                            .await
+                            .unwrap(),
+                    }
+                }
+                pending().await
+            }),
+        )
     }
 }

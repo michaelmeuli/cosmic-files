@@ -85,7 +85,7 @@ use crate::{
         Controller, Operation, OperationError, OperationErrorType, OperationSelection,
         ReplaceResult,
     },
-    russh::{CLIENTS, ClientItem, ClientKey},
+    russh::{CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage},
     spawn_detached::spawn_detached,
     tab::{
         self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK, Tab,
@@ -508,6 +508,11 @@ pub enum DialogPage {
     MountError {
         mounter_key: MounterKey,
         item: MounterItem,
+        error: String,
+    },
+    ClientError {
+        client_key: ClientKey,
+        item: ClientItem,
         error: String,
     },
     NetworkAuth {
@@ -2813,6 +2818,15 @@ impl Application for App {
                                 tasks.push(mounter.mount(item).map(|_| cosmic::action::none()));
                             }
                         }
+                        DialogPage::ClientError {
+                            client_key,
+                            item,
+                            error: _,
+                        } => {
+                            if let Some(client) = CLIENTS.get(&client_key) {
+                                tasks.push(client.connect(item).map(|_| cosmic::action::none()));
+                            }
+                        }
                         DialogPage::NetworkAuth {
                             mounter_key: _,
                             uri: _,
@@ -5053,6 +5067,22 @@ impl Application for App {
                 .secondary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
                 ),
+            DialogPage::ClientError {
+                client_key: _,
+                item: _,
+                error,
+            } => widget::dialog()
+                .title(fl!("mount-error"))
+                .body(error)
+                .icon(icon::from_name("dialog-error").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("try-again"))
+                        .on_press(Message::DialogComplete)
+                        .id(CLIENT_ERROR_TRY_AGAIN_BUTTON_ID.clone()),
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
             DialogPage::NetworkAuth {
                 mounter_key,
                 uri,
@@ -6193,8 +6223,8 @@ impl Application for App {
                         MounterMessage::MountResult(item, res) => {
                             Message::MountResult(key, item, res)
                         }
-                        MounterMessage::ClientResult(client_key, item, res) => {
-                            Message::ClientResult(client_key, item, res)
+                        ClientMessage::ClientResult(item, res) => {
+                            Message::ClientResult(key, item, res)
                         }
                         MounterMessage::NetworkAuth(uri, auth, auth_tx) => {
                             Message::NetworkAuth(key, uri, auth, auth_tx)

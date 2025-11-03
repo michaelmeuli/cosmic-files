@@ -66,17 +66,18 @@ impl ClientItem {
 pub type ClientItems = Vec<ClientItem>;
 
 #[derive(Clone, Debug)]
-pub enum MounterMessage {
+pub enum ClientMessage {
     Items(ClientItems),
-    MountResult(ClientItem, Result<bool, String>),
-    NetworkAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
-    NetworkResult(String, Result<bool, String>),
+    ClientResult(ClientItem, Result<bool, String>),
+    RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
+    RemoteResult(String, Result<bool, String>),
 }
 
 
 pub trait Connector: Send + Sync {
     fn connect(&self, item: ClientItem) -> Task<()>;
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
+    fn subscription(&self) -> Subscription<ClientMessage>;
 }
 
 
