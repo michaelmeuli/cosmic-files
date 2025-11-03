@@ -12,15 +12,12 @@ use tokio::sync::{Mutex, mpsc};
 use super::{ClientAuth, ClientItem, ClientItems, Connector, MounterMessage};
 use crate::{
     config::IconSizes,
-    err_str,
-    home_dir,
+    err_str, home_dir,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 
 fn items(sizes: IconSizes) -> ClientItems {
-    let key_path = home_dir()
-        .join(".ssh")
-        .join("id_rsa");
+    let key_path = home_dir().join(".ssh").join("id_rsa");
     let auth_method = AuthMethod::with_key_file(key_path, None);
     let mut items = ClientItems::new();
     items.push(ClientItem::Russh(Item {
@@ -105,17 +102,30 @@ impl Russh {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         std::thread::spawn(move || {
-            while let Some(command) = command_rx.recv().await {
-                match command {
-                    Cmd::Connect(client_item, complete_tx) => {
-                        let ClientItem::Russh(ref item) = client_item else {
-                            _ = complete_tx.send(Err(anyhow::anyhow!("No mounter item")));
-                            continue;
-                        };
-                        // Handle connect command
+            let rt = Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async move {
+                tokio::task::spawn_local(async move {
+                    while let Some(command) = command_rx.recv().await {
+                        match command {
+                            Cmd::Items(sizes, items_tx) => {
+                                items_tx.send(items(sizes)).await.unwrap();
+                            }
+                            Cmd::Rescan => {
+                                event_tx
+                                    .send(Event::Items(items(IconSizes::default())))
+                                    .unwrap();
+                            }
+                            Cmd::Connect(client_item, complete_tx) => {
+                                let ClientItem::Russh(ref item) = client_item else {
+                                    _ = complete_tx.send(Err(anyhow::anyhow!("No mounter item")));
+                                    continue;
+                                };
+                                // Handle connect command
+                            }
+                        }
                     }
-                }
-            }
+                });
+            });
         });
         Self {
             command_tx,
