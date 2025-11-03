@@ -81,11 +81,11 @@ use crate::{
     mime_app::{self, MimeApp, MimeAppCache},
     mime_icon,
     mounter::{MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage},
-    russh::{CLIENTS, ClientItem, ClientKey},
     operation::{
         Controller, Operation, OperationError, OperationErrorType, OperationSelection,
         ReplaceResult,
     },
+    russh::{CLIENTS, ClientItem, ClientKey},
     spawn_detached::spawn_detached,
     tab::{
         self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK, Tab,
@@ -110,6 +110,9 @@ static FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID: LazyLock<widget::Id> =
 
 static MOUNT_ERROR_TRY_AGAIN_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("mount-error-try-again-button"));
+
+static CLIENT_ERROR_TRY_AGAIN_BUTTON_ID: LazyLock<widget::Id> =
+    LazyLock::new(|| widget::Id::new("client-error-try-again-button"));
 
 pub(crate) static REPLACE_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("replace-button"));
@@ -352,6 +355,7 @@ pub enum Message {
     ModifiersChanged(window::Id, Modifiers),
     MounterItems(MounterKey, MounterItems),
     MountResult(MounterKey, MounterItem, Result<bool, String>),
+    ClientResult(ClientKey, ClientItem, Result<bool, String>),
     NavBarClose(Entity),
     NavBarContext(Entity),
     NavMenuAction(NavMenuAction),
@@ -3125,6 +3129,25 @@ impl Application for App {
                             error,
                         },
                         Some(MOUNT_ERROR_TRY_AGAIN_BUTTON_ID.clone()),
+                    );
+                }
+            },
+            Message::ClientResult(client_key, item, res) => match res {
+                Ok(true) => {
+                    log::info!("connected to {:?}", item);
+                }
+                Ok(false) => {
+                    log::info!("cancelled connection to {:?}", item);
+                }
+                Err(error) => {
+                    log::warn!("failed to connect to {:?}: {}", item, error);
+                    return self.push_dialog(
+                        DialogPage::ClientError {
+                            client_key,
+                            item,
+                            error,
+                        },
+                        Some(CLIENT_ERROR_TRY_AGAIN_BUTTON_ID.clone()),
                     );
                 }
             },
@@ -6169,6 +6192,9 @@ impl Application for App {
                         MounterMessage::Items(items) => Message::MounterItems(key, items),
                         MounterMessage::MountResult(item, res) => {
                             Message::MountResult(key, item, res)
+                        }
+                        MounterMessage::ClientResult(client_key, item, res) => {
+                            Message::ClientResult(client_key, item, res)
                         }
                         MounterMessage::NetworkAuth(uri, auth, auth_tx) => {
                             Message::NetworkAuth(key, uri, auth, auth_tx)

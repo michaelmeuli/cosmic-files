@@ -39,15 +39,21 @@ enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
     Rescan,
     Connect(ClientItem, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
-    NetworkDrive(String, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
     NetworkScan(
         String,
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
-    Unmount(ClientItem),
+    Disconnect(ClientItem),
 }
 
+enum Event {
+    Changed,
+    Items(ClientItems),
+    ClientResult(ClientItem, Result<bool, String>),
+    RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
+    RemoteResult(String, Result<bool, String>),
+}
 // async_ssh2_tokio::client::Client
 // pub async fn connect(addr: impl ToSocketAddrsWithHostname, username: &str, auth: AuthMethod, server_check: ServerCheckMethod) -> Result<Self, crate::Error>
 
@@ -120,7 +126,30 @@ impl Russh {
                                     _ = complete_tx.send(Err(anyhow::anyhow!("No mounter item")));
                                     continue;
                                 };
-                                // Handle connect command
+                                let event_tx = event_tx.clone();
+                                let client_item = client_item.clone();
+                                let res = Client::connect(
+                                    (item.uri.as_str(), item.port),
+                                    item.username.as_str(),
+                                    item.auth.clone(),
+                                    item.server_check.clone(),
+                                )
+                                .await;
+                                match res {
+                                    Ok(_client) => {
+                                        _ = complete_tx.send(Ok(()));
+                                        event_tx
+                                            .send(Event::ClientResult(client_item, Ok(true)))
+                                            .unwrap();
+                                    }
+                                    Err(err) => {
+                                        let err_str = err_str(&err);
+                                        _ = complete_tx.send(Err(err));
+                                        event_tx
+                                            .send(Event::ClientResult(client_item, Err(err_str)))
+                                            .unwrap();
+                                    }
+                                }
                             }
                         }
                     }
