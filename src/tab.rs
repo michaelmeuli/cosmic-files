@@ -82,6 +82,7 @@ use crate::{
     menu, mime_app,
     mime_icon::{mime_for_path, mime_icon},
     mounter::MOUNTERS,
+    russh::CLIENTS,
     mouse_area,
     operation::{Controller, OperationError},
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},

@@ -327,6 +327,8 @@ impl MenuAction for NavMenuAction {
 pub enum Message {
     AddToSidebar(Option<Entity>),
     AppTheme(AppTheme),
+    ClientItems(ClientKey, ClientItems),
+    ClientResult(ClientKey, ClientItem, Result<bool, String>),
     CloseToast(widget::ToastId),
     Compress(Option<Entity>),
     Config(Config),
@@ -355,7 +357,6 @@ pub enum Message {
     ModifiersChanged(window::Id, Modifiers),
     MounterItems(MounterKey, MounterItems),
     MountResult(MounterKey, MounterItem, Result<bool, String>),
-    ClientResult(ClientKey, ClientItem, Result<bool, String>),
     NavBarClose(Entity),
     NavBarContext(Entity),
     NavMenuAction(NavMenuAction),
@@ -396,6 +397,8 @@ pub enum Message {
     Preview(Option<Entity>),
     RescanRecents,
     RescanTrash,
+    RemoteAuth(ClientKey, String, ClientAuth, mpsc::Sender<ClientAuth>),
+    RemoteResult(ClientKey, String, Result<bool, String>),
     RemoveFromRecents(Option<Entity>),
     Rename(Option<Entity>),
     ReplaceResult(ReplaceResult),
@@ -6223,14 +6226,30 @@ impl Application for App {
                         MounterMessage::MountResult(item, res) => {
                             Message::MountResult(key, item, res)
                         }
-                        ClientMessage::ClientResult(item, res) => {
-                            Message::ClientResult(key, item, res)
-                        }
                         MounterMessage::NetworkAuth(uri, auth, auth_tx) => {
                             Message::NetworkAuth(key, uri, auth, auth_tx)
                         }
                         MounterMessage::NetworkResult(uri, res) => {
                             Message::NetworkResult(key, uri, res)
+                        }
+                    },
+                ),
+            );
+        }
+
+        for (key, mounter) in CLIENTS.iter() {
+            subscriptions.push(
+                mounter.subscription().with(*key).map(
+                    |(key, mounter_message)| match mounter_message {
+                        ClientMessage::Items(items) => Message::ClientItems(key, items),
+                        ClientMessage::ClientResult(item, res) => {
+                            Message::ClientResult(key, item, res)
+                        }
+                        ClientMessage::RemoteAuth(uri, auth, auth_tx) => {
+                            Message::RemoteAuth(key, uri, auth, auth_tx)
+                        }
+                        ClientMessage::RemoteResult(uri, res) => {
+                            Message::RemoteResult(key, uri, res)
                         }
                     },
                 ),

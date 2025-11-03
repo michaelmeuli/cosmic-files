@@ -15,6 +15,7 @@ use crate::{
     err_str, home_dir,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
+use tokio::runtime::Builder;
 
 fn items(sizes: IconSizes) -> ClientItems {
     let key_path = home_dir().join(".ssh").join("id_rsa");
@@ -31,6 +32,7 @@ fn items(sizes: IconSizes) -> ClientItems {
         username: "mimeul".to_string(),
         auth: auth_method,
         server_check: ServerCheckMethod::NoCheck,
+        client: None,
     }));
     items
 }
@@ -147,7 +149,7 @@ impl Russh {
                                     }
                                     Err(err) => {
                                         let err_str = err_str(&err);
-                                        _ = complete_tx.send(Err(err));
+                                        _ = complete_tx.send(Err(err.into()));
                                         event_tx
                                             .send(Event::ClientResult(client_item, Err(err_str)))
                                             .unwrap();

@@ -12,6 +12,35 @@ use crate::{config::IconSizes, tab};
 #[cfg(feature = "russh")]
 mod russh;
 
+#[derive(Clone)]
+pub struct ClientAuth {
+    pub message: String,
+    pub username_opt: Option<String>,
+    pub domain_opt: Option<String>,
+    pub password_opt: Option<String>,
+    pub remember_opt: Option<bool>,
+    pub anonymous_opt: Option<bool>,
+}
+
+// Custom debug for ClientAuth to hide password
+impl fmt::Debug for ClientAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClientAuth")
+            .field("username_opt", &self.username_opt)
+            .field("domain_opt", &self.domain_opt)
+            .field(
+                "password_opt",
+                if self.password_opt.is_some() {
+                    &"Some(*)"
+                } else {
+                    &"None"
+                },
+            )
+            .field("remember_opt", &self.remember_opt)
+            .field("anonymous_opt", &self.anonymous_opt)
+            .finish()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum ClientItem {
@@ -41,7 +70,7 @@ impl ClientItem {
     pub fn is_mounted(&self) -> bool {
         match self {
             #[cfg(feature = "russh")]
-            Self::Russh(item) => item.is_mounted(),
+            Self::Russh(item) => item.is_connected(),
             Self::None => unreachable!(),
         }
     }
