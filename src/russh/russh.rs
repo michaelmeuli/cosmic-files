@@ -186,7 +186,7 @@ impl Connector for Russh {
         )
     }
 
-    fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
         None
     }
 

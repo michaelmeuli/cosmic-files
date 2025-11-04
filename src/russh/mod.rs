@@ -105,7 +105,7 @@ pub enum ClientMessage {
 
 pub trait Connector: Send + Sync {
     fn connect(&self, item: ClientItem) -> Task<()>;
-    fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
+    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 
