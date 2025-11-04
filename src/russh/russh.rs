@@ -37,11 +37,118 @@ fn items(sizes: IconSizes) -> ClientItems {
     items
 }
 
+fn network_scan(item: Item, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+    let mut path = url.path().to_string();
+    if path.is_empty() {
+        path = "/".into();
+    }
+
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| e.to_string())?;
+    let sftp = SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|e| e.to_string())?;
+    let entries = sftp
+        .read_dir(&path)
+        .await
+        .map_err(|e| format!("read_dir {path}: {e:?}"))?;
+
+    let mut items = Vec::new();
+    for entry in entries {
+        let child_path = PathBuf::from(entry.file_name());
+        let stat = entry.metadata();
+
+        let name = child_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        let is_dir = stat.is_dir();
+
+        let child_uri = {
+            // Rebuild user@host[:port]
+            let mut auth = String::new();
+            if let Some(user) = url.username().strip_prefix("").filter(|u| !u.is_empty()) {
+                auth.push_str(user);
+                if let Some(pass) = url.password() {
+                    let _ = pass; // avoid embedding password in URIs
+                }
+                auth.push('@');
+            }
+            let hostport = match (url.host_str(), url.port()) {
+                (Some(h), Some(p)) => format!("{h}:{p}"),
+                (Some(h), None) => h.to_string(),
+                _ => "localhost".into(),
+            };
+            format!(
+                "{}://{}{}",
+                url.scheme(),
+                auth + &hostport,
+                child_path.to_string_lossy()
+            )
+        };
+
+        let location = Location::Network(child_uri, name.clone(), None);
+
+        let metadata = if is_dir {
+            ItemMetadata::SimpleDir { entries: 0 }
+        } else {
+            ItemMetadata::SimpleFile { size: 0 }
+        };
+
+        let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+            let file_icon = |size| {
+                widget::icon::from_name(if metadata.is_dir() {
+                    "folder"
+                } else {
+                    "text-x-generic"
+                })
+                .size(size)
+                .handle()
+            };
+            (
+                //TODO: get mime from content_type?
+                "inode/directory".parse().unwrap(),
+                file_icon(sizes.grid()),
+                file_icon(sizes.list()),
+                file_icon(sizes.list_condensed()),
+            )
+        };
+
+        items.push(tab::Item {
+            name: name.clone(),
+            is_mount_point: false,
+            display_name: name,
+            metadata,
+            hidden: false,
+            location_opt: Some(location),
+            mime,
+            icon_handle_grid,
+            icon_handle_list,
+            icon_handle_list_condensed,
+            thumbnail_opt: Some(ItemThumbnail::NotImage),
+            button_id: widget::Id::unique(),
+            pos_opt: Cell::new(None),
+            rect_opt: Cell::new(None),
+            selected: false,
+            highlighted: false,
+            overlaps_drag_rect: false,
+            dir_size: DirSize::NotDirectory,
+            cut: false,
+        });
+    }
+    Ok(items)
+}
+
 enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
     Rescan,
     Connect(ClientItem, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
-    NetworkScan(
+    RemoteScan(
         String,
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
@@ -156,6 +263,9 @@ impl Russh {
                                     }
                                 }
                             }
+                            Cmd::RemoteScan(mut uri, sizes, items_tx) => {
+                                let original_uri = uri.clone();
+                            }
                         }
                     }
                 });
@@ -187,7 +297,11 @@ impl Connector for Russh {
     }
 
     fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
-        None
+        let (items_tx, mut items_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
+            .unwrap();
+        items_rx.blocking_recv()
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {
