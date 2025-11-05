@@ -37,6 +37,63 @@ fn items(sizes: IconSizes) -> ClientItems {
     items
 }
 
+fn virtual_network_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
+    struct V {
+        name: String,
+        display_name: String,
+        uri: String,
+    }
+
+    let entries = vec![V {
+        name: "Remote".into(),
+        display_name: "Remote".into(),
+        uri: "ssh://michael@localhost:22/".into(),
+    }];
+
+    let mut items = Vec::new();
+
+    for v in entries {
+        let name = v.name;
+        let uri = v.uri;
+        let display_name = v.display_name;
+        let location = Location::Remote(uri, display_name.clone(), None);
+
+        let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+            let file_icon = |size| widget::icon::from_name("folder").size(size).handle();
+            (
+                //TODO: get mime from content_type?
+                "inode/directory".parse().unwrap(),
+                file_icon(sizes.grid()),
+                file_icon(sizes.list()),
+                file_icon(sizes.list_condensed()),
+            )
+        };
+
+        items.push(tab::Item {
+            name,
+            is_mount_point: false,
+            display_name,
+            metadata: ItemMetadata::SimpleDir { entries: 0 },
+            hidden: false,
+            location_opt: Some(location),
+            mime,
+            icon_handle_grid,
+            icon_handle_list,
+            icon_handle_list_condensed,
+            thumbnail_opt: Some(ItemThumbnail::NotImage),
+            button_id: widget::Id::unique(),
+            pos_opt: Cell::new(None),
+            rect_opt: Cell::new(None),
+            selected: false,
+            highlighted: false,
+            overlaps_drag_rect: false,
+            dir_size: DirSize::NotDirectory,
+            cut: false,
+        });
+    }
+    Ok(items)
+}
+
 fn network_scan(item: Item, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
     let mut path = url.path().to_string();
     if path.is_empty() {
