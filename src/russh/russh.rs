@@ -1,5 +1,8 @@
 use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
+use russh_sftp::client::SftpSession;
+use url::Url;
 
+use cctk::{cosmic_protocols::corner_radius::v1::client, sctk::reexports::calloop::channel};
 use cosmic::{
     Task,
     iced::{Subscription, futures::SinkExt, stream},
@@ -94,26 +97,32 @@ fn virtual_network_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String
     Ok(items)
 }
 
-fn network_scan(item: Item, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+async fn remote_sftp_list(
+    client: &Client,
+    uri: &str,
+    sizes: IconSizes,
+) -> Result<Vec<tab::Item>, String> {
+    // Open a channel
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+
+    let url = Url::parse(uri).map_err(|e| format!("bad uri: {e}"))?;
+
     let mut path = url.path().to_string();
     if path.is_empty() {
         path = "/".into();
     }
 
-    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
-    channel
-        .request_subsystem(true, "sftp")
-        .await
-        .map_err(|e| e.to_string())?;
     let sftp = SftpSession::new(channel.into_stream())
         .await
         .map_err(|e| e.to_string())?;
+
     let entries = sftp
-        .read_dir(&path)
+        .read_dir(path.clone())
         .await
         .map_err(|e| format!("read_dir {path}: {e:?}"))?;
 
-    let mut items = Vec::new();
+    let mut out_items = Vec::new();
+
     for entry in entries {
         let child_path = PathBuf::from(entry.file_name());
         let stat = entry.metadata();
@@ -168,7 +177,7 @@ fn network_scan(item: Item, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, S
                 .handle()
             };
             (
-                //TODO: get mime from content_type?
+                // TODO: get mime from content_type?
                 "inode/directory".parse().unwrap(),
                 file_icon(sizes.grid()),
                 file_icon(sizes.list()),
@@ -176,7 +185,7 @@ fn network_scan(item: Item, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, S
             )
         };
 
-        items.push(tab::Item {
+        out_items.push(tab::Item {
             name: name.clone(),
             is_mount_point: false,
             display_name: name,
@@ -198,7 +207,8 @@ fn network_scan(item: Item, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, S
             cut: false,
         });
     }
-    Ok(items)
+
+    Ok(out_items)
 }
 
 enum Cmd {
@@ -263,6 +273,10 @@ impl Item {
     pub fn path(&self) -> Option<PathBuf> {
         self.path_opt.clone()
     }
+
+    pub fn client(&self) -> Option<Client> {
+        self.client.clone()
+    }
 }
 
 pub struct Russh {
@@ -320,8 +334,29 @@ impl Russh {
                                     }
                                 }
                             }
-                            Cmd::RemoteScan(mut uri, sizes, items_tx) => {
-                                let original_uri = uri.clone();
+                            Cmd::RemoteScan(uri, sizes, items_tx) => {
+                                let items = items(IconSizes::default());
+
+                                for item in items {
+                                    match item.client() {
+                                        Some(client) => {
+                                            match remote_sftp_list(&client, &uri, sizes).await {
+                                                Ok(remote_items) => {
+                                                    items_tx.send(Ok(remote_items)).await;
+                                                }
+                                                Err(e) => {
+                                                    items_tx.send(Err(e)).await;
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            items_tx
+                                                .send(Err("no client available for remote scan"
+                                                    .to_string()))
+                                                .await;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

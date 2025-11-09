@@ -1,3 +1,5 @@
+use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
+
 use cosmic::{Task, iced::Subscription, widget};
 use std::{
     collections::BTreeMap,
@@ -90,6 +92,14 @@ impl ClientItem {
             Self::None => unreachable!(),
         }
     }
+
+    pub fn client(&self) -> Option<Client> {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::Russh(item) => item.client(),
+            Self::None => unreachable!(),
+        }
+    }
 }
 
 pub type ClientItems = Vec<ClientItem>;
@@ -104,6 +114,7 @@ pub enum ClientMessage {
 
 
 pub trait Connector: Send + Sync {
+    fn items(&self, sizes: IconSizes) -> Option<ClientItems>;
     fn connect(&self, item: ClientItem) -> Task<()>;
     fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
     fn subscription(&self) -> Subscription<ClientMessage>;

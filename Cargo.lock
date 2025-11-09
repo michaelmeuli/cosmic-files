@@ -1642,6 +1642,7 @@ dependencies = [
  "procfs",
  "recently-used-xbel",
  "regex",
+ "russh-sftp",
  "rust-embed",
  "serde",
  "shlex",
