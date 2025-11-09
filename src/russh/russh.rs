@@ -102,46 +102,35 @@ async fn remote_sftp_list(
     uri: &str,
     sizes: IconSizes,
 ) -> Result<Vec<tab::Item>, String> {
-    // Open a channel
+    let force_dir = uri.starts_with("ssh:///");
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
-
     let url = Url::parse(uri).map_err(|e| format!("bad uri: {e}"))?;
-
     let mut path = url.path().to_string();
     if path.is_empty() {
         path = "/".into();
     }
-
     let sftp = SftpSession::new(channel.into_stream())
         .await
         .map_err(|e| e.to_string())?;
-
     let entries = sftp
         .read_dir(path.clone())
         .await
         .map_err(|e| format!("read_dir {path}: {e:?}"))?;
-
-    let mut out_items = Vec::new();
-
+    let mut items = Vec::new();
     for entry in entries {
         let child_path = PathBuf::from(entry.file_name());
-        let stat = entry.metadata();
-
+        let info = entry.metadata();
         let name = child_path
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-
-        let is_dir = stat.is_dir();
-
         let child_uri = {
-            // Rebuild user@host[:port]
             let mut auth = String::new();
             if let Some(user) = url.username().strip_prefix("").filter(|u| !u.is_empty()) {
                 auth.push_str(user);
                 if let Some(pass) = url.password() {
-                    let _ = pass; // avoid embedding password in URIs
+                    let _ = pass;
                 }
                 auth.push('@');
             }
@@ -157,13 +146,31 @@ async fn remote_sftp_list(
                 child_path.to_string_lossy()
             )
         };
-
         let location = Location::Network(child_uri, name.clone(), None);
 
-        let metadata = if is_dir {
-            ItemMetadata::SimpleDir { entries: 0 }
+        let metadata = if !force_dir {
+            let mtime = info
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            let is_dir = info.is_dir();
+            let size_opt = (!is_dir).then_some(info.size);
+            let mut children_opt = None;
+            if is_dir {
+                // Cannot map remote SFTP entries to a local filesystem path here,
+                // so avoid using a non-existent `file` variable; leave a safe default.
+                // TODO: consider querying the SFTP session for child count asynchronously.
+                children_opt = Some(0);
+            }
+            // TODO: ItemMetadata::Russh
+            ItemMetadata::GvfsPath {
+                mtime,
+                size_opt,
+                children_opt,
+            }
         } else {
-            ItemMetadata::SimpleFile { size: 0 }
+            ItemMetadata::SimpleDir { entries: 0 }
         };
 
         let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
@@ -185,7 +192,7 @@ async fn remote_sftp_list(
             )
         };
 
-        out_items.push(tab::Item {
+        items.push(tab::Item {
             name: name.clone(),
             is_mount_point: false,
             display_name: name,
@@ -208,7 +215,7 @@ async fn remote_sftp_list(
         });
     }
 
-    Ok(out_items)
+    Ok(items)
 }
 
 enum Cmd {
