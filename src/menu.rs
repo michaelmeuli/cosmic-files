@@ -109,12 +109,14 @@ pub fn context_menu<'a>(
     let mut selected_desktop_entry = None;
     let mut selected_types: Vec<Mime> = vec![];
     let mut selected_mount_point = 0;
+    let mut selected_client_point = 0;
     if let Some(items) = tab.items_opt() {
         for item in items {
             if item.selected {
                 selected += 1;
                 if item.metadata.is_dir() {
                     selected_mount_point += i32::from(item.is_mount_point);
+                    selected_client_point += i32::from(item.is_client_point);
                     selected_dir += 1;
                 }
                 match &item.location_opt {
@@ -200,7 +202,7 @@ pub fn context_menu<'a>(
                         .push(menu_item(fl!("open-in-new-window"), Action::OpenInNewWindow).into());
                 }
                 children.push(divider::horizontal::light().into());
-                if selected_mount_point == 0 {
+                if selected_mount_point == 0 && selected_client_point == 0 {
                     children.push(menu_item(fl!("rename"), Action::Rename).into());
                     children.push(menu_item(fl!("cut"), Action::Cut).into());
                 }
@@ -229,7 +231,7 @@ pub fn context_menu<'a>(
                     );
                     children.push(divider::horizontal::light().into());
                 }
-                if selected_mount_point == 0 {
+                if selected_mount_point == 0 && selected_client_point == 0 {
                     if modifiers.shift() && !modifiers.control() {
                         children.push(
                             menu_item(fl!("delete-permanently"), Action::PermanentlyDelete).into(),

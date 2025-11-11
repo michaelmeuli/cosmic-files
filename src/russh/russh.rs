@@ -75,6 +75,7 @@ fn virtual_network_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String
         items.push(tab::Item {
             name,
             is_mount_point: false,
+            is_client_point: true,
             display_name,
             metadata: ItemMetadata::SimpleDir { entries: 0 },
             hidden: false,
@@ -153,9 +154,10 @@ async fn remote_sftp_list(
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs());
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let is_dir = info.is_dir();
-            let size_opt = (!is_dir).then_some(info.size);
+            let size_opt = (!is_dir).then_some(info.size).flatten();
             let mut children_opt = None;
             if is_dir {
                 // Cannot map remote SFTP entries to a local filesystem path here,

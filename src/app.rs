@@ -466,6 +466,7 @@ pub enum ContextPage {
     About,
     EditHistory,
     NetworkDrive,
+    RemoteDrive,
     Preview(Option<Entity>, PreviewKind),
     Settings,
 }
@@ -527,8 +528,19 @@ pub enum DialogPage {
         auth: MounterAuth,
         auth_tx: mpsc::Sender<MounterAuth>,
     },
+    RemoteAuth {
+        client_key: ClientKey,
+        uri: String,
+        auth: ClientAuth,
+        auth_tx: mpsc::Sender<ClientAuth>,
+    },
     NetworkError {
         mounter_key: MounterKey,
+        uri: String,
+        error: String,
+    },
+    RemoteError {
+        client_key: ClientKey,
         uri: String,
         error: String,
     },
@@ -697,6 +709,7 @@ pub struct App {
     mime_app_cache: MimeAppCache,
     modifiers: Modifiers,
     mounter_items: FxHashMap<MounterKey, MounterItems>,
+    client_items: FxHashMap<ClientKey, ClientItems>,
     must_save_sort_names: bool,
     network_drive_connecting: Option<(MounterKey, String)>,
     network_drive_input: String,
@@ -2169,6 +2182,7 @@ impl Application for App {
             mime_app_cache: MimeAppCache::new(),
             modifiers: Modifiers::empty(),
             mounter_items: FxHashMap::default(),
+            client_items: FxHashMap::default(),
             must_save_sort_names: false,
             network_drive_connecting: None,
             network_drive_input: String::new(),
@@ -2834,6 +2848,17 @@ impl Application for App {
                                 cosmic::action::none()
                             }));
                         }
+                        DialogPage::RemoteAuth {
+                            client_key: _,
+                            uri: _,
+                            auth,
+                            auth_tx,
+                        } => {
+                            tasks.push(Task::future(async move {
+                                auth_tx.send(auth).await.unwrap();
+                                cosmic::action::none()
+                            }));
+                        }
                         DialogPage::NetworkError {
                             mounter_key: _,
                             uri,
@@ -2842,6 +2867,14 @@ impl Application for App {
                             //TODO: re-use mounter_key?
                             tasks.push(self.update(Message::NetworkDriveInput(uri)));
                             tasks.push(self.update(Message::NetworkDriveSubmit));
+                        }
+                        DialogPage::RemoteError {
+                            client_key: _,
+                            uri,
+                            error: _,
+                        } => {
+                            tasks.push(self.update(Message::RemoteDriveInput(uri)));
+                            tasks.push(self.update(Message::RemoteDriveSubmit));
                         }
                         DialogPage::NewItem { parent, name, dir } => {
                             let path = parent.join(name);
@@ -3115,6 +3148,11 @@ impl Application for App {
 
                 return Task::batch(commands);
             }
+            Message::ClientItems(client_key, client_items) => {
+                self.client_items.insert(client_key, client_items);
+                // Update nav bar
+                self.update_nav_model();
+            }
             Message::MountResult(mounter_key, item, res) => match res {
                 Ok(true) => {
                     log::info!("connected to {item:?}");
@@ -3164,6 +3202,17 @@ impl Application for App {
                     Some(self.dialog_text_input.clone()),
                 );
             }
+            Message::RemoteAuth(client_key, uri, auth, auth_tx) => {
+                return self.push_dialog(
+                    DialogPage::RemoteAuth {
+                        client_key,
+                        uri,
+                        auth,
+                        auth_tx,
+                    },
+                    Some(self.dialog_text_input.clone()),
+                );
+            }
             Message::NetworkDriveInput(input) => {
                 self.network_drive_input = input;
             }
@@ -3203,6 +3252,27 @@ impl Application for App {
                         log::warn!("failed to connect to {uri:?}: {error}");
                         return self.dialog_pages.push_back(DialogPage::NetworkError {
                             mounter_key,
+                            uri,
+                            error,
+                        });
+                    }
+                }
+            }
+            Message::RemoteResult(client_key, uri, res) => {
+                match res {
+                    Ok(true) => {
+                        log::info!("connected to {uri:?}");
+                        if matches!(self.context_page, ContextPage::RemoteDrive) {
+                            self.set_show_context(false);
+                        }
+                    }
+                    Ok(false) => {
+                        log::info!("cancelled connection to {uri:?}");
+                    }
+                    Err(error) => {
+                        log::warn!("failed to connect to {uri:?}: {error}");
+                        return self.dialog_pages.push_back(DialogPage::RemoteError {
+                            client_key: client_key,
                             uri,
                             error,
                         });
@@ -5130,6 +5200,135 @@ impl Application for App {
                                 mounter_key: *mounter_key,
                                 uri: uri.clone(),
                                 auth: MounterAuth {
+                                    anonymous_opt: Some(true),
+                                    ..auth.clone()
+                                },
+                                auth_tx: auth_tx.clone(),
+                            }),
+                        ),
+                    );
+                }
+
+                widget
+            }
+            DialogPage::RemoteAuth {
+                client_key,
+                uri,
+                auth,
+                auth_tx,
+            } => {
+                //TODO: use URI!
+                let mut controls = widget::column::with_capacity(4);
+                let mut id_assigned = false;
+
+                if let Some(username) = &auth.username_opt {
+                    //TODO: what should submit do?
+                    let mut input = widget::text_input(fl!("username"), username)
+                        .on_input(move |value| {
+                            Message::DialogUpdate(DialogPage::RemoteAuth {
+                                client_key: *client_key,
+                                uri: uri.clone(),
+                                auth: ClientAuth {
+                                    username_opt: Some(value),
+                                    ..auth.clone()
+                                },
+                                auth_tx: auth_tx.clone(),
+                            })
+                        })
+                        .on_submit(|_| Message::DialogComplete);
+                    if !id_assigned {
+                        input = input.id(self.dialog_text_input.clone());
+                        id_assigned = true;
+                    }
+                    controls = controls.push(input);
+                }
+
+                if let Some(domain) = &auth.domain_opt {
+                    //TODO: what should submit do?
+                    let mut input = widget::text_input(fl!("domain"), domain)
+                        .on_input(move |value| {
+                            Message::DialogUpdate(DialogPage::RemoteAuth {
+                                client_key: *client_key,
+                                uri: uri.clone(),
+                                auth: ClientAuth {
+                                    domain_opt: Some(value),
+                                    ..auth.clone()
+                                },
+                                auth_tx: auth_tx.clone(),
+                            })
+                        })
+                        .on_submit(|_| Message::DialogComplete);
+                    if !id_assigned {
+                        input = input.id(self.dialog_text_input.clone());
+                        id_assigned = true;
+                    }
+                    controls = controls.push(input);
+                }
+
+                if let Some(password) = &auth.password_opt {
+                    //TODO: what should submit do?
+                    //TODO: button for showing password
+                    let mut input = widget::secure_input(fl!("password"), password, None, true)
+                        .on_input(move |value| {
+                            Message::DialogUpdate(DialogPage::RemoteAuth {
+                                client_key: *client_key,
+                                uri: uri.clone(),
+                                auth: ClientAuth {
+                                    password_opt: Some(value),
+                                    ..auth.clone()
+                                },
+                                auth_tx: auth_tx.clone(),
+                            })
+                        })
+                        .on_submit(|_| Message::DialogComplete);
+                    if !id_assigned {
+                        input = input.id(self.dialog_text_input.clone());
+                    }
+                    controls = controls.push(input);
+                }
+
+                if let Some(remember) = &auth.remember_opt {
+                    //TODO: what should submit do?
+                    //TODO: button for showing password
+                    controls = controls.push(
+                        widget::checkbox(fl!("remember-password"), *remember).on_toggle(
+                            move |value| {
+                                Message::DialogUpdate(DialogPage::RemoteAuth {
+                                    client_key: *client_key,
+                                    uri: uri.clone(),
+                                    auth: ClientAuth {
+                                        remember_opt: Some(value),
+                                        ..auth.clone()
+                                    },
+                                    auth_tx: auth_tx.clone(),
+                                })
+                            },
+                        ),
+                    );
+                }
+
+                let mut parts = auth.message.splitn(2, '\n');
+                let title = parts.next().unwrap_or_default();
+                let body = parts.next().unwrap_or_default();
+
+                let mut widget = widget::dialog()
+                    .title(title)
+                    .body(body)
+                    .control(controls.spacing(space_s))
+                    .primary_action(
+                        widget::button::suggested(fl!("connect")).on_press(Message::DialogComplete),
+                    )
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    );
+
+                if let Some(_anonymous) = &auth.anonymous_opt {
+                    widget = widget.tertiary_action(
+                        widget::button::text(fl!("connect-anonymously")).on_press(
+                            Message::DialogUpdateComplete(DialogPage::RemoteAuth {
+                                client_key: *client_key,
+                                uri: uri.clone(),
+                                auth: ClientAuth {
                                     anonymous_opt: Some(true),
                                     ..auth.clone()
                                 },

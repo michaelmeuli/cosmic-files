@@ -669,6 +669,7 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
         name: file_name.into(),
         display_name,
         is_mount_point: false,
+        is_client_point: false,
         metadata: ItemMetadata::GvfsPath {
             mtime,
             size_opt,
@@ -815,6 +816,7 @@ pub fn item_from_entry(
         name,
         display_name,
         is_mount_point: false,
+        is_client_point: false,
         metadata: ItemMetadata::Path {
             metadata,
             children_opt,
@@ -1106,6 +1108,7 @@ pub fn scan_trash(sizes: IconSizes) -> Vec<Item> {
                 name,
                 display_name,
                 is_mount_point: false,
+                is_client_point: false,
                 metadata: ItemMetadata::Trash { metadata, entry },
                 hidden: false,
                 location_opt: None,
@@ -1288,6 +1291,7 @@ pub fn scan_desktop(
             name,
             display_name,
             is_mount_point: false,
+            is_client_point: false,
             metadata,
             hidden: false,
             location_opt: Some(Location::Trash),
@@ -1656,6 +1660,12 @@ pub enum ItemMetadata {
         size_opt: Option<u64>,
         children_opt: Option<usize>,
     },
+    #[cfg(feature = "russh")]
+    RusshPath {
+        mtime: u64,
+        size_opt: Option<u64>,
+        children_opt: Option<usize>,
+    },
 }
 
 impl ItemMetadata {
@@ -1670,6 +1680,8 @@ impl ItemMetadata {
             Self::SimpleFile { .. } => false,
             #[cfg(feature = "gvfs")]
             Self::GvfsPath { children_opt, .. } => children_opt.is_some(),
+            #[cfg(feature = "russh")]
+            Self::RusshPath { children_opt, .. } => children_opt.is_some(),
         }
     }
 
@@ -1678,6 +1690,10 @@ impl ItemMetadata {
             Self::Path { metadata, .. } => metadata.modified().ok(),
             #[cfg(feature = "gvfs")]
             Self::GvfsPath { mtime, .. } => {
+                Some(SystemTime::UNIX_EPOCH + Duration::from_secs(*mtime))
+            }
+            #[cfg(feature = "russh")]
+            Self::RusshPath { mtime, .. } => {
                 Some(SystemTime::UNIX_EPOCH + Duration::from_secs(*mtime))
             }
             _ => None,
@@ -1693,6 +1709,8 @@ impl ItemMetadata {
             },
             #[cfg(feature = "gvfs")]
             Self::GvfsPath { size_opt, .. } => *size_opt,
+            #[cfg(feature = "russh")]
+            Self::RusshPath { size_opt, .. } => *size_opt,
             _ => None,
         }
     }
@@ -2018,6 +2036,7 @@ impl ItemThumbnail {
 pub struct Item {
     pub name: String,
     pub is_mount_point: bool,
+    pub is_client_point: bool,
     pub display_name: String,
     pub metadata: ItemMetadata,
     pub hidden: bool,
@@ -4042,6 +4061,15 @@ impl Tab {
                             Some(child_count) => (true, *child_count as u64),
                             None => (false, size_opt.unwrap_or_default()),
                         },
+                        #[cfg(feature = "russh")]
+                        ItemMetadata::RusshPath {
+                            size_opt,
+                            children_opt,
+                            ..
+                        } => match children_opt {
+                            Some(child_count) => (true, *child_count as u64),
+                            None => (false, size_opt.unwrap_or_default()),
+                        },
                     };
                     let (a_is_entry, a_size) = get_size(a.1);
                     let (b_is_entry, b_size) = get_size(b.1);
@@ -5149,6 +5177,21 @@ impl Tab {
                         ItemMetadata::SimpleFile { size } => format_size(*size),
                         #[cfg(feature = "gvfs")]
                         ItemMetadata::GvfsPath {
+                            size_opt,
+                            children_opt,
+                            ..
+                        } => match children_opt {
+                            Some(child_count) => {
+                                if *child_count == 1 {
+                                    format!("{child_count} item")
+                                } else {
+                                    format!("{child_count} items")
+                                }
+                            }
+                            None => format_size(size_opt.unwrap_or_default()),
+                        },
+                        #[cfg(feature = "russh")]
+                        ItemMetadata::RusshPath {
                             size_opt,
                             children_opt,
                             ..
