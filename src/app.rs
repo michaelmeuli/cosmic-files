@@ -401,6 +401,14 @@ pub enum Message {
     RescanRecents,
     RescanTrash,
     RemoteAuth(ClientKey, String, ClientAuth, mpsc::Sender<ClientAuth>),
+    RemoteDriveInput(String),
+    RemoteDriveOpenEntityAfterMount {
+        entity: Entity,
+    },
+    RemoteDriveOpenTabAfterMount {
+        location: Location,
+    },
+    RemoteDriveSubmit,
     RemoteResult(ClientKey, String, Result<bool, String>),
     RemoveFromRecents(Option<Entity>),
     Rename(Option<Entity>),
@@ -713,6 +721,8 @@ pub struct App {
     must_save_sort_names: bool,
     network_drive_connecting: Option<(MounterKey, String)>,
     network_drive_input: String,
+    remote_drive_connecting: Option<(ClientKey, String)>,
+    remote_drive_input: String,
     #[cfg(feature = "notify")]
     notification_opt: Option<Arc<Mutex<notify_rust::NotificationHandle>>>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -2186,6 +2196,8 @@ impl Application for App {
             must_save_sort_names: false,
             network_drive_connecting: None,
             network_drive_input: String::new(),
+            remote_drive_connecting: None,
+            remote_drive_input: String::new(),
             #[cfg(feature = "notify")]
             notification_opt: None,
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -3216,6 +3228,9 @@ impl Application for App {
             Message::NetworkDriveInput(input) => {
                 self.network_drive_input = input;
             }
+            Message::RemoteDriveInput(input) => {
+                self.remote_drive_input = input;
+            }
             Message::NetworkDriveSubmit => {
                 //TODO: know which mounter to use for network drives
                 if let Some((mounter_key, mounter)) = MOUNTERS.iter().next() {
@@ -3228,6 +3243,20 @@ impl Application for App {
                 log::warn!(
                     "no mounter found for connecting to {:?}",
                     self.network_drive_input
+                );
+            }
+            Message::RemoteDriveSubmit => {
+                //TODO: know which client to use for remote drives
+                if let Some((client_key, client)) = CLIENTS.iter().next() {
+                    self.remote_drive_connecting =
+                        Some((*client_key, self.remote_drive_input.clone()));
+                    return client
+                        .remote_drive(self.remote_drive_input.clone())
+                        .map(|()| cosmic::action::none());
+                }
+                log::warn!(
+                    "no client found for connecting to {:?}",
+                    self.remote_drive_input
                 );
             }
             Message::NetworkResult(mounter_key, uri, res) => {
@@ -4804,7 +4833,13 @@ impl Application for App {
             Message::NetworkDriveOpenEntityAfterMount { entity } => {
                 return self.on_nav_select(entity);
             }
+            Message::RemoteDriveOpenEntityAfterMount { entity } => {
+                return self.on_nav_select(entity);
+            }
             Message::NetworkDriveOpenTabAfterMount { location } => {
+                return self.open_tab(location, false, None);
+            }
+            Message::RemoteDriveOpenTabAfterMount { location } => {
                 return self.open_tab(location, false, None);
             }
         }
@@ -4842,6 +4877,28 @@ impl Application for App {
                 context_drawer::context_drawer(
                     self.network_drive(),
                     Message::ToggleContextPage(ContextPage::NetworkDrive),
+                )
+                .title(fl!("add-network-drive"))
+                .header(text_input)
+                .footer(widget::row::with_children([
+                    widget::horizontal_space().into(),
+                    button.into(),
+                ]))
+            }
+            ContextPage::RemoteDrive => {
+                let mut text_input =
+                    widget::text_input(fl!("enter-server-address"), &self.remote_drive_input);
+                let button = if self.remote_drive_connecting.is_some() {
+                    widget::button::standard(fl!("connecting"))
+                } else {
+                    text_input = text_input
+                        .on_input(Message::RemoteDriveInput)
+                        .on_submit(|_| Message::RemoteDriveSubmit);
+                    widget::button::standard(fl!("connect")).on_press(Message::RemoteDriveSubmit)
+                };
+                context_drawer::context_drawer(
+                    self.remote_drive(),
+                    Message::ToggleContextPage(ContextPage::RemoteDrive),
                 )
                 .title(fl!("add-network-drive"))
                 .header(text_input)
@@ -5342,6 +5399,20 @@ impl Application for App {
             }
             DialogPage::NetworkError {
                 mounter_key: _,
+                uri: _,
+                error,
+            } => widget::dialog()
+                .title(fl!("network-drive-error"))
+                .body(error)
+                .icon(icon::from_name("dialog-error").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("try-again")).on_press(Message::DialogComplete),
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
+            DialogPage::RemoteError {
+                client_key: _,
                 uri: _,
                 error,
             } => widget::dialog()

@@ -197,6 +197,7 @@ async fn remote_sftp_list(
         items.push(tab::Item {
             name: name.clone(),
             is_mount_point: false,
+            is_client_point: true,
             display_name: name,
             metadata,
             hidden: false,
