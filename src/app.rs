@@ -1716,6 +1716,38 @@ impl App {
         .into()
     }
 
+    fn remote_drive(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxs, space_m, ..
+        } = theme::active().cosmic().spacing;
+        let mut table = widget::column::with_capacity(8);
+        for (i, line) in fl!("network-drive-schemes").lines().enumerate() {
+            let mut row = widget::row::with_capacity(2);
+            for part in line.split(',') {
+                row = row.push(
+                    widget::container(if i == 0 {
+                        widget::text::heading(part.to_string())
+                    } else {
+                        widget::text::body(part.to_string())
+                    })
+                    .width(Length::Fill)
+                    .padding(space_xxs),
+                );
+            }
+            table = table.push(row);
+            if i == 0 {
+                table = table.push(widget::divider::horizontal::light());
+            }
+        }
+        widget::column::with_children([
+            widget::text::body(fl!("network-drive-description")).into(),
+            table.into(),
+        ])
+        .spacing(space_m)
+        .into()
+    }
+
+
     fn desktop_view_options(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_m, space_l, ..
