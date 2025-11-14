@@ -3913,12 +3913,13 @@ impl Application for App {
             }
             Message::TabNext => {
                 let len = self.tab_model.len();
-                let pos = self
+                let pos = (self
                     .tab_model
                     .position(self.tab_model.active())
                     .expect("should always be at least one tab open")
+                    + 1)
                     // Wraparound to 0 if i + 1 > num of tabs
-                    + 1 % len as u16;
+                    % len as u16;
 
                 let entity = self.tab_model.entity_at(pos);
                 if let Some(entity) = entity {
@@ -3988,12 +3989,6 @@ impl Application for App {
 
             Message::TabMessage(entity_opt, tab_message) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
-
-                //TODO: move to Task?
-                if let tab::Message::ContextMenu(_point_opt, _) = tab_message {
-                    // Disable side context page
-                    self.set_show_context(false);
-                }
 
                 let tab_commands = match self.tab_model.data_mut::<Tab>(entity) {
                     Some(tab) => tab.update(tab_message, self.modifiers),

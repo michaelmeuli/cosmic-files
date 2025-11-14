@@ -46,7 +46,7 @@ use icu::{
     },
     locale::preferences::extensions::unicode::keywords::HourCycle,
 };
-use image::ImageDecoder;
+use image::{DynamicImage, ImageDecoder, ImageReader};
 use jxl_oxide::integration::JxlDecoder;
 use mime_guess::{Mime, mime};
 use rustc_hash::FxHashMap;
@@ -570,6 +570,36 @@ pub fn fs_kind(_metadata: &Metadata) -> FsKind {
     FsKind::Local
 }
 
+fn get_desktop_file_display_name(path: &Path) -> Option<String> {
+    let entry = match freedesktop_entry_parser::parse_entry(path) {
+        Ok(ok) => ok,
+        Err(err) => {
+            log::warn!("failed to parse {}: {}", path.display(), err);
+            return None;
+        }
+    };
+
+    entry
+        .section("Desktop Entry")
+        .attr("Name")
+        .map(str::to_string)
+}
+
+fn get_desktop_file_icon(path: &Path) -> Option<String> {
+    let entry = match freedesktop_entry_parser::parse_entry(path) {
+        Ok(ok) => ok,
+        Err(err) => {
+            log::warn!("failed to parse {}: {}", path.display(), err);
+            return None;
+        }
+    };
+
+    entry
+        .section("Desktop Entry")
+        .attr("Icon")
+        .map(str::to_string)
+}
+
 pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
     let entry = match freedesktop_entry_parser::parse_entry(path) {
         Ok(ok) => ok,
@@ -578,16 +608,24 @@ pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
             return (None, None);
         }
     };
+    let section = entry.section("Desktop Entry");
     (
-        entry
-            .section("Desktop Entry")
-            .attr("Name")
-            .map(str::to_string),
-        entry
-            .section("Desktop Entry")
-            .attr("Icon")
-            .map(str::to_string),
+        section.attr("Name").map(str::to_string),
+        section.attr("Icon").map(str::to_string),
     )
+}
+
+fn display_name_for_file(path: &Path, name: &str, get_from_gvfs: bool, is_desktop: bool) -> String {
+    if is_desktop {
+        return get_desktop_file_display_name(path).map_or_else(
+            || Item::display_name(name),
+            |desktop_name| Item::display_name(desktop_name.as_str()),
+        );
+    } else if get_from_gvfs {
+        #[cfg(feature = "gvfs")]
+        return Item::display_name(glib::filename_display_name(path).as_str())
+    }
+    Item::display_name(name)
 }
 
 #[cfg(feature = "gvfs")]
@@ -596,7 +634,7 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
         .attribute_as_string(gio::FILE_ATTRIBUTE_STANDARD_NAME)
         .unwrap_or_default();
     let mtime = file_info.attribute_uint64(gio::FILE_ATTRIBUTE_TIME_MODIFIED);
-    let mut display_name = Item::display_name(&file_info.display_name());
+    let mut is_desktop = false;
     let remote = file_info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE);
     let is_dir = matches!(file_info.file_type(), gio::FileType::Directory);
 
@@ -617,11 +655,8 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
 
         //TODO: clean this up, implement for trash
         let icon_name_opt = if mime == "application/x-desktop" {
-            let (desktop_name_opt, icon_name_opt) = parse_desktop_file(&path);
-            if let Some(desktop_name) = desktop_name_opt {
-                display_name = Item::display_name(&desktop_name);
-            }
-            icon_name_opt
+            is_desktop = true;
+            get_desktop_file_icon(&path)
         } else {
             None
         };
@@ -663,6 +698,7 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
         }
     }
 
+    let display_name = display_name_for_file(&path, &file_info.display_name(), false, is_desktop);
     let hidden = file_name.starts_with('.');
 
     Item {
@@ -703,7 +739,8 @@ pub fn item_from_entry(
     metadata: fs::Metadata,
     sizes: IconSizes,
 ) -> Item {
-    let mut display_name = Item::display_name(&name);
+    let mut is_desktop = false;
+    let mut is_gvfs = false;
 
     let hidden = name.starts_with('.') || hidden_attribute(&metadata);
 
@@ -712,20 +749,8 @@ pub fn item_from_entry(
         FsKind::Remote => true,
         #[cfg(feature = "gvfs")]
         FsKind::Gvfs => {
+            is_gvfs = true;
             let file = gio::File::for_path(&path);
-            match gio::prelude::FileExt::query_info(
-                &file,
-                gio::FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
-                gio::FileQueryInfoFlags::NONE,
-                gio::Cancellable::NONE,
-            ) {
-                Ok(info) => {
-                    display_name = Item::display_name(&info.display_name());
-                }
-                Err(err) => {
-                    log::warn!("failed to get GIO info for {}: {}", path.display(), err);
-                }
-            }
 
             match gio::prelude::FileExt::query_filesystem_info(
                 &file,
@@ -766,11 +791,8 @@ pub fn item_from_entry(
             let mime = mime_for_path(&path, Some(&metadata), remote);
             //TODO: clean this up, implement for trash
             let icon_name_opt = if mime == "application/x-desktop" {
-                let (desktop_name_opt, icon_name_opt) = parse_desktop_file(&path);
-                if let Some(desktop_name) = desktop_name_opt {
-                    display_name = Item::display_name(&desktop_name);
-                }
-                icon_name_opt
+                is_desktop = true;
+                get_desktop_file_icon(&path)
             } else {
                 None
             };
@@ -812,6 +834,8 @@ pub fn item_from_entry(
         }
     }
 
+    let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
+
     Item {
         name,
         display_name,
@@ -839,9 +863,8 @@ pub fn item_from_entry(
     }
 }
 
-pub fn item_from_path<P: Into<PathBuf>>(path: P, sizes: IconSizes) -> Result<Item, String> {
-    let path = path.into();
-    let name = match path.file_name() {
+fn get_filename_from_path(path: &Path) -> Result<String, String> {
+    Ok(match path.file_name() {
         Some(name_os) => name_os
             .to_str()
             .ok_or_else(|| {
@@ -852,7 +875,12 @@ pub fn item_from_path<P: Into<PathBuf>>(path: P, sizes: IconSizes) -> Result<Ite
             })?
             .to_string(),
         None => fl!("filesystem"),
-    };
+    })
+}
+
+pub fn item_from_path<P: Into<PathBuf>>(path: P, sizes: IconSizes) -> Result<Item, String> {
+    let path = path.into();
+    let name = get_filename_from_path(&path)?;
     let metadata = fs::metadata(&path)
         .map_err(|err| format!("failed to read metadata for {}: {}", path.display(), err))?;
     Ok(item_from_entry(path, name, metadata, sizes))
@@ -1984,10 +2012,9 @@ impl ItemThumbnail {
                 Ok(status) => {
                     if status.success() {
                         match image::ImageReader::open(file.path())
-                            .and_then(image::ImageReader::with_guessed_format)
+                            .and_then(ImageReader::with_guessed_format)
                         {
-                            Ok(reader) => match reader.decode().map(image::DynamicImage::into_rgb8)
-                            {
+                            Ok(reader) => match reader.decode().map(DynamicImage::into_rgba8) {
                                 Ok(image) => {
                                     return Some((
                                         Self::Image(
@@ -2524,10 +2551,12 @@ fn folder_name<P: AsRef<Path>>(path: P) -> (String, bool) {
                 found_home = true;
                 fl!("home")
             } else {
-                // This is not optimized but it helps ensure the same display names
-                match item_from_path(path, IconSizes::default()) {
-                    Ok(item) => item.display_name,
-                    Err(_err) => name.to_string_lossy().into_owned(),
+                match (get_filename_from_path(path), fs::metadata(path)) {
+                    (Ok(name), Ok(metadata)) => {
+                        let is_gvfs = fs_kind(&metadata) == FsKind::Gvfs;
+                        display_name_for_file(path, &name, is_gvfs, false)
+                    }
+                    _ => name.to_string_lossy().into_owned(),
                 }
             }
         }
