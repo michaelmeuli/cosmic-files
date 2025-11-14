@@ -312,7 +312,7 @@ impl Russh {
                                     .send(Event::Items(items(IconSizes::default())))
                                     .unwrap();
                             }
-                            Cmd::Connect(client_item, complete_tx) => {
+                            Cmd::Connect(mut client_item, complete_tx) => {
                                 let ClientItem::Russh(ref mut item) = client_item else {
                                     _ = complete_tx.send(Err(anyhow::anyhow!("No client item")));
                                     continue;
@@ -367,6 +367,16 @@ impl Russh {
                                         }
                                     }
                                 }
+                            }
+                            Cmd::Disconnect(mut client_item) => {
+                                let ClientItem::Russh(ref mut item) = client_item else {
+                                    continue;
+                                };
+                                if let Some(client) = &item.client {
+                                    let _ = client.disconnect().await;
+                                }
+                                item.is_connected = false;
+                                item.client = None;
                             }
                         }
                     }
