@@ -9,7 +9,7 @@ use cosmic::{
     widget,
 };
 use gio::{glib, prelude::*};
-use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
+use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, result, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
@@ -225,6 +225,7 @@ enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
     Rescan,
     Connect(ClientItem, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
+    RemoteDrive(String, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
     RemoteScan(
         String,
         IconSizes,
@@ -263,7 +264,7 @@ impl Item {
         self.name.clone()
     }
 
-    pub fn is_connected(&self) -> bool {
+    pub const fn is_connected(&self) -> bool {
         self.is_connected
     }
 
@@ -284,8 +285,12 @@ impl Item {
         self.path_opt.clone()
     }
 
-    pub fn client(&self) -> Option<Client> {
+    pub fn get_client(&self) -> Option<Client> {
         self.client.clone()
+    }
+
+    pub fn set_client(&mut self, client: Client) {
+        self.client = Some(client);
     }
 }
 
@@ -318,7 +323,6 @@ impl Russh {
                                     continue;
                                 };
                                 let event_tx = event_tx.clone();
-                                let client_item = client_item.clone();
                                 let res = Client::connect(
                                     (item.uri.as_str(), item.port),
                                     item.username.as_str(),
@@ -344,11 +348,94 @@ impl Russh {
                                     }
                                 }
                             }
+                            Cmd::RemoteDrive(uri, result_tx) => {
+                                let event_tx = event_tx.clone();
+                                let uri_clone = uri.clone();
+
+                                let mut result_tx_opt = Some(result_tx);
+
+                                let mut result_for_event: Result<bool, String> =
+                                    Err("uninitialized".into());
+
+                                let mut found_client = false;
+                                let client_items = items(IconSizes::default());
+                                for mut client_item in client_items {
+                                    match client_item.get_client() {
+                                        Some(client) => {
+                                            let ClientItem::Russh(ref mut item) = client_item else {
+                                                continue;
+                                            };
+                                            found_client = true;
+                                            if client.is_closed() {
+                                                log::info!(
+                                                    "RemoteDrive: client is closed, reconnecting…"
+                                                );
+                                                match Client::connect(
+                                                    (item.uri.as_str(), item.port),
+                                                    item.username.as_str(),
+                                                    item.auth.clone(),
+                                                    item.server_check.clone(),
+                                                )
+                                                .await
+                                                {
+                                                    Ok(new_client) => {
+                                                        client_item.set_client(new_client.clone());
+                                                        log::info!(
+                                                            "RemoteDrive: reconnected successfully"
+                                                        );
+
+                                                        if let Some(tx) = result_tx_opt.take() {
+                                                            _ = tx.send(Ok(()));
+                                                        }
+                                                        result_for_event = Ok(true);
+                                                    }
+                                                    Err(err) => {
+                                                        let err_str =
+                                                            format!("Reconnect failed: {err}");
+
+                                                        if let Some(tx) = result_tx_opt.take() {
+                                                            _ = tx.send(Err(anyhow::anyhow!(
+                                                                err_str.clone()
+                                                            )));
+                                                        }
+                                                        result_for_event = Err(err_str);
+                                                    }
+                                                }
+                                            } else {
+                                                log::info!(
+                                                    "RemoteDrive {uri}: client already connected"
+                                                );
+                                                if let Some(tx) = result_tx_opt.take() {
+                                                    _ = tx.send(Ok(()));
+                                                }
+                                                result_for_event = Ok(true);
+                                            }
+                                            break;
+                                        }
+                                        None => continue,
+                                    }
+                                }
+
+                                if !found_client {
+                                    let err_str =
+                                        "no client available for remote drive".to_string();
+
+                                    if let Some(tx) = result_tx_opt.take() {
+                                        _ = tx.send(Err(anyhow::anyhow!(err_str.clone())));
+                                    }
+
+                                    result_for_event = Err(err_str);
+                                }
+
+                                event_tx
+                                    .send(Event::RemoteResult(uri_clone, result_for_event))
+                                    .unwrap();
+                            }
                             Cmd::RemoteScan(uri, sizes, items_tx) => {
                                 let items = items(IconSizes::default());
 
                                 for item in items {
-                                    match item.client() {
+                                    match item.get_client() {
                                         Some(client) => {
                                             match remote_sftp_list(&client, &uri, sizes).await {
                                                 Ok(remote_items) => {
@@ -391,6 +478,12 @@ impl Russh {
 }
 
 impl Connector for Russh {
+    fn items(&self, sizes: IconSizes) -> Option<ClientItems> {
+        let (items_tx, mut items_rx) = mpsc::channel(1);
+        self.command_tx.send(Cmd::Items(sizes, items_tx)).unwrap();
+        items_rx.blocking_recv()
+    }
+
     fn connect(&self, item: ClientItem) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
@@ -408,12 +501,39 @@ impl Connector for Russh {
         )
     }
 
+    fn remote_drive(&self, uri: String) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+
+                command_tx.send(Cmd::RemoteDrive(uri, res_tx)).unwrap();
+                res_rx.await
+            },
+            |x| {
+                if let Err(err) = x {
+                    log::error!("{err:?}");
+                }
+            },
+        )
+    }
+
     fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
         self.command_tx
             .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
             .unwrap();
         items_rx.blocking_recv()
+    }
+
+    fn disconnect(&self, item: ClientItem) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                command_tx.send(Cmd::Disconnect(item)).unwrap();
+            },
+            |_| {},
+        )
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {

@@ -69,7 +69,7 @@ impl ClientItem {
         }
     }
 
-    pub fn is_mounted(&self) -> bool {
+    pub fn is_connected(&self) -> bool {
         match self {
             #[cfg(feature = "russh")]
             Self::Russh(item) => item.is_connected(),
@@ -93,10 +93,18 @@ impl ClientItem {
         }
     }
 
-    pub fn client(&self) -> Option<Client> {
+    pub fn get_client(&self) -> Option<Client> {
         match self {
             #[cfg(feature = "russh")]
-            Self::Russh(item) => item.client(),
+            Self::Russh(item) => item.get_client(),
+            Self::None => unreachable!(),
+        }
+    }
+
+    pub fn set_client(&mut self, client: Client) {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::Russh(item) => item.set_client(client),
             Self::None => unreachable!(),
         }
     }

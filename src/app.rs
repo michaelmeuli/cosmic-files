@@ -1536,6 +1536,9 @@ impl App {
                             Favorite::Network { uri, name, path } => {
                                 Location::Network(uri.clone(), name.clone(), Some(path.to_owned()))
                             }
+                            Favorite::Remote { uri, name, path } => {
+                                Location::Remote(uri.clone(), name.clone(), Some(path.to_owned()))
+                            }
                             _ => Location::Path(path.clone()),
                         })
                         .data(FavoriteIndex(favorite_i))
@@ -1566,12 +1569,29 @@ impl App {
                     .divider_above()
             });
         }
+        if !CLIENTS.is_empty() {
+            nav_model = nav_model.insert(|b| {
+                b.text(fl!("networks"))
+                    .icon(icon::icon(
+                        icon::from_name("network-workgroup-symbolic")
+                            .size(16)
+                            .handle(),
+                    ))
+                    .data(Location::Remote(
+                        "ssh:///".to_string(),
+                        fl!("networks"),
+                        None,
+                    ))
+                    .divider_above()
+            });
+        }
 
         // Collect all mounter items
         let mut nav_items = Vec::new();
         for (key, items) in &self.mounter_items {
             nav_items.extend(items.iter().map(|item| (*key, item)));
         }
+
         // Sort by name lexically
         nav_items.sort_by(|a, b| LANGUAGE_SORTER.compare(&a.1.name(), &b.1.name()));
         // Add items to nav model
@@ -1588,6 +1608,35 @@ impl App {
                     b = b.icon(icon::icon(icon).size(16));
                 }
                 if item.is_mounted() {
+                    b = b.closable();
+                }
+                if i == 0 {
+                    b = b.divider_above();
+                }
+                b
+            });
+        }
+
+        let mut client_items = Vec::new();
+        for (key, items) in &self.client_items {
+            client_items.extend(items.iter().map(|item| (*key, item)));
+        }
+        // Sort by name lexically
+        client_items.sort_by(|a, b| LANGUAGE_SORTER.compare(&a.1.name(), &b.1.name()));
+        // Add items to nav model
+        for (i, (key, item)) in client_items.into_iter().enumerate() {
+            nav_model = nav_model.insert(|mut b| {
+                b = b.text(item.name()).data(ClientData(key, item.clone()));
+                let uri = item.uri();
+                if let Some(path) = item.path() {
+                    b = b.data(Location::Remote(uri, item.name(), Some(path)));
+                } else if !uri.is_empty() {
+                    b = b.data(Location::Remote(uri, item.name(), None));
+                }
+                if let Some(icon) = item.icon(true) {
+                    b = b.icon(icon::icon(icon).size(16));
+                }
+                if item.is_connected() {
                     b = b.closable();
                 }
                 if i == 0 {
@@ -2286,6 +2335,15 @@ impl Application for App {
                     Message::NetworkDriveOpenEntityAfterMount { entity: e },
                 )));
             }
+            if let Some(e) = app.nav_model.iter().find(|e| {
+                app.nav_model.data::<Location>(*e).is_some_and(
+                    |l| matches!(l, Location::Remote(uri, ..) if *uri == *location.as_str()),
+                )
+            }) {
+                commands.push(cosmic::task::message(cosmic::Action::App(
+                    Message::RemoteDriveOpenEntityAfterMount { entity: e },
+                )));
+            }
         }
 
         if app.tab_model.entity_at(0).is_none() {
@@ -2436,6 +2494,51 @@ impl Application for App {
                         if let Some(mounter) = MOUNTERS.get(&key) {
                             return mounter.network_drive(uri.clone()).map(move |()| {
                                 cosmic::Action::App(Message::NetworkDriveOpenEntityAfterMount {
+                                    entity,
+                                })
+                            });
+                        }
+                    }
+
+                    log::warn!(
+                        "failed to open favorite, path does not exist: {}",
+                        path.display()
+                    );
+                    return self.push_dialog(
+                        DialogPage::FavoritePathError {
+                            path: path.clone(),
+                            entity,
+                        },
+                        Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
+                    );
+                }
+                #[cfg(feature = "russh")]
+                Location::Remote(uri, name, Some(path))
+                    if !path.try_exists().unwrap_or_default() =>
+                {
+                    let mut found = false;
+
+                    if let Some(key) = self
+                        .client_items
+                        .iter()
+                        .find_map(|(k, items)| {
+                            items.iter().find_map(|item| {
+                                found |= item.path().is_some_and(|p| path.starts_with(&p))
+                                    || item.name() == *name
+                                    || item.uri() == *uri;
+                                (!item.is_connected() && found).then_some(*k)
+                            })
+                        })
+                        .or(if found {
+                            None
+                        } else {
+                            // TODO do we need to choose the correct mounter?
+                            self.client_items.keys().copied().next()
+                        })
+                    {
+                        if let Some(client) = CLIENTS.get(&key) {
+                            return client.remote_drive(uri.clone()).map(move |()| {
+                                cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount {
                                     entity,
                                 })
                             });
@@ -6452,7 +6555,7 @@ impl Application for App {
         for (key, mounter) in CLIENTS.iter() {
             subscriptions.push(
                 mounter.subscription().with(*key).map(
-                    |(key, mounter_message)| match mounter_message {
+                    |(key, client_message)| match client_message {
                         ClientMessage::Items(items) => Message::ClientItems(key, items),
                         ClientMessage::ClientResult(item, res) => {
                             Message::ClientResult(key, item, res)

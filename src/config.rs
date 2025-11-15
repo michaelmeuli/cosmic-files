@@ -70,6 +70,11 @@ pub enum Favorite {
         name: String,
         path: PathBuf,
     },
+    Remote {
+        uri: String,
+        name: String,
+        path: PathBuf,
+    },
 }
 
 impl Favorite {
@@ -98,6 +103,7 @@ impl Favorite {
             Self::Videos => dirs::video_dir(),
             Self::Path(path) => Some(path.clone()),
             Self::Network { path, .. } => Some(path.clone()),
+            Self::Remote { path, .. } => Some(path.clone()),
         }
     }
 }
