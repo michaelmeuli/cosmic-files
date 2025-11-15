@@ -1553,6 +1553,7 @@ impl fmt::Debug for TaskWrapper {
 pub enum Command {
     Action(Action),
     AddNetworkDrive,
+    AddRemoteDrive,
     AddToSidebar(PathBuf),
     AutoScroll(Option<f32>),
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
@@ -1578,6 +1579,7 @@ pub enum Command {
 #[derive(Clone, Debug)]
 pub enum Message {
     AddNetworkDrive,
+    AddRemoteDrive,
     AutoScroll(Option<f32>),
     Click(Option<usize>),
     DoubleClick(Option<usize>),
@@ -2980,6 +2982,9 @@ impl Tab {
         match message {
             Message::AddNetworkDrive => {
                 commands.push(Command::AddNetworkDrive);
+            }
+            Message::AddRemoteDrive => {
+                commands.push(Command::AddRemoteDrive);
             }
             Message::AutoScroll(auto_scroll) => {
                 commands.push(Command::AutoScroll(auto_scroll));
@@ -5605,6 +5610,20 @@ impl Tab {
                         widget::horizontal_space().into(),
                         widget::button::standard(fl!("add-network-drive"))
                             .on_press(Message::AddNetworkDrive)
+                            .into(),
+                    ]))
+                    .padding([space_xxs, space_xs])
+                    .layer(cosmic_theme::Layer::Primary)
+                    .apply(widget::container)
+                    .padding([0, 0, 7, 0]),
+                );
+            }
+            Location::Remote(uri, _display_name, _path) if uri == "ssh:///" => {
+                tab_column = tab_column.push(
+                    widget::layer_container(widget::row::with_children([
+                        widget::horizontal_space().into(),
+                        widget::button::standard(fl!("add-network-drive"))
+                            .on_press(Message::AddRemoteDrive)
                             .into(),
                     ]))
                     .padding([space_xxs, space_xs])

@@ -4140,6 +4140,10 @@ impl Application for App {
                             self.context_page = ContextPage::NetworkDrive;
                             self.set_show_context(true);
                         }
+                        tab::Command::AddRemoteDrive => {
+                            self.context_page = ContextPage::RemoteDrive;
+                            self.set_show_context(true);
+                        }
                         tab::Command::AddToSidebar(path) => {
                             let mut favorites = self.config.favorites.clone();
                             let favorite = Favorite::from_path(path);

@@ -362,7 +362,8 @@ impl Russh {
                                 for mut client_item in client_items {
                                     match client_item.get_client() {
                                         Some(client) => {
-                                            let ClientItem::Russh(ref mut item) = client_item else {
+                                            let ClientItem::Russh(ref mut item) = client_item
+                                            else {
                                                 continue;
                                             };
                                             found_client = true;
@@ -447,10 +448,14 @@ impl Russh {
                                             }
                                         }
                                         None => {
-                                            items_tx
+                                            // Handle the Result properly
+                                            if let Err(e) = items_tx
                                                 .send(Err("no client available for remote scan"
                                                     .to_string()))
-                                                .await;
+                                                .await
+                                            {
+                                                log::error!("Failed to send error message: {}", e);
+                                            }
                                         }
                                     }
                                 }
