@@ -1279,6 +1279,7 @@ impl App {
         log::info!("rescan_tab {entity:?} {location:?} {selection_paths:?}");
         let icon_sizes = self.config.tab.icon_sizes;
         let mounter_items = self.mounter_items.clone();
+        let client_items = self.client_items.clone();
 
         Task::future(async move {
             let location2 = location.clone();
@@ -1298,6 +1299,20 @@ impl App {
                             }
                         }
                     }
+                    #[cfg(feature = "russh")]
+                    {
+                        let client_paths: Box<[_]> = client_items
+                            .values()
+                            .flatten()
+                            .filter_map(ClientItem::path)
+                            .collect();
+                        if !client_paths.is_empty() {
+                            for item in &mut items {
+                                item.is_client_point =
+                                    item.path_opt().is_some_and(|p| client_paths.contains(p));
+                            }
+                        }
+                    }   
 
                     cosmic::action::app(Message::TabRescan(
                         entity,

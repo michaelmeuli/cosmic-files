@@ -45,6 +45,7 @@ use crate::{
     localize::LANGUAGE_SORTER,
     menu,
     mounter::{MOUNTERS, MounterItem, MounterItems, MounterKey, MounterMessage},
+    russh::{CLIENTS, ClientItem, ClientItems, ClientKey, ClientMessage},
     tab::{self, ItemMetadata, Location, Tab},
     zoom::{zoom_in_view, zoom_out_view, zoom_to_default},
 };
@@ -422,6 +423,7 @@ enum Message {
     Key(Modifiers, Key, Option<SmolStr>),
     ModifiersChanged(Modifiers),
     MounterItems(MounterKey, MounterItems),
+    ClientItems(ClientKey, ClientItems),
     NewFolder,
     NotifyEvents(Vec<DebouncedEvent>),
     NotifyWatcher(WatcherWrapper),
@@ -475,6 +477,7 @@ impl From<AppMessage> for Message {
 }
 
 pub struct MounterData(MounterKey, MounterItem);
+pub struct ClientData(ClientKey, ClientItem);
 
 struct WatcherWrapper {
     watcher_opt: Option<Debouncer<RecommendedWatcher, RecommendedCache>>,
@@ -514,6 +517,7 @@ struct App {
     filename_id: widget::Id,
     modifiers: Modifiers,
     mounter_items: FxHashMap<MounterKey, MounterItems>,
+    client_items: FxHashMap<ClientKey, ClientItems>,
     nav_model: segmented_button::SingleSelectModel,
     result_opt: Option<DialogResult>,
     search_id: widget::Id,
@@ -676,6 +680,7 @@ impl App {
         let location = self.tab.location.clone();
         let icon_sizes = self.tab.config.icon_sizes;
         let mounter_items = self.mounter_items.clone();
+        let client_items = self.client_items.clone();
         Task::future(async move {
             let location2 = location.clone();
             match tokio::task::spawn_blocking(move || location2.scan(icon_sizes)).await {
@@ -691,6 +696,20 @@ impl App {
                             for item in &mut items {
                                 item.is_mount_point =
                                     item.path_opt().is_some_and(|p| mounter_paths.contains(p));
+                            }
+                        }
+                    }
+                    #[cfg(feature = "russh")]
+                    {
+                        let client_paths: Box<[_]> = client_items
+                            .values()
+                            .flatten()
+                            .filter_map(ClientItem::path)
+                            .collect();
+                        if !client_paths.is_empty() {
+                            for item in &mut items {
+                                item.is_client_point =
+                                    item.path_opt().is_some_and(|p| client_paths.contains(p));
                             }
                         }
                     }
@@ -978,6 +997,7 @@ impl Application for App {
             filename_id: widget::Id::new("Dialog Filename"),
             modifiers: Modifiers::empty(),
             mounter_items: FxHashMap::default(),
+            client_items: FxHashMap::default(),
             nav_model: segmented_button::ModelBuilder::default().build(),
             result_opt: None,
             search_id: widget::Id::new("Dialog File Search"),
@@ -1227,6 +1247,13 @@ impl Application for App {
                     .map(|()| cosmic::action::none());
             }
         }
+        if let Some(data) = self.nav_model.data::<ClientData>(entity) {
+            if let Some(client) = CLIENTS.get(&data.0) {
+                return client
+                    .connect(data.1.clone())
+                    .map(|()| cosmic::action::none());
+            }
+        }
         Task::none()
     }
 
@@ -1442,6 +1469,50 @@ impl Application for App {
 
                 // Insert new items
                 self.mounter_items.insert(mounter_key, mounter_items);
+
+                // Update nav bar
+                //TODO: this could change favorites IDs while they are in use
+                self.update_nav_model();
+
+                return Task::batch(commands);
+            }
+            Message::ClientItems(client_key, client_items) => {
+                // Check for unmounted folders
+                let mut not_connected = Vec::new();
+                if let Some(old_items) = self.client_items.get(&client_key) {
+                    for old_item in old_items {
+                        if let Some(old_path) = old_item.path() {
+                            if old_item.is_connected() {
+                                let mut still_connected = false;
+                                for item in &client_items {
+                                    if let Some(path) = item.path() {
+                                        if path == old_path && item.is_connected() {
+                                            still_connected = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !still_connected {
+                                    not_connected.push(Location::Path(old_path));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Go back to home in any tabs that were not_connected
+                let mut commands = Vec::new();
+                {
+                    let home_location = Location::Path(home_dir());
+                    if not_connected.contains(&self.tab.location) {
+                        self.tab.change_location(&home_location, None);
+                        commands.push(self.update_watcher());
+                        commands.push(self.rescan_tab(None));
+                    }
+                }
+
+                // Insert new items
+                self.client_items.insert(client_key, client_items);
 
                 // Update nav bar
                 //TODO: this could change favorites IDs while they are in use
@@ -2039,6 +2110,19 @@ impl Application for App {
                         Message::MounterItems(key, items)
                     } else {
                         log::warn!("{mounter_message:?} not supported in dialog mode");
+                        Message::None
+                    }
+                })
+        }));
+        subscriptions.extend(CLIENTS.iter().map(|(key, client)| {
+            client
+                .subscription()
+                .with(*key)
+                .map(|(key, client_message)| {
+                    if let ClientMessage::Items(items) = client_message {
+                        Message::ClientItems(key, items)
+                    } else {
+                        log::warn!("{client_message:?} not supported in dialog mode");
                         Message::None
                     }
                 })
