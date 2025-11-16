@@ -1,4 +1,4 @@
-use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
+use async_ssh2_tokio::client::Client;
 
 use cosmic::{Task, iced::Subscription, widget};
 use std::{

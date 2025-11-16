@@ -2,14 +2,12 @@ use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
 use russh_sftp::client::SftpSession;
 use url::Url;
 
-use cctk::{cosmic_protocols::corner_radius::v1::client, sctk::reexports::calloop::channel};
 use cosmic::{
     Task,
     iced::{Subscription, futures::SinkExt, stream},
     widget,
 };
-use gio::{glib, prelude::*};
-use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, result, sync::Arc};
+use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};

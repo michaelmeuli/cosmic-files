@@ -1312,7 +1312,7 @@ impl App {
                                     item.path_opt().is_some_and(|p| client_paths.contains(p));
                             }
                         }
-                    }   
+                    }
 
                     cosmic::action::app(Message::TabRescan(
                         entity,
@@ -1811,7 +1811,6 @@ impl App {
         .into()
     }
 
-
     fn desktop_view_options(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_m, space_l, ..
@@ -1838,6 +1837,17 @@ impl App {
                 move |show_mounted_drives| {
                     Message::DesktopConfig(DesktopConfig {
                         show_mounted_drives,
+                        ..config
+                    })
+                },
+            ),
+        );
+        section = section.add(
+            widget::settings::item::builder(fl!("connected-drives")).toggler(
+                config.show_connected_drives,
+                move |show_connected_drives| {
+                    Message::DesktopConfig(DesktopConfig {
+                        show_connected_drives,
                         ..config
                     })
                 },
@@ -3437,27 +3447,25 @@ impl Application for App {
                     }
                 }
             }
-            Message::RemoteResult(client_key, uri, res) => {
-                match res {
-                    Ok(true) => {
-                        log::info!("connected to {uri:?}");
-                        if matches!(self.context_page, ContextPage::RemoteDrive) {
-                            self.set_show_context(false);
-                        }
-                    }
-                    Ok(false) => {
-                        log::info!("cancelled connection to {uri:?}");
-                    }
-                    Err(error) => {
-                        log::warn!("failed to connect to {uri:?}: {error}");
-                        return self.dialog_pages.push_back(DialogPage::RemoteError {
-                            client_key: client_key,
-                            uri,
-                            error,
-                        });
+            Message::RemoteResult(client_key, uri, res) => match res {
+                Ok(true) => {
+                    log::info!("connected to {uri:?}");
+                    if matches!(self.context_page, ContextPage::RemoteDrive) {
+                        self.set_show_context(false);
                     }
                 }
-            }
+                Ok(false) => {
+                    log::info!("cancelled connection to {uri:?}");
+                }
+                Err(error) => {
+                    log::warn!("failed to connect to {uri:?}: {error}");
+                    return self.dialog_pages.push_back(DialogPage::RemoteError {
+                        client_key: client_key,
+                        uri,
+                        error,
+                    });
+                }
+            },
             Message::NewItem(entity_opt, dir) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
                 if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {

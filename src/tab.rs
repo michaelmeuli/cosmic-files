@@ -1298,6 +1298,42 @@ pub fn scan_desktop(
         }
     }
 
+    if desktop_config.show_connected_drives {
+        for client in CLIENTS.values() {
+            let Some(client_items) = client.items(sizes) else {
+                continue;
+            };
+            items.extend(client_items.into_iter().filter_map(|client_item| {
+                let path = client_item.path()?;
+                // Get most item data from path
+                let mut item = match item_from_path(&path, sizes) {
+                    Ok(item) => item,
+                    Err(err) => {
+                        log::warn!(
+                            "failed to get item from mounter item {}: {}",
+                            path.display(),
+                            err
+                        );
+                        return None;
+                    }
+                };
+
+                //Override some data with client information
+                item.name = client_item.name();
+                item.display_name = Item::display_name(&item.name);
+
+                //TODO: use icon size for client item icon
+                if let Some(icon) = client_item.icon(false) {
+                    item.icon_handle_grid.clone_from(&icon);
+                    item.icon_handle_list.clone_from(&icon);
+                    item.icon_handle_list_condensed = icon;
+                }
+
+                Some(item)
+            }));
+        }
+    } 
+
     if desktop_config.show_trash {
         let name = fl!("trash");
         let display_name = Item::display_name(&name);

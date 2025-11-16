@@ -247,6 +247,7 @@ pub struct DesktopConfig {
     pub icon_size: NonZeroU16,
     pub show_content: bool,
     pub show_mounted_drives: bool,
+    pub show_connected_drives: bool,
     pub show_trash: bool,
 }
 
@@ -257,6 +258,7 @@ impl Default for DesktopConfig {
             icon_size: 100.try_into().unwrap(),
             show_content: true,
             show_mounted_drives: false,
+            show_connected_drives: false,
             show_trash: false,
         }
     }
