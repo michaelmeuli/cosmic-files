@@ -355,11 +355,11 @@ impl Russh {
                                 Err("uninitialized".into());
 
                             let mut found_client = false;
-                            let client_items = items(IconSizes::default());
-                            for mut client_item in client_items {
+                            let mut client_items = items(IconSizes::default());
+                            for client_item in client_items.iter_mut() {
                                 match client_item.get_client() {
                                     Some(client) => {
-                                        let ClientItem::Russh(ref mut item) = client_item else {
+                                        let ClientItem::Russh(item) = client_item else {
                                             continue;
                                         };
                                         found_client = true;
@@ -409,7 +409,9 @@ impl Russh {
                                         }
                                         break;
                                     }
-                                    None => continue,
+                                    None => {
+                                        continue;
+                                    }
                                 }
                             }
 
