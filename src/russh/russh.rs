@@ -49,8 +49,17 @@ pub fn normalize_ssh_uri(raw: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
+pub fn get_host_from_ssh_uri(raw: &str) -> Result<String, String> {
+    let url = Url::parse(raw).map_err(|e| format!("invalid ssh uri: {e}"))?;
+    if url.scheme() != "ssh" {
+        return Err("URI must use ssh://".into());
+    }
+    let host = url.host_str().unwrap_or("localhost");
+    Ok(host.to_string())
+}
+
 fn items(_sizes: IconSizes) -> ClientItems {
-    let key_path = home_dir().join(".ssh").join("id_rsa");
+    let key_path = home_dir().join(".ssh").join("id_ed25519");
     let auth_method = AuthMethod::with_key_file(key_path, None);
     let mut items = ClientItems::new();
     items.push(ClientItem::Russh(Item {
@@ -59,7 +68,8 @@ fn items(_sizes: IconSizes) -> ClientItems {
         icon_opt: None,
         icon_symbolic_opt: None,
         path_opt: None,
-        uri: "130.60.24.133".to_string(),
+        uri: "ssh://mimeul@130.60.24.133:22/".to_string(),
+        host: "130.60.24.133".to_string(),
         port: 22,
         username: "mimeul".to_string(),
         auth: auth_method,
@@ -281,6 +291,7 @@ pub struct Item {
     icon_symbolic_opt: Option<PathBuf>,
     path_opt: Option<PathBuf>,
     uri: String,
+    host: String,
     port: u16,
     username: String,
     auth: AuthMethod,
@@ -299,6 +310,10 @@ impl Item {
 
     pub fn uri(&self) -> String {
         self.uri.clone()
+    }
+
+    pub fn host(&self) -> String {
+        self.host.clone()
     }
 
     pub fn icon(&self, symbolic: bool) -> Option<widget::icon::Handle> {
@@ -383,8 +398,9 @@ impl Russh {
                             let event_tx = event_tx.clone();
                             let uri = normalize_ssh_uri(&uri).unwrap_or(uri);
                             let uri_clone = uri.clone();
+                            let host = get_host_from_ssh_uri(&uri).unwrap_or("localhost".to_string());
                             let mut client_items = client_items_worker.lock().await;
-                            let key_path = home_dir().join(".ssh").join("id_rsa");
+                            let key_path = home_dir().join(".ssh").join("id_ed25519");
                             let auth_method = AuthMethod::with_key_file(key_path, None);
                             let client_item: &mut ClientItem =
                                 match client_items.iter_mut().find(|c| c.uri() == uri) {
@@ -397,8 +413,9 @@ impl Russh {
                                             icon_symbolic_opt: None,
                                             path_opt: None,
                                             uri: uri.clone(),
+                                            host,
                                             port: 22,
-                                            username: "".into(),
+                                            username: "michael".into(),
                                             auth: auth_method,
                                             server_check: ServerCheckMethod::NoCheck,
                                             client: None,
@@ -426,7 +443,7 @@ impl Russh {
                                 continue;
                             }
                             match Client::connect(
-                                (item.uri.as_str(), item.port),
+                                (item.host.as_str(), item.port),
                                 item.username.as_str(),
                                 item.auth.clone(),
                                 item.server_check.clone(),
