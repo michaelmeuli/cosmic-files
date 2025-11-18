@@ -326,7 +326,6 @@ impl Item {
 pub struct Russh {
     command_tx: mpsc::UnboundedSender<Cmd>,
     event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
-    client_items: Arc<Mutex<Vec<ClientItem>>>,
 }
 
 impl Russh {
@@ -499,7 +498,6 @@ impl Russh {
         Self {
             command_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
-            client_items,
         }
     }
 }
