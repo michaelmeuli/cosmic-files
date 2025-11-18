@@ -18,7 +18,38 @@ use crate::{
 };
 use tokio::runtime::Builder;
 
-fn items(sizes: IconSizes) -> ClientItems {
+pub fn normalize_ssh_uri(raw: &str) -> Result<String, String> {
+    let url = Url::parse(raw).map_err(|e| format!("invalid ssh uri: {e}"))?;
+    if url.scheme() != "ssh" {
+        return Err("URI must use ssh://".into());
+    }
+    let user = match url.username() {
+        "" => None,
+        u => Some(u),
+    };
+    let host = url.host_str().unwrap_or("localhost");
+    let port = url.port().unwrap_or(22);
+    let mut path = url.path().to_string();
+    if path.is_empty() {
+        path = "/".into();
+    }
+    // Prevent duplicate slashes (avoid ssh:////path)
+    if !path.starts_with('/') {
+        path.insert(0, '/');
+    }
+    // Remove trailing slash except for root
+    if path.len() > 1 && path.ends_with('/') {
+        path.pop();
+    }
+    let normalized = if let Some(user) = user {
+        format!("ssh://{}@{}:{}{}", user, host, port, path)
+    } else {
+        format!("ssh://{}:{}{}", host, port, path)
+    };
+    Ok(normalized)
+}
+
+fn items(_sizes: IconSizes) -> ClientItems {
     let key_path = home_dir().join(".ssh").join("id_rsa");
     let auth_method = AuthMethod::with_key_file(key_path, None);
     let mut items = ClientItems::new();
@@ -295,12 +326,15 @@ impl Item {
 pub struct Russh {
     command_tx: mpsc::UnboundedSender<Cmd>,
     event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
+    client_items: Arc<Mutex<Vec<ClientItem>>>,
 }
 
 impl Russh {
     pub fn new() -> Self {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let client_items = Arc::new(Mutex::new(Vec::<ClientItem>::new()));
+        let client_items_worker = client_items.clone();
         std::thread::spawn(move || {
             let rt = Builder::new_current_thread().enable_all().build().unwrap();
             rt.block_on(async move {
@@ -346,72 +380,81 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteDrive(uri, result_tx) => {
+                            let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
                             let uri_clone = uri.clone();
-                            let mut result_tx_opt = Some(result_tx);
-                            let mut result_for_event: Result<bool, String> =
-                                Err("uninitialized".into());
-                            let mut found_client = false;
-                            let mut client_items = items(IconSizes::default());
-
-                            for client_item in client_items.iter_mut() {
-                                let has_client = client_item.get_client().is_some();
-                                if has_client {
-                                    found_client = true;
-                                    log::info!("Client already exists for {}", client_item.uri());
-                                    break;
-                                }
-                                let (uri, port, username, auth, server_check) = match client_item {
-                                    ClientItem::Russh(item) => (
-                                        item.uri.clone(),
-                                        item.port,
-                                        item.username.clone(),
-                                        item.auth.clone(),
-                                        item.server_check.clone(),
-                                    ),
-                                    _ => continue,
+                            let mut client_items = client_items_worker.lock().await;
+                            let key_path = home_dir().join(".ssh").join("id_rsa");
+                            let auth_method = AuthMethod::with_key_file(key_path, None);
+                            let client_item: &mut ClientItem =
+                                match client_items.iter_mut().find(|c| c.uri() == uri) {
+                                    Some(item) => item,
+                                    None => {
+                                        client_items.push(ClientItem::Russh(Item {
+                                            name: uri.clone(),
+                                            is_connected: false,
+                                            icon_opt: None,
+                                            icon_symbolic_opt: None,
+                                            path_opt: None,
+                                            uri: uri.clone(),
+                                            port: 22,
+                                            username: "".into(),
+                                            auth: auth_method,
+                                            server_check: ServerCheckMethod::NoCheck,
+                                            client: None,
+                                        }));
+                                        client_items.last_mut().unwrap()
+                                    }
                                 };
-                                log::info!("No client for {}, creating new one and connecting…", uri);
-                                match Client::connect(
-                                    (uri.as_str(), port),
-                                    username.as_str(),
-                                    auth,
-                                    server_check,
-                                )
-                                .await
-                                {
-                                    Ok(new_client) => {
-                                        client_item.set_client(new_client.clone());
-                                        log::info!("New SSH client created for {}", uri);
-                                        if let Some(tx) = result_tx_opt.take() {
-                                            let _ = tx.send(Ok(()));
-                                        }
-                                        result_for_event = Ok(true);
-                                        found_client = true;
-                                        event_tx.send(Event::Items(vec![client_item.clone()])).unwrap();
-                                        break;
-                                    }
-                                    Err(err) => {
-                                        let err_str = format!("Connection failed: {err}");
-                                        if let Some(tx) = result_tx_opt.take() {
-                                            let _ = tx.send(Err(anyhow::anyhow!(err_str.clone())));
-                                        }
-                                        result_for_event = Err(err_str);
-                                        found_client = false;
-                                        break;
-                                    }
-                                }
-                            }
-                            if !found_client {
-                                let err_str = "No client available for remote drive".to_string();
+                            let ClientItem::Russh(item) = client_item else {
+                                let msg = "ClientItem is not Russh".to_string();
                                 if let Some(tx) = result_tx_opt.take() {
-                                    _ = tx.send(Err(anyhow::anyhow!(err_str.clone())));
+                                    let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
                                 }
-                                result_for_event = Err(err_str);
+                                event_tx
+                                    .send(Event::RemoteResult(uri_clone, Err(msg)))
+                                    .unwrap();
+                                continue;
+                            };
+                            if item.is_connected() {
+                                if let Some(tx) = result_tx_opt.take() {
+                                    let _ = tx.send(Ok(()));
+                                }
+                                event_tx
+                                    .send(Event::RemoteResult(uri_clone, Ok(true)))
+                                    .unwrap();
+                                continue;
                             }
-                            event_tx
-                                .send(Event::RemoteResult(uri_clone, result_for_event))
-                                .unwrap();
+                            match Client::connect(
+                                (item.uri.as_str(), item.port),
+                                item.username.as_str(),
+                                item.auth.clone(),
+                                item.server_check.clone(),
+                            )
+                            .await
+                            {
+                                Ok(client) => {
+                                    item.set_client(client);
+                                    item.is_connected = true;
+
+                                    if let Some(tx) = result_tx_opt.take() {
+                                        let _ = tx.send(Ok(()));
+                                    }
+
+                                    event_tx
+                                        .send(Event::RemoteResult(uri_clone, Ok(true)))
+                                        .unwrap();
+                                }
+                                Err(err) => {
+                                    let msg = format!("SSH connect failed: {}", err);
+                                    if let Some(tx) = result_tx_opt.take() {
+                                        let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
+                                    }
+                                    event_tx
+                                        .send(Event::RemoteResult(uri_clone, Err(msg)))
+                                        .unwrap();
+                                }
+                            }
                         }
                         Cmd::RemoteScan(uri, sizes, items_tx) => {
                             if uri == "ssh:///" {
@@ -455,6 +498,7 @@ impl Russh {
         Self {
             command_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
+            client_items,
         }
     }
 }
