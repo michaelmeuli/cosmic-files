@@ -482,9 +482,9 @@ impl Russh {
                                 continue;
                             }
 
-                            let client_items = items(IconSizes::default());
+                            let client_items = client_items_worker.lock().await;
                             let mut sent = false;
-                            for item in client_items {
+                            for item in client_items.iter() {
                                 if let Some(client) = item.get_client() {
                                     let result = remote_sftp_list(&client, &uri, sizes).await;
                                     let _ = items_tx.send(result).await;
