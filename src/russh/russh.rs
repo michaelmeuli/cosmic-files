@@ -348,83 +348,67 @@ impl Russh {
                         Cmd::RemoteDrive(uri, result_tx) => {
                             let event_tx = event_tx.clone();
                             let uri_clone = uri.clone();
-
                             let mut result_tx_opt = Some(result_tx);
-
                             let mut result_for_event: Result<bool, String> =
                                 Err("uninitialized".into());
-
                             let mut found_client = false;
                             let mut client_items = items(IconSizes::default());
+
                             for client_item in client_items.iter_mut() {
-                                match client_item.get_client() {
-                                    Some(client) => {
-                                        let ClientItem::Russh(item) = client_item else {
-                                            continue;
-                                        };
-                                        found_client = true;
-                                        if client.is_closed() {
-                                            log::info!(
-                                                "RemoteDrive: client is closed, reconnecting…"
-                                            );
-                                            match Client::connect(
-                                                (item.uri.as_str(), item.port),
-                                                item.username.as_str(),
-                                                item.auth.clone(),
-                                                item.server_check.clone(),
-                                            )
-                                            .await
-                                            {
-                                                Ok(new_client) => {
-                                                    client_item.set_client(new_client.clone());
-                                                    log::info!(
-                                                        "RemoteDrive: reconnected successfully"
-                                                    );
-
-                                                    if let Some(tx) = result_tx_opt.take() {
-                                                        _ = tx.send(Ok(()));
-                                                    }
-                                                    result_for_event = Ok(true);
-                                                }
-                                                Err(err) => {
-                                                    let err_str =
-                                                        format!("Reconnect failed: {err}");
-
-                                                    if let Some(tx) = result_tx_opt.take() {
-                                                        _ = tx.send(Err(anyhow::anyhow!(
-                                                            err_str.clone()
-                                                        )));
-                                                    }
-                                                    result_for_event = Err(err_str);
-                                                }
-                                            }
-                                        } else {
-                                            log::info!(
-                                                "RemoteDrive {uri}: client already connected"
-                                            );
-                                            if let Some(tx) = result_tx_opt.take() {
-                                                _ = tx.send(Ok(()));
-                                            }
-                                            result_for_event = Ok(true);
+                                let has_client = client_item.get_client().is_some();
+                                if has_client {
+                                    found_client = true;
+                                    log::info!("Client already exists for {}", client_item.uri());
+                                    break;
+                                }
+                                let (uri, port, username, auth, server_check) = match client_item {
+                                    ClientItem::Russh(item) => (
+                                        item.uri.clone(),
+                                        item.port,
+                                        item.username.clone(),
+                                        item.auth.clone(),
+                                        item.server_check.clone(),
+                                    ),
+                                    _ => continue,
+                                };
+                                log::info!("No client for {}, creating new one and connecting…", uri);
+                                match Client::connect(
+                                    (uri.as_str(), port),
+                                    username.as_str(),
+                                    auth,
+                                    server_check,
+                                )
+                                .await
+                                {
+                                    Ok(new_client) => {
+                                        client_item.set_client(new_client.clone());
+                                        log::info!("New SSH client created for {}", uri);
+                                        if let Some(tx) = result_tx_opt.take() {
+                                            let _ = tx.send(Ok(()));
                                         }
+                                        result_for_event = Ok(true);
+                                        found_client = true;
+                                        event_tx.send(Event::Items(vec![client_item.clone()])).unwrap();
                                         break;
                                     }
-                                    None => {
-                                        continue;
+                                    Err(err) => {
+                                        let err_str = format!("Connection failed: {err}");
+                                        if let Some(tx) = result_tx_opt.take() {
+                                            let _ = tx.send(Err(anyhow::anyhow!(err_str.clone())));
+                                        }
+                                        result_for_event = Err(err_str);
+                                        found_client = false;
+                                        break;
                                     }
                                 }
                             }
-
                             if !found_client {
-                                let err_str = "no client available for remote drive".to_string();
-
+                                let err_str = "No client available for remote drive".to_string();
                                 if let Some(tx) = result_tx_opt.take() {
                                     _ = tx.send(Err(anyhow::anyhow!(err_str.clone())));
                                 }
-
                                 result_for_event = Err(err_str);
                             }
-
                             event_tx
                                 .send(Event::RemoteResult(uri_clone, result_for_event))
                                 .unwrap();

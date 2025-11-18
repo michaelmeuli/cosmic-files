@@ -3321,6 +3321,8 @@ impl Application for App {
                 return Task::batch(commands);
             }
             Message::ClientItems(client_key, client_items) => {
+                log::info!("received client items for {client_key:?}");
+                log::debug!("items: {client_items:?}");
                 self.client_items.insert(client_key, client_items);
                 // Update nav bar
                 self.update_nav_model();
@@ -3447,23 +3449,32 @@ impl Application for App {
                     }
                 }
             }
-            Message::RemoteResult(client_key, uri, res) => match res {
-                Ok(true) => {
-                    log::info!("connected to {uri:?}");
-                    if matches!(self.context_page, ContextPage::RemoteDrive) {
-                        self.set_show_context(false);
+            Message::RemoteResult(client_key, uri, res) => {
+                if self
+                    .remote_drive_connecting
+                    .as_ref()
+                    .is_some_and(|(m, u)| *m == client_key && *u == uri)
+                {
+                    self.remote_drive_connecting = None;
+                }
+                match res {
+                    Ok(true) => {
+                        log::info!("connected to {uri:?}");
+                        if matches!(self.context_page, ContextPage::RemoteDrive) {
+                            self.set_show_context(false);
+                        }
                     }
-                }
-                Ok(false) => {
-                    log::info!("cancelled connection to {uri:?}");
-                }
-                Err(error) => {
-                    log::warn!("failed to connect to {uri:?}: {error}");
-                    return self.dialog_pages.push_back(DialogPage::RemoteError {
-                        client_key: client_key,
-                        uri,
-                        error,
-                    });
+                    Ok(false) => {
+                        log::info!("cancelled connection to {uri:?}");
+                    }
+                    Err(error) => {
+                        log::warn!("failed to connect to {uri:?}: {error}");
+                        return self.dialog_pages.push_back(DialogPage::RemoteError {
+                            client_key,
+                            uri,
+                            error,
+                        });
+                    }
                 }
             },
             Message::NewItem(entity_opt, dir) => {
