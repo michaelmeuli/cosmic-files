@@ -382,6 +382,7 @@ impl Russh {
                         Cmd::RemoteDrive(uri, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
+                            let uri = normalize_ssh_uri(&uri).unwrap_or(uri);
                             let uri_clone = uri.clone();
                             let mut client_items = client_items_worker.lock().await;
                             let key_path = home_dir().join(".ssh").join("id_rsa");
