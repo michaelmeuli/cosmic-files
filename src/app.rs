@@ -2541,6 +2541,10 @@ impl Application for App {
                 Location::Remote(uri, name, Some(path))
                     if !path.try_exists().unwrap_or_default() =>
                 {
+                    log::info!(
+                        "attempting to open remote favorite, path does not exist: {}",
+                        path.display()
+                    );
                     let mut found = false;
 
                     if let Some(key) = self

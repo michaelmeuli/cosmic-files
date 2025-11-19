@@ -142,6 +142,7 @@ async fn remote_sftp_list(
     uri: &str,
     sizes: IconSizes,
 ) -> Result<Vec<tab::Item>, String> {
+    log::info!("remote_sftp_list: listing uri {}", uri);
     let force_dir = uri.starts_with("ssh:///");
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     let url = Url::parse(uri).map_err(|e| format!("bad uri: {e}"))?;
@@ -398,7 +399,8 @@ impl Russh {
                             let event_tx = event_tx.clone();
                             let uri = normalize_ssh_uri(&uri).unwrap_or(uri);
                             let uri_clone = uri.clone();
-                            let host = get_host_from_ssh_uri(&uri).unwrap_or("localhost".to_string());
+                            let host =
+                                get_host_from_ssh_uri(&uri).unwrap_or("localhost".to_string());
                             let mut client_items = client_items_worker.lock().await;
                             let key_path = home_dir().join(".ssh").join("id_ed25519");
                             let auth_method = AuthMethod::with_key_file(key_path, None);
@@ -461,6 +463,7 @@ impl Russh {
                                     event_tx
                                         .send(Event::RemoteResult(uri_clone, Ok(true)))
                                         .unwrap();
+                                    event_tx.send(Event::Items(client_items.clone())).unwrap();
                                 }
                                 Err(err) => {
                                     let msg = format!("SSH connect failed: {}", err);
@@ -474,29 +477,43 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteScan(uri, sizes, items_tx) => {
+                            log::info!("RemoteScan: scanning uri {}", uri);
                             if uri == "ssh:///" {
-                                log::info!("Listing virtual network root for URI: {}", uri);
                                 let result =
                                     virtual_network_root_items(sizes).map_err(|e| e.to_string());
                                 let _ = items_tx.send(result).await;
                                 continue;
                             }
-
+                            let norm_uri = normalize_ssh_uri(&uri).unwrap_or(uri.clone());
+                            let host = match get_host_from_ssh_uri(&norm_uri) {
+                                Ok(h) => h,
+                                Err(e) => {
+                                    let _ = items_tx.send(Err(e)).await;
+                                    continue;
+                                }
+                            };
                             let client_items = client_items_worker.lock().await;
-                            let mut sent = false;
+                            let mut found_client = None;
                             for item in client_items.iter() {
-                                if let Some(client) = item.get_client() {
-                                    let result = remote_sftp_list(&client, &uri, sizes).await;
-                                    let _ = items_tx.send(result).await;
-                                    sent = true;
-                                    break;
+                                if let ClientItem::Russh(r) = item {
+                                    if r.host == host {
+                                        found_client = Some(r);
+                                        break;
+                                    }
                                 }
                             }
-                            if !sent {
-                                let _ = items_tx
-                                    .send(Err("no client available for remote scan".into()))
-                                    .await;
-                            }
+                            let Some(item) = found_client else {
+                                let msg = format!("No SSH client found for host: {}", host);
+                                let _ = items_tx.send(Err(msg)).await;
+                                continue;
+                            };
+                            let Some(client) = item.get_client() else {
+                                let msg = format!("SSH client not connected for host {}", host);
+                                let _ = items_tx.send(Err(msg)).await;
+                                continue;
+                            };
+                            let result = remote_sftp_list(&client, &norm_uri, sizes).await;
+                            let _ = items_tx.send(result).await;
                         }
                         Cmd::Disconnect(mut client_item) => {
                             let ClientItem::Russh(ref mut item) = client_item else {
@@ -560,24 +577,32 @@ impl Connector for Russh {
         )
     }
 
+    // fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+    //     let (items_tx, mut items_rx) = mpsc::channel(1);
+
+    //     if let Err(e) = self
+    //         .command_tx
+    //         .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
+    //     {
+    //         log::error!("RemoteScan: failed to send command: {}", e);
+    //         return Some(Err("internal error: remote worker not running".into()));
+    //     }
+
+    //     match items_rx.blocking_recv() {
+    //         Some(res) => Some(res),
+    //         None => {
+    //             log::error!("RemoteScan: response channel closed without a value");
+    //             Some(Err("internal error: no response from remote worker".into()))
+    //         }
+    //     }
+    // }
+
     fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
-
-        if let Err(e) = self
-            .command_tx
+        self.command_tx
             .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
-        {
-            log::error!("RemoteScan: failed to send command: {}", e);
-            return Some(Err("internal error: remote worker not running".into()));
-        }
-
-        match items_rx.blocking_recv() {
-            Some(res) => Some(res),
-            None => {
-                log::error!("RemoteScan: response channel closed without a value");
-                Some(Err("internal error: no response from remote worker".into()))
-            }
-        }
+            .unwrap();
+        items_rx.blocking_recv()
     }
 
     fn disconnect(&self, item: ClientItem) -> Task<()> {
