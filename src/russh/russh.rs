@@ -144,12 +144,16 @@ async fn remote_sftp_list(
 ) -> Result<Vec<tab::Item>, String> {
     log::info!("remote_sftp_list: listing uri {}", uri);
     let force_dir = uri.starts_with("ssh:///");
-    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     let url = Url::parse(uri).map_err(|e| format!("bad uri: {e}"))?;
     let mut path = url.path().to_string();
     if path.is_empty() {
         path = "/".into();
     }
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| e.to_string())?;
     let sftp = SftpSession::new(channel.into_stream())
         .await
         .map_err(|e| e.to_string())?;
