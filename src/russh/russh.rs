@@ -265,6 +265,39 @@ async fn remote_sftp_list(
     Ok(items)
 }
 
+fn request_password(
+    uri: String,
+    event_tx: mpsc::UnboundedSender<Event>,
+) -> ClientAuth {
+
+
+    let auth = ClientAuth {
+        message: String::new(),
+        username_opt: Some(String::new()),
+        domain_opt: Some(String::new()),
+        password_opt: Some(String::new()),
+        remember_opt: Some(false),
+        anonymous_opt: Some(false),
+    };
+    let (auth_tx, mut auth_rx) = mpsc::channel(1);
+    event_tx
+        .send(Event::RemoteAuth(uri.clone(), auth, auth_tx))
+        .unwrap();
+
+    if let Some(auth) = auth_rx.blocking_recv() {
+        auth
+    } else {
+        ClientAuth {
+            message: "Authentication cancelled".into(),
+            username_opt: None,
+            domain_opt: None,
+            password_opt: None,
+            remember_opt: None,
+            anonymous_opt: None,
+        }
+    }
+}
+
 enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
     Rescan,
