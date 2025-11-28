@@ -4666,6 +4666,13 @@ impl Application for App {
                             .map(|()| cosmic::action::none());
                     }
                 }
+                if let Some(data) = self.nav_model.data::<ClientData>(entity) {
+                    if let Some(client) = CLIENTS.get(&data.0) {
+                        return client
+                            .disconnect(data.1.clone())
+                            .map(|()| cosmic::action::none());
+                    }
+                }
             }
             Message::NavBarContext(entity) => {
                 self.nav_bar_context_id = entity;
@@ -4967,6 +4974,26 @@ impl Application for App {
                                     {
                                         return mounter
                                             .unmount(item.clone())
+                                            .map(|()| cosmic::action::none());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                #[cfg(feature = "russh")]
+                {
+                    let mut paths = self.selected_paths(None);
+                    if let Some(p) = paths.next() {
+                        {
+                            for (k, client_items) in &self.client_items {
+                                if let Some(client) = CLIENTS.get(k) {
+                                    if let Some(item) = client_items
+                                        .iter()
+                                        .find(|&item| item.path().is_some_and(|path| path == p))
+                                    {
+                                        return client
+                                            .disconnect(item.clone())
                                             .map(|()| cosmic::action::none());
                                     }
                                 }
