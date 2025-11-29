@@ -265,12 +265,7 @@ async fn remote_sftp_list(
     Ok(items)
 }
 
-fn request_password(
-    uri: String,
-    event_tx: mpsc::UnboundedSender<Event>,
-) -> ClientAuth {
-
-
+fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> ClientAuth {
     let auth = ClientAuth {
         message: String::new(),
         username_opt: Some(String::new()),
@@ -396,9 +391,29 @@ impl Russh {
                             items_tx.send(items(sizes)).await.unwrap();
                         }
                         Cmd::Rescan => {
-                            event_tx.clone()
-                                .send(Event::Items(items(IconSizes::default())))
-                                .unwrap();
+                            let mut client_items = client_items_worker.lock().await;
+                            let const_items = items(IconSizes::default());
+
+                            let merged: Vec<ClientItem> = const_items
+                                .into_iter()
+                                .map(|const_item| match &const_item {
+                                    ClientItem::Russh(item) => client_items
+                                        .iter()
+                                        .find(|existing_item| {
+                                            matches!(
+                                                existing_item,
+                                                ClientItem::Russh(existing_russh_item)
+                                                    if existing_russh_item.host == item.host
+                                            )
+                                        })
+                                        .cloned()
+                                        .unwrap_or(const_item),
+                                    _ => const_item,
+                                })
+                                .collect();
+
+                            *client_items = merged.clone();
+                            event_tx.clone().send(Event::Items(merged)).unwrap();
                         }
                         Cmd::Connect(mut client_item, complete_tx) => {
                             let ClientItem::Russh(ref mut item) = client_item else {
@@ -442,7 +457,7 @@ impl Russh {
                             let key_path = home_dir().join(".ssh").join("id_ed25519");
                             let auth_method = AuthMethod::with_key_file(key_path, None);
                             let client_item: &mut ClientItem =
-                                match client_items.iter_mut().find(|c| c.uri() == uri) {
+                                match client_items.iter_mut().find(|c| c.host() == host) {
                                     Some(item) => item,
                                     None => {
                                         client_items.push(ClientItem::Russh(Item {
@@ -529,10 +544,16 @@ impl Russh {
                                     continue;
                                 }
                             };
+                            log::info!("RemoteScan: normalized uri {}, host {}", norm_uri, host);
                             let client_items = client_items_worker.lock().await;
                             let mut found_client = None;
                             for item in client_items.iter() {
+                                log::info!("RemoteScan: checking client item {:?}", item);
                                 if let ClientItem::Russh(r) = item {
+                                    log::info!(
+                                        "RemoteScan: checking client item with host {}",
+                                        r.host
+                                    );
                                     if r.host == host {
                                         found_client = Some(r);
                                         break;

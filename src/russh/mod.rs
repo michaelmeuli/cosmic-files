@@ -69,6 +69,14 @@ impl ClientItem {
         }
     }
 
+    pub fn host(&self) -> String {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::Russh(item) => item.host(),
+            Self::None => unreachable!(),
+        }
+    }
+
     pub fn is_connected(&self) -> bool {
         match self {
             #[cfg(feature = "russh")]
