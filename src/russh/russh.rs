@@ -635,26 +635,6 @@ impl Connector for Russh {
         )
     }
 
-    // fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
-    //     let (items_tx, mut items_rx) = mpsc::channel(1);
-
-    //     if let Err(e) = self
-    //         .command_tx
-    //         .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
-    //     {
-    //         log::error!("RemoteScan: failed to send command: {}", e);
-    //         return Some(Err("internal error: remote worker not running".into()));
-    //     }
-
-    //     match items_rx.blocking_recv() {
-    //         Some(res) => Some(res),
-    //         None => {
-    //             log::error!("RemoteScan: response channel closed without a value");
-    //             Some(Err("internal error: no response from remote worker".into()))
-    //         }
-    //     }
-    // }
-
     fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
         self.command_tx
