@@ -396,7 +396,7 @@ impl Russh {
                             items_tx.send(items(sizes)).await.unwrap();
                         }
                         Cmd::Rescan => {
-                            event_tx
+                            event_tx.clone()
                                 .send(Event::Items(items(IconSizes::default())))
                                 .unwrap();
                         }
