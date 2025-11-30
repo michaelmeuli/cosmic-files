@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
     config::IconSizes,
-    err_str, home_dir,
+    home_dir,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 use tokio::runtime::Builder;
@@ -355,15 +355,12 @@ impl Item {
 pub struct Russh {
     command_tx: mpsc::UnboundedSender<Cmd>,
     event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
-    clients: RwLock<HashMap<String, Arc<Client>>>,
 }
 
 impl Russh {
     pub fn new() -> Self {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-
-
 
         let clients = Arc::new(RwLock::new(HashMap::<String, Arc<Client>>::new()));
         let clients_worker = Arc::clone(&clients);
@@ -376,6 +373,7 @@ impl Russh {
                             items_tx.send(items(sizes)).await.unwrap();
                         }
                         Cmd::Connect(client_item, complete_tx) => {
+                            let client_item_clone = client_item.clone();
                             let ClientItem::Russh(item) = client_item else {
                                 _ = complete_tx.send(Err(anyhow::anyhow!("No client item")));
                                 continue;
@@ -391,55 +389,77 @@ impl Russh {
                             .await;
                             match res {
                                 Ok(client) => {
-                                    let mut write = clients_worker.write().await;
-                                    write.insert(item.host.clone(), Arc::new(client.clone()));
+                                    {
+                                        let mut write = clients_worker.write().await;
+                                        write.insert(item.host.clone(), Arc::new(client));
+                                    }
                                     _ = complete_tx.send(Ok(()));
                                     event_tx
-                                        .send(Event::ClientResult(client_item, Ok(true)))
+                                        .send(Event::ClientResult(
+                                            client_item_clone.clone(),
+                                            Ok(true),
+                                        ))
                                         .unwrap();
                                 }
                                 Err(err) => {
                                     _ = complete_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                     event_tx
-                                        .send(Event::ClientResult(client_item, Err(format!("{err}"))))
+                                        .send(Event::ClientResult(
+                                            client_item_clone,
+                                            Err(format!("{err}")),
+                                        ))
                                         .unwrap();
                                 }
                             }
                         }
                         Cmd::RemoteDrive(uri, result_tx) => {
+                            log::info!("Cmd::RemoteDrive: connecting to uri {}", uri);
                             let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
+
                             let norm_uri = normalize_ssh_uri(&uri).unwrap_or(uri);
                             let norm_uri_clone = norm_uri.clone();
                             let url = Url::parse(&norm_uri).unwrap();
                             let host = url.host_str().unwrap_or("localhost");
                             let port = url.port().unwrap_or(22);
                             let username = url.username();
-                            let key_path = home_dir().join(".ssh").join("id_ed25519");
-                            let auth_method = AuthMethod::with_key_file(key_path, None);
-                            let read = clients_worker.read().await;
-                            if let Some(client) = read.get(host) {
-                                log::info!("Cmd::RemoteDrive: read.get(host) success for host {}", host);
+
+                            let existing_client = {
+                                let read = clients_worker.read().await;
+                                read.get(host).cloned() 
+                            };
+
+                            if let Some(_) = existing_client {
+                                log::info!(
+                                    "Cmd::RemoteDrive: Client already exists for host {}",
+                                    host
+                                );
                                 if let Some(tx) = result_tx_opt.take() {
                                     let _ = tx.send(Ok(()));
                                 }
                                 event_tx
                                     .send(Event::RemoteResult(norm_uri_clone, Ok(true)))
                                     .unwrap();
-                                continue;
+                                return;
                             }
+
+                            log::info!("Cmd::RemoteDrive: Connecting fresh session to {}", host);
+                            let key_path = home_dir().join(".ssh").join("id_ed25519");
+                            let auth = AuthMethod::with_key_file(key_path, None);
                             match Client::connect(
                                 (host, port),
                                 username,
-                                auth_method.clone(),
+                                auth,
                                 ServerCheckMethod::NoCheck,
                             )
                             .await
                             {
                                 Ok(client) => {
-                                    let mut write = clients_worker.write().await;
-                                    write.insert(host.to_string(), Arc::new(client.clone()));
-                                    drop(write);
+                                    log::info!("Cmd::RemoteDrive: Connected OK {}", host);
+                                    {
+                                        let mut write = clients_worker.write().await;
+                                        write.insert(host.to_string(), Arc::new(client));
+                                    }
                                     if let Some(tx) = result_tx_opt.take() {
                                         let _ = tx.send(Ok(()));
                                     }
@@ -470,24 +490,30 @@ impl Russh {
                             let url = Url::parse(&norm_uri).unwrap();
                             let host = url.host_str().unwrap_or("localhost");
                             log::info!("RemoteScan: normalized uri {}, host {}", norm_uri, host);
-                            let read = clients_worker.read().await;
-                            let Some(client) = read.get(host)  else {
-                                let msg = format!("No SSH client connected for host: {}", host);
-                                let _ = items_tx.send(Err(msg)).await;
-                                continue;
+                            let client = {
+                                let read = clients_worker.read().await;
+                                match read.get(host) {
+                                    Some(c) => Arc::clone(c), // clone Arc<Client>
+                                    None => {
+                                        let msg =
+                                            format!("No SSH client connected for host: {}", host);
+                                        let _ = items_tx.send(Err(msg)).await;
+                                        continue;
+                                    }
+                                }
                             };
                             let result = remote_sftp_list(&client, &norm_uri, sizes).await;
                             let _ = items_tx.send(result).await;
                         }
-                        Cmd::Disconnect(mut client_item) => {
-                            let ClientItem::Russh(ref mut item) = client_item else {
+                        Cmd::Disconnect(client_item) => {
+                            let ClientItem::Russh(mut item) = client_item else {
                                 continue;
                             };
-                            if let Some(client) = &item.client {
-                                let _ = client.disconnect().await;
+                            {
+                                let mut write = clients_worker.write().await;
+                                write.remove(&item.host);
                             }
                             item.is_connected = false;
-                            item.client = None;
                         }
                     }
                 }
@@ -496,7 +522,6 @@ impl Russh {
         Self {
             command_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
-            clients: RwLock::new(HashMap::new()),
         }
     }
 }

@@ -1,5 +1,3 @@
-use async_ssh2_tokio::client::Client;
-
 use cosmic::{Task, iced::Subscription, widget};
 use std::{
     collections::BTreeMap,
