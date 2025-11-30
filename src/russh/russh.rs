@@ -51,15 +51,6 @@ pub fn normalize_ssh_uri(raw: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-pub fn get_host_from_ssh_uri(raw: &str) -> Result<String, String> {
-    let url = Url::parse(raw).map_err(|e| format!("invalid ssh uri: {e}"))?;
-    if url.scheme() != "ssh" {
-        return Err("URI must use ssh://".into());
-    }
-    let host = url.host_str().unwrap_or("localhost");
-    Ok(host.to_string())
-}
-
 fn items(_sizes: IconSizes) -> ClientItems {
     let key_path = home_dir().join(".ssh").join("id_ed25519");
     let auth_method = AuthMethod::with_key_file(key_path, None);
@@ -428,45 +419,43 @@ impl Russh {
                         Cmd::RemoteDrive(uri, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
-                            let uri = normalize_ssh_uri(&uri).unwrap_or(uri);
-                            let uri_clone = uri.clone();
-                            let host =
-                                get_host_from_ssh_uri(&uri).unwrap_or("localhost".to_string());
-                            let mut client_items = client_items_worker.lock().await;
+                            let norm_uri = normalize_ssh_uri(&uri).unwrap_or(uri);
+                            let norm_uri_clone = norm_uri.clone();
+                            let url = Url::parse(&norm_uri).unwrap();
+                            let host = url.host_str().unwrap_or("localhost");
+                            let port = url.port().unwrap_or(22);
+                            let username = url.username();
                             let key_path = home_dir().join(".ssh").join("id_ed25519");
                             let auth_method = AuthMethod::with_key_file(key_path, None);
                             let read = clients_worker.read().await;
-                            if let Some(client) = read.get(&host) {
+                            if let Some(client) = read.get(host) {
                                 log::info!("Reusing existing client for host {}", host);
                                 if let Some(tx) = result_tx_opt.take() {
                                     let _ = tx.send(Ok(()));
                                 }
                                 event_tx
-                                    .send(Event::RemoteResult(uri_clone, Ok(true)))
+                                    .send(Event::RemoteResult(norm_uri_clone, Ok(true)))
                                     .unwrap();
                                 continue;
                             }
-
                             match Client::connect(
-                                (host.as_str(), port),
-                                username.as_str(),
+                                (host, port),
+                                username,
                                 auth_method.clone(),
-                                server_check.clone(),
+                                ServerCheckMethod::NoCheck,
                             )
                             .await
                             {
                                 Ok(client) => {
-                                    item.set_client(client);
-                                    item.is_connected = true;
-
+                                    let mut write = clients_worker.write().await;
+                                    write.insert(host.to_string(), Arc::new(client.clone()));
+                                    drop(write);
                                     if let Some(tx) = result_tx_opt.take() {
                                         let _ = tx.send(Ok(()));
                                     }
-
                                     event_tx
-                                        .send(Event::RemoteResult(uri_clone, Ok(true)))
+                                        .send(Event::RemoteResult(norm_uri_clone, Ok(true)))
                                         .unwrap();
-                                    event_tx.send(Event::Items(client_items.clone())).unwrap();
                                 }
                                 Err(err) => {
                                     let msg = format!("SSH connect failed: {}", err);
@@ -474,7 +463,7 @@ impl Russh {
                                         let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
                                     }
                                     event_tx
-                                        .send(Event::RemoteResult(uri_clone, Err(msg)))
+                                        .send(Event::RemoteResult(norm_uri_clone, Err(msg)))
                                         .unwrap();
                                 }
                             }
@@ -487,37 +476,13 @@ impl Russh {
                                 let _ = items_tx.send(result).await;
                                 continue;
                             }
-                            let norm_uri = normalize_ssh_uri(&uri).unwrap_or(uri.clone());
-                            let host = match get_host_from_ssh_uri(&norm_uri) {
-                                Ok(h) => h,
-                                Err(e) => {
-                                    let _ = items_tx.send(Err(e)).await;
-                                    continue;
-                                }
-                            };
+                            let norm_uri = normalize_ssh_uri(&uri).unwrap_or(uri);
+                            let url = Url::parse(&norm_uri).unwrap();
+                            let host = url.host_str().unwrap_or("localhost");
                             log::info!("RemoteScan: normalized uri {}, host {}", norm_uri, host);
-                            let client_items = client_items_worker.lock().await;
-                            let mut found_client = None;
-                            for item in client_items.iter() {
-                                log::info!("RemoteScan: checking client item {:?}", item);
-                                if let ClientItem::Russh(r) = item {
-                                    log::info!(
-                                        "RemoteScan: checking client item with host {}",
-                                        r.host
-                                    );
-                                    if r.host == host {
-                                        found_client = Some(r);
-                                        break;
-                                    }
-                                }
-                            }
-                            let Some(item) = found_client else {
-                                let msg = format!("No SSH client found for host: {}", host);
-                                let _ = items_tx.send(Err(msg)).await;
-                                continue;
-                            };
-                            let Some(client) = item.get_client() else {
-                                let msg = format!("SSH client not connected for host {}", host);
+                            let read = clients_worker.read().await;
+                            let Some(client) = read.get(host)  else {
+                                let msg = format!("No SSH client connected for host: {}", host);
                                 let _ = items_tx.send(Err(msg)).await;
                                 continue;
                             };
