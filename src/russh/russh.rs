@@ -7,8 +7,10 @@ use cosmic::{
     iced::{Subscription, futures::SinkExt, stream},
     widget,
 };
-use std::{any::TypeId, cell::Cell, future::pending, path::PathBuf, sync::Arc};
-use tokio::sync::{Mutex, mpsc};
+use std::{
+    any::TypeId, cell::Cell, collections::HashMap, future::pending, path::PathBuf, sync::Arc,
+};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
@@ -295,7 +297,6 @@ fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> Clie
 
 enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
-    Rescan,
     Connect(ClientItem, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
     RemoteDrive(String, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
     RemoteScan(
@@ -307,7 +308,6 @@ enum Cmd {
 }
 
 enum Event {
-    Changed,
     Items(ClientItems),
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
@@ -374,14 +374,18 @@ impl Item {
 pub struct Russh {
     command_tx: mpsc::UnboundedSender<Cmd>,
     event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
+    clients: RwLock<HashMap<String, Arc<Client>>>,
 }
 
 impl Russh {
     pub fn new() -> Self {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let client_items = Arc::new(Mutex::new(Vec::<ClientItem>::new()));
-        let client_items_worker = client_items.clone();
+
+
+
+        let clients = Arc::new(RwLock::new(HashMap::<String, Arc<Client>>::new()));
+        let clients_worker = Arc::clone(&clients);
         std::thread::spawn(move || {
             let rt = Builder::new_current_thread().enable_all().build().unwrap();
             rt.block_on(async move {
@@ -389,31 +393,6 @@ impl Russh {
                     match command {
                         Cmd::Items(sizes, items_tx) => {
                             items_tx.send(items(sizes)).await.unwrap();
-                        }
-                        Cmd::Rescan => {
-                            let mut client_items = client_items_worker.lock().await;
-                            let const_items = items(IconSizes::default());
-
-                            let merged: Vec<ClientItem> = const_items
-                                .into_iter()
-                                .map(|const_item| match &const_item {
-                                    ClientItem::Russh(item) => client_items
-                                        .iter()
-                                        .find(|existing_item| {
-                                            matches!(
-                                                existing_item,
-                                                ClientItem::Russh(existing_russh_item)
-                                                    if existing_russh_item.host == item.host
-                                            )
-                                        })
-                                        .cloned()
-                                        .unwrap_or(const_item),
-                                    _ => const_item,
-                                })
-                                .collect();
-
-                            *client_items = merged.clone();
-                            event_tx.clone().send(Event::Items(merged)).unwrap();
                         }
                         Cmd::Connect(mut client_item, complete_tx) => {
                             let ClientItem::Russh(ref mut item) = client_item else {
@@ -456,38 +435,9 @@ impl Russh {
                             let mut client_items = client_items_worker.lock().await;
                             let key_path = home_dir().join(".ssh").join("id_ed25519");
                             let auth_method = AuthMethod::with_key_file(key_path, None);
-                            let client_item: &mut ClientItem =
-                                match client_items.iter_mut().find(|c| c.host() == host) {
-                                    Some(item) => item,
-                                    None => {
-                                        client_items.push(ClientItem::Russh(Item {
-                                            name: uri.clone(),
-                                            is_connected: false,
-                                            icon_opt: None,
-                                            icon_symbolic_opt: None,
-                                            path_opt: None,
-                                            uri: uri.clone(),
-                                            host,
-                                            port: 22,
-                                            username: "michael".into(),
-                                            auth: auth_method,
-                                            server_check: ServerCheckMethod::NoCheck,
-                                            client: None,
-                                        }));
-                                        client_items.last_mut().unwrap()
-                                    }
-                                };
-                            let ClientItem::Russh(item) = client_item else {
-                                let msg = "ClientItem is not Russh".to_string();
-                                if let Some(tx) = result_tx_opt.take() {
-                                    let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
-                                }
-                                event_tx
-                                    .send(Event::RemoteResult(uri_clone, Err(msg)))
-                                    .unwrap();
-                                continue;
-                            };
-                            if item.is_connected() {
+                            let read = clients_worker.read().await;
+                            if let Some(client) = read.get(&host) {
+                                log::info!("Reusing existing client for host {}", host);
                                 if let Some(tx) = result_tx_opt.take() {
                                     let _ = tx.send(Ok(()));
                                 }
@@ -496,11 +446,12 @@ impl Russh {
                                     .unwrap();
                                 continue;
                             }
+
                             match Client::connect(
-                                (item.host.as_str(), item.port),
-                                item.username.as_str(),
-                                item.auth.clone(),
-                                item.server_check.clone(),
+                                (host.as_str(), port),
+                                username.as_str(),
+                                auth_method.clone(),
+                                server_check.clone(),
                             )
                             .await
                             {
@@ -590,6 +541,7 @@ impl Russh {
         Self {
             command_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
+            clients: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -654,15 +606,12 @@ impl Connector for Russh {
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {
-        let command_tx = self.command_tx.clone();
         let event_rx = self.event_rx.clone();
         Subscription::run_with_id(
             TypeId::of::<Self>(),
             stream::channel(1, |mut output| async move {
-                command_tx.send(Cmd::Rescan).unwrap();
                 while let Some(event) = event_rx.lock().await.recv().await {
                     match event {
-                        Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
                         Event::Items(items) => {
                             output.send(ClientMessage::Items(items)).await.unwrap()
                         }
