@@ -67,7 +67,6 @@ fn items(_sizes: IconSizes) -> ClientItems {
         username: "mimeul".to_string(),
         auth: auth_method,
         server_check: ServerCheckMethod::NoCheck,
-        client: None,
     }));
     items
 }
@@ -320,7 +319,6 @@ pub struct Item {
     username: String,
     auth: AuthMethod,
     server_check: ServerCheckMethod,
-    client: Option<Client>,
 }
 
 impl Item {
@@ -352,14 +350,6 @@ impl Item {
     pub fn path(&self) -> Option<PathBuf> {
         self.path_opt.clone()
     }
-
-    pub fn get_client(&self) -> Option<Client> {
-        self.client.clone()
-    }
-
-    pub fn set_client(&mut self, client: Client) {
-        self.client = Some(client);
-    }
 }
 
 pub struct Russh {
@@ -385,14 +375,15 @@ impl Russh {
                         Cmd::Items(sizes, items_tx) => {
                             items_tx.send(items(sizes)).await.unwrap();
                         }
-                        Cmd::Connect(mut client_item, complete_tx) => {
-                            let ClientItem::Russh(ref mut item) = client_item else {
+                        Cmd::Connect(client_item, complete_tx) => {
+                            let ClientItem::Russh(item) = client_item else {
                                 _ = complete_tx.send(Err(anyhow::anyhow!("No client item")));
                                 continue;
                             };
                             let event_tx = event_tx.clone();
+
                             let res = Client::connect(
-                                (item.uri.as_str(), item.port),
+                                (item.host.as_str(), item.port),
                                 item.username.as_str(),
                                 item.auth.clone(),
                                 item.server_check.clone(),
@@ -400,18 +391,17 @@ impl Russh {
                             .await;
                             match res {
                                 Ok(client) => {
-                                    item.is_connected = true;
-                                    item.client = Some(client);
+                                    let mut write = clients_worker.write().await;
+                                    write.insert(item.host.clone(), Arc::new(client.clone()));
                                     _ = complete_tx.send(Ok(()));
                                     event_tx
                                         .send(Event::ClientResult(client_item, Ok(true)))
                                         .unwrap();
                                 }
                                 Err(err) => {
-                                    let err_str = err_str(&err);
-                                    _ = complete_tx.send(Err(err.into()));
+                                    _ = complete_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                     event_tx
-                                        .send(Event::ClientResult(client_item, Err(err_str)))
+                                        .send(Event::ClientResult(client_item, Err(format!("{err}"))))
                                         .unwrap();
                                 }
                             }
@@ -429,7 +419,7 @@ impl Russh {
                             let auth_method = AuthMethod::with_key_file(key_path, None);
                             let read = clients_worker.read().await;
                             if let Some(client) = read.get(host) {
-                                log::info!("Reusing existing client for host {}", host);
+                                log::info!("Cmd::RemoteDrive: read.get(host) success for host {}", host);
                                 if let Some(tx) = result_tx_opt.take() {
                                     let _ = tx.send(Ok(()));
                                 }

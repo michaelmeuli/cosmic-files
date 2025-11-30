@@ -100,22 +100,6 @@ impl ClientItem {
             Self::None => unreachable!(),
         }
     }
-
-    pub fn get_client(&self) -> Option<Client> {
-        match self {
-            #[cfg(feature = "russh")]
-            Self::Russh(item) => item.get_client(),
-            Self::None => unreachable!(),
-        }
-    }
-
-    pub fn set_client(&mut self, client: Client) {
-        match self {
-            #[cfg(feature = "russh")]
-            Self::Russh(item) => item.set_client(client),
-            Self::None => unreachable!(),
-        }
-    }
 }
 
 pub type ClientItems = Vec<ClientItem>;
