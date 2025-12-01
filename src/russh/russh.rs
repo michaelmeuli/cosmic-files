@@ -51,23 +51,23 @@ pub fn normalize_ssh_uri(raw: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-fn items(_sizes: IconSizes) -> ClientItems {
-    let key_path = home_dir().join(".ssh").join("id_ed25519");
-    let auth_method = AuthMethod::with_key_file(key_path, None);
+fn items(keys: Vec<String>, _sizes: IconSizes) -> ClientItems {
     let mut items = ClientItems::new();
-    items.push(ClientItem::Russh(Item {
-        name: "S3IT".to_string(),
-        is_connected: false,
-        icon_opt: None,
-        icon_symbolic_opt: None,
-        path_opt: None,
-        uri: "ssh://mimeul@130.60.24.133:22/".to_string(),
-        host: "130.60.24.133".to_string(),
-        port: 22,
-        username: "mimeul".to_string(),
-        auth: auth_method,
-        server_check: ServerCheckMethod::NoCheck,
-    }));
+    for host in keys {
+        items.push(ClientItem::Russh(Item {
+            name: host.clone(),
+            is_connected: true,
+            icon_opt: None,
+            icon_symbolic_opt: None,
+            path_opt: None,
+            uri: format!("ssh://{host}:22/"),
+            host,
+            port: 22,
+            username: "michael".to_string(),
+            auth: AuthMethod::with_key_file(home_dir().join(".ssh").join("id_ed25519"), None),
+            server_check: ServerCheckMethod::NoCheck,
+        }));
+    }
     items
 }
 
@@ -287,6 +287,7 @@ fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> Clie
 
 enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
+    Rescan,
     Connect(ClientItem, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
     RemoteDrive(String, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
     RemoteScan(
@@ -298,6 +299,7 @@ enum Cmd {
 }
 
 enum Event {
+    Changed,
     Items(ClientItems),
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
@@ -370,7 +372,22 @@ impl Russh {
                 while let Some(command) = command_rx.recv().await {
                     match command {
                         Cmd::Items(sizes, items_tx) => {
-                            items_tx.send(items(sizes)).await.unwrap();
+                            let keys: Vec<String> = {
+                                let read = clients.read().await;
+                                read.keys().cloned().collect()
+                            };
+                            log::info!("Russh: Items - clients: {:?}", keys);
+                            items_tx.send(items(keys, sizes)).await.unwrap();
+                        }
+                        Cmd::Rescan => {
+                            let keys: Vec<String> = {
+                                let read = clients.read().await;
+                                read.keys().cloned().collect()
+                            };
+                            log::info!("Russh: Rescan - clients: {:?}", keys);
+                            event_tx
+                                .send(Event::Items(items(keys, IconSizes::default())))
+                                .unwrap();
                         }
                         Cmd::Connect(client_item, complete_tx) => {
                             let client_item_clone = client_item.clone();
@@ -426,7 +443,7 @@ impl Russh {
 
                             let existing_client = {
                                 let read = clients_worker.read().await;
-                                read.get(host).cloned() 
+                                read.get(host).cloned()
                             };
 
                             if let Some(_) = existing_client {
@@ -466,6 +483,7 @@ impl Russh {
                                     event_tx
                                         .send(Event::RemoteResult(norm_uri_clone, Ok(true)))
                                         .unwrap();
+                                    event_tx.send(Event::Changed).unwrap();
                                 }
                                 Err(err) => {
                                     let msg = format!("SSH connect failed: {}", err);
@@ -586,12 +604,15 @@ impl Connector for Russh {
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {
+        let command_tx = self.command_tx.clone();
         let event_rx = self.event_rx.clone();
         Subscription::run_with_id(
             TypeId::of::<Self>(),
             stream::channel(1, |mut output| async move {
+                command_tx.send(Cmd::Rescan).unwrap();
                 while let Some(event) = event_rx.lock().await.recv().await {
                     match event {
+                        Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
                         Event::Items(items) => {
                             output.send(ClientMessage::Items(items)).await.unwrap()
                         }
