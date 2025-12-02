@@ -367,7 +367,7 @@ impl Russh {
             let rt = Builder::new_current_thread().enable_all().build().unwrap();
             rt.block_on(async move {
                 let clients = Arc::new(RwLock::new(HashMap::<String, Arc<Client>>::new()));
-                let client_items = Vec::<ClientItem>::new();
+                let mut client_items = Vec::<ClientItem>::new();
                 while let Some(command) = command_rx.recv().await {
                     match command {
                         Cmd::Items(sizes, items_tx) => {
@@ -384,11 +384,13 @@ impl Russh {
                                 read.keys().cloned().collect()
                             };
                             log::info!("Russh: Rescan - clients: {:?}", keys);
+                            log::info!("Russh: Rescan - client items: {:?}", client_items);
                             event_tx
                                 .send(Event::Items(client_items.clone()))
                                 .unwrap();
                         }
                         Cmd::Connect(client_item, complete_tx) => {
+                            log::info!("Russh: Connect - client_item: {:?}", client_item);
                             let client_item_clone = client_item.clone();
                             let ClientItem::Russh(item) = client_item else {
                                 _ = complete_tx.send(Err(anyhow::anyhow!("No client item")));
@@ -410,6 +412,19 @@ impl Russh {
                                         let mut write = clients.write().await;
                                         write.insert(item.host.clone(), Arc::new(client));
                                     }
+                                    client_items.push(ClientItem::Russh(Item {
+                                        name: item.name.clone(),
+                                        is_connected: true,
+                                        icon_opt: item.icon_opt.clone(),
+                                        icon_symbolic_opt: item.icon_symbolic_opt.clone(),
+                                        path_opt: item.path_opt.clone(),
+                                        uri: item.uri.clone(),
+                                        host: item.host.clone(),
+                                        port: item.port,
+                                        username: item.username.clone(),
+                                        auth: item.auth.clone(),
+                                        server_check: item.server_check.clone(),
+                                    }));
                                     _ = complete_tx.send(Ok(()));
                                     event_tx
                                         .send(Event::ClientResult(
@@ -472,11 +487,27 @@ impl Russh {
                             .await
                             {
                                 Ok(client) => {
-                                    log::info!("Cmd::RemoteDrive: Connected OK {}", host);
+                                    log::info!("Cmd::RemoteDrive Ok(client): Connected OK {}", host);
                                     {
                                         let mut write = clients.write().await;
                                         write.insert(host.to_string(), Arc::new(client));
                                     }
+                                    client_items.push(ClientItem::Russh(Item {
+                                        name: host.to_string(),
+                                        is_connected: true,
+                                        icon_opt: None,
+                                        icon_symbolic_opt: None,
+                                        path_opt: None,
+                                        uri: norm_uri.clone(),
+                                        host: host.to_string(),
+                                        port,
+                                        username: username.to_string(),
+                                        auth: AuthMethod::with_key_file(
+                                            home_dir().join(".ssh").join("id_ed25519"),
+                                            None,
+                                        ),
+                                        server_check: ServerCheckMethod::NoCheck,
+                                    }));
                                     if let Some(tx) = result_tx_opt.take() {
                                         let _ = tx.send(Ok(()));
                                     }

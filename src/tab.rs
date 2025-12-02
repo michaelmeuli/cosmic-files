@@ -1516,6 +1516,7 @@ impl Location {
     }
 
     pub fn scan(&self, sizes: IconSizes) -> (Option<Item>, Vec<Item>) {
+        log::info!("pub fn scan: scanning location: {:?}", self);
         let items = match self {
             Self::Desktop(path, display, desktop_config) => {
                 scan_desktop(path, display, *desktop_config, sizes)

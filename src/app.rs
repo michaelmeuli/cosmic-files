@@ -2489,13 +2489,19 @@ impl Application for App {
     }
 
     fn on_nav_select(&mut self, entity: Entity) -> Task<Self::Message> {
+        log::info!("on_nav_select: activating entity {:?}", entity);
         self.nav_model.activate(entity);
         if let Some(location) = self.nav_model.data::<Location>(entity) {
+            log::info!("found Location in nav_model: {:?}", location); //Remote("ssh://michael@localhost:22/", "localhost", None)
             let should_open = match location {
                 #[cfg(feature = "gvfs")]
                 Location::Network(uri, name, Some(path))
                     if !path.try_exists().unwrap_or_default() =>
                 {
+                    log::info!(
+                        "attempting to open network favorite, path does not exist: {}",
+                        path.display()
+                    );
                     let mut found = false;
 
                     if let Some(key) = self
@@ -2627,12 +2633,14 @@ impl Application for App {
             };
 
             if should_open {
+                log::info!("should_open is true for location: {:?}", location);
                 let message = Message::TabMessage(None, tab::Message::Location(location.clone()));
                 return self.update(message);
             }
         }
         if let Some(data) = self.nav_model.data::<MounterData>(entity) {
             if let Some(mounter) = MOUNTERS.get(&data.0) {
+                log::info!("found Mounter, calling mounter.mount");
                 return mounter
                     .mount(data.1.clone())
                     .map(|()| cosmic::action::none());
@@ -3331,7 +3339,7 @@ impl Application for App {
             }
             Message::ClientItems(client_key, client_items) => {
                 log::info!("received client items for {client_key:?}");
-                log::debug!("items: {client_items:?}");
+                log::info!("items: {client_items:?}");
                 self.client_items.insert(client_key, client_items);
                 // Update nav bar
                 self.update_nav_model();
