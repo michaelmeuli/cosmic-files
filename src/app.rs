@@ -2566,6 +2566,10 @@ impl Application for App {
                         })
                     {
                         if let Some(client) = CLIENTS.get(&key) {
+                            log::info!(
+                                "found Connector, calling client.remote_drive: {}",
+                                uri
+                            );
                             return client.remote_drive(uri.clone()).map(move |()| {
                                 cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount {
                                     entity,
@@ -2636,6 +2640,7 @@ impl Application for App {
         }
         if let Some(data) = self.nav_model.data::<ClientData>(entity) {
             if let Some(client) = CLIENTS.get(&data.0) {
+                log::info!("found Connector, calling client.connect");
                 return client
                     .connect(data.1.clone())
                     .map(|_| cosmic::action::none());

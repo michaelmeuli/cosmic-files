@@ -363,12 +363,11 @@ impl Russh {
     pub fn new() -> Self {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-
-        let clients = Arc::new(RwLock::new(HashMap::<String, Arc<Client>>::new()));
-        let clients_worker = Arc::clone(&clients);
         std::thread::spawn(move || {
             let rt = Builder::new_current_thread().enable_all().build().unwrap();
             rt.block_on(async move {
+                let clients = Arc::new(RwLock::new(HashMap::<String, Arc<Client>>::new()));
+                let client_items = Vec::<ClientItem>::new();
                 while let Some(command) = command_rx.recv().await {
                     match command {
                         Cmd::Items(sizes, items_tx) => {
@@ -377,7 +376,7 @@ impl Russh {
                                 read.keys().cloned().collect()
                             };
                             log::info!("Russh: Items - clients: {:?}", keys);
-                            items_tx.send(items(keys, sizes)).await.unwrap();
+                            items_tx.send(client_items.clone()).await.unwrap();
                         }
                         Cmd::Rescan => {
                             let keys: Vec<String> = {
@@ -386,7 +385,7 @@ impl Russh {
                             };
                             log::info!("Russh: Rescan - clients: {:?}", keys);
                             event_tx
-                                .send(Event::Items(items(keys, IconSizes::default())))
+                                .send(Event::Items(client_items.clone()))
                                 .unwrap();
                         }
                         Cmd::Connect(client_item, complete_tx) => {
@@ -406,8 +405,9 @@ impl Russh {
                             .await;
                             match res {
                                 Ok(client) => {
+                                    log::info!("russh.rs: Connected to {} OK", item.host);
                                     {
-                                        let mut write = clients_worker.write().await;
+                                        let mut write = clients.write().await;
                                         write.insert(item.host.clone(), Arc::new(client));
                                     }
                                     _ = complete_tx.send(Ok(()));
@@ -442,7 +442,7 @@ impl Russh {
                             let username = url.username();
 
                             let existing_client = {
-                                let read = clients_worker.read().await;
+                                let read = clients.read().await;
                                 read.get(host).cloned()
                             };
 
@@ -474,7 +474,7 @@ impl Russh {
                                 Ok(client) => {
                                     log::info!("Cmd::RemoteDrive: Connected OK {}", host);
                                     {
-                                        let mut write = clients_worker.write().await;
+                                        let mut write = clients.write().await;
                                         write.insert(host.to_string(), Arc::new(client));
                                     }
                                     if let Some(tx) = result_tx_opt.take() {
@@ -509,7 +509,7 @@ impl Russh {
                             let host = url.host_str().unwrap_or("localhost");
                             log::info!("RemoteScan: normalized uri {}, host {}", norm_uri, host);
                             let client = {
-                                let read = clients_worker.read().await;
+                                let read = clients.read().await;
                                 match read.get(host) {
                                     Some(c) => Arc::clone(c), // clone Arc<Client>
                                     None => {
@@ -528,7 +528,7 @@ impl Russh {
                                 continue;
                             };
                             {
-                                let mut write = clients_worker.write().await;
+                                let mut write = clients.write().await;
                                 write.remove(&item.host);
                             }
                             item.is_connected = false;
