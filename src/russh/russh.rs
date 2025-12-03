@@ -51,24 +51,38 @@ pub fn normalize_ssh_uri(raw: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-fn items(keys: Vec<String>, _sizes: IconSizes) -> ClientItems {
-    let mut items = ClientItems::new();
-    for host in keys {
-        items.push(ClientItem::Russh(Item {
-            name: host.clone(),
-            is_connected: true,
-            icon_opt: None,
-            icon_symbolic_opt: None,
-            path_opt: None,
-            uri: format!("ssh://{host}:22/"),
-            host,
-            port: 22,
-            username: "michael".to_string(),
-            auth: AuthMethod::with_key_file(home_dir().join(".ssh").join("id_ed25519"), None),
-            server_check: ServerCheckMethod::NoCheck,
-        }));
+fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
+    let home_dir = dirs::home_dir().ok_or_else(|| {
+        "Could not determine the user home directory.\n\
+        This usually indicates that the HOME environment variable is missing or invalid.\n\
+        Please ensure HOME is set correctly before using SSH connections."
+            .to_string()
+    })?;
+
+    let ssh_dir = home_dir.join(".ssh");
+    if !ssh_dir.is_dir() {
+        return Err(format!(
+            "SSH configuration directory not found: {}.\n\
+            Please ensure ~/.ssh exists and contains your SSH keys.",
+            ssh_dir.display()
+        ));
     }
-    items
+    if ssh_dir.join("id_rsa").is_file() {
+        Ok((ssh_dir.join("id_rsa"), ssh_dir.join("id_rsa.pub")))
+    } else if ssh_dir.join("id_ed25519").is_file() {
+        Ok((ssh_dir.join("id_ed25519"), ssh_dir.join("id_ed25519.pub")))
+    } else if ssh_dir.join("id_ecdsa").is_file() {
+        Ok((ssh_dir.join("id_ecdsa"), ssh_dir.join("id_ecdsa.pub")))
+    } else if ssh_dir.join("id_dsa").is_file() {
+        Ok((ssh_dir.join("id_dsa"), ssh_dir.join("id_dsa.pub")))
+    } else {
+        Err(format!(
+            "No SSH key pair found in {}.\n\
+            Expected one of: id_rsa, id_ed25519, id_ecdsa, id_dsa.\n\
+            Please generate a key (e.g., with `ssh-keygen -t ed25519`) and try again.",
+            ssh_dir.display()
+        ))
+    }
 }
 
 fn virtual_network_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
@@ -474,21 +488,20 @@ impl Russh {
                             }
 
                             log::info!("Cmd::RemoteDrive: Connecting fresh session to {}", host);
-                            let key_path = home_dir().join(".ssh").join("id_ed25519");
-                            if !key_path.exists() {
-                                let msg = format!("SSH key file missing: {}", key_path.display());
-                                log::error!("{msg}");
 
-                                if let Some(tx) = result_tx_opt.take() {
-                                    let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
+                            let key_path = match get_key_files() {
+                                Ok(key_pair) => key_pair.0,
+                                Err(e) => {
+                                    log::error!("Cmd::RemoteDrive: {}", e);
+                                    if let Some(tx) = result_tx_opt.take() {
+                                        let _ = tx.send(Err(anyhow::anyhow!(e.clone())));
+                                    }
+                                    event_tx
+                                        .send(Event::RemoteResult(norm_uri_clone, Err(e)))
+                                        .unwrap();
+                                    return;
                                 }
-
-                                event_tx
-                                    .send(Event::RemoteResult(norm_uri_clone, Err(msg)))
-                                    .unwrap();
-                                return;
-                            }
-
+                            };
                             let auth = AuthMethod::with_key_file(key_path, None);
                             match Client::connect(
                                 (host, port),
