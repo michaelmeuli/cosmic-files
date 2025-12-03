@@ -175,6 +175,7 @@ network-drive-schemes =
     SSH File Transfer Protocol,sftp:// or ssh://
     WebDAV,dav:// or davs://
 network-drive-error = Unable to access network drive
+remote-access-error = Unable to access remote server
 password = Password
 remember-password = Remember password
 try-again = Try again

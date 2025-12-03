@@ -5633,7 +5633,7 @@ impl Application for App {
                 uri: _,
                 error,
             } => widget::dialog()
-                .title(fl!("network-drive-error"))
+                .title(fl!("remote-access-error"))
                 .body(error)
                 .icon(icon::from_name("dialog-error").size(64))
                 .primary_action(

@@ -385,9 +385,7 @@ impl Russh {
                             };
                             log::info!("Russh: Rescan - clients: {:?}", keys);
                             log::info!("Russh: Rescan - client items: {:?}", client_items);
-                            event_tx
-                                .send(Event::Items(client_items.clone()))
-                                .unwrap();
+                            event_tx.send(Event::Items(client_items.clone())).unwrap();
                         }
                         Cmd::Connect(client_item, complete_tx) => {
                             log::info!("Russh: Connect - client_item: {:?}", client_item);
@@ -477,6 +475,20 @@ impl Russh {
 
                             log::info!("Cmd::RemoteDrive: Connecting fresh session to {}", host);
                             let key_path = home_dir().join(".ssh").join("id_ed25519");
+                            if !key_path.exists() {
+                                let msg = format!("SSH key file missing: {}", key_path.display());
+                                log::error!("{msg}");
+
+                                if let Some(tx) = result_tx_opt.take() {
+                                    let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
+                                }
+
+                                event_tx
+                                    .send(Event::RemoteResult(norm_uri_clone, Err(msg)))
+                                    .unwrap();
+                                return;
+                            }
+
                             let auth = AuthMethod::with_key_file(key_path, None);
                             match Client::connect(
                                 (host, port),
@@ -487,7 +499,10 @@ impl Russh {
                             .await
                             {
                                 Ok(client) => {
-                                    log::info!("Cmd::RemoteDrive Ok(client): Connected OK {}", host);
+                                    log::info!(
+                                        "Cmd::RemoteDrive Ok(client): Connected OK {}",
+                                        host
+                                    );
                                     {
                                         let mut write = clients.write().await;
                                         write.insert(host.to_string(), Arc::new(client));
