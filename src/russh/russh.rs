@@ -525,7 +525,7 @@ impl Russh {
                                         client_items
                                     );
                                     client_items.push(ClientItem::Russh(Item {
-                                        name: "test".to_string(),
+                                        name: host.to_string(),
                                         is_connected: true,
                                         icon_opt: None,
                                         icon_symbolic_opt: None,

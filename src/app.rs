@@ -1082,6 +1082,7 @@ impl App {
         scrollable_id: widget::Id,
         window_id: Option<window::Id>,
     ) -> (Entity, Task<Message>) {
+        log::info!("Opening tab at location: {:?}", location);
         let mut tab = Tab::new(
             location.clone(),
             self.config.tab,

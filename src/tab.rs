@@ -3080,6 +3080,7 @@ impl Tab {
                     .and_then(|items| click_i_opt.and_then(|click_i| items.get(click_i)))
                 {
                     if let Some(location) = &clicked_item.location_opt {
+                        log::info!("Double click on location: {:?}", location);
                         if clicked_item.metadata.is_dir() {
                             cd = Some(location.clone());
                         } else if let Some(path) = location.path_opt() {
