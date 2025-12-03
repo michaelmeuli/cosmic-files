@@ -216,7 +216,7 @@ async fn remote_sftp_list(
                 children_opt = Some(0);
             }
             // TODO: ItemMetadata::Russh
-            ItemMetadata::GvfsPath {
+            ItemMetadata::RusshPath {
                 mtime,
                 size_opt,
                 children_opt,
@@ -520,8 +520,12 @@ impl Russh {
                                         let mut write = clients.write().await;
                                         write.insert(host.to_string(), Arc::new(client));
                                     }
+                                    log::info!(
+                                        "Cmd::RemoteDrive1: client_items {:?}",
+                                        client_items
+                                    );
                                     client_items.push(ClientItem::Russh(Item {
-                                        name: host.to_string(),
+                                        name: "test".to_string(),
                                         is_connected: true,
                                         icon_opt: None,
                                         icon_symbolic_opt: None,
@@ -536,6 +540,10 @@ impl Russh {
                                         ),
                                         server_check: ServerCheckMethod::NoCheck,
                                     }));
+                                    log::info!(
+                                        "Cmd::RemoteDrive2: client_items {:?}",
+                                        client_items
+                                    );
                                     if let Some(tx) = result_tx_opt.take() {
                                         let _ = tx.send(Ok(()));
                                     }
