@@ -85,7 +85,7 @@ fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     }
 }
 
-fn virtual_network_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
+fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
     struct V {
         name: String,
         display_name: String,
@@ -178,26 +178,27 @@ async fn remote_sftp_list(
             .to_string();
         let child_uri = {
             let mut auth = String::new();
-            if let Some(user) = url.username().strip_prefix("").filter(|u| !u.is_empty()) {
-                auth.push_str(user);
-                if let Some(pass) = url.password() {
-                    let _ = pass;
-                }
+            if !url.username().is_empty() {
+                auth.push_str(url.username());
                 auth.push('@');
             }
+
             let hostport = match (url.host_str(), url.port()) {
                 (Some(h), Some(p)) => format!("{h}:{p}"),
                 (Some(h), None) => h.to_string(),
                 _ => "localhost".into(),
             };
+            let mut new_path = PathBuf::from(url.path());
+            new_path.push(&child_path);
+
             format!(
                 "{}://{}{}",
                 url.scheme(),
                 auth + &hostport,
-                child_path.to_string_lossy()
+                new_path.to_string_lossy(),
             )
         };
-        let location = Location::Network(child_uri, name.clone(), None);
+        let location = Location::Remote(child_uri, name.clone(), None);
 
         let metadata = if !force_dir {
             let mtime = info
@@ -567,7 +568,7 @@ impl Russh {
                             log::info!("RemoteScan: scanning uri {}", uri);
                             if uri == "ssh:///" {
                                 let result =
-                                    virtual_network_root_items(sizes).map_err(|e| e.to_string());
+                                    virtual_remote_root_items(sizes).map_err(|e| e.to_string());
                                 let _ = items_tx.send(result).await;
                                 continue;
                             }
