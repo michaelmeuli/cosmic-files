@@ -14,6 +14,7 @@ use cosmic::{
         stream, window,
     },
     iced_core::widget::operation,
+    iced_winit::{self, SurfaceIdWrapper},
     theme,
     widget::{
         self, Operation,
@@ -369,7 +370,45 @@ impl<M: Send + 'static> Dialog<M> {
             .map(DialogMessage)
             .map(move |message| cosmic::action::app(mapper(message)));
         if let Some(result) = self.cosmic.app.result_opt.take() {
+            #[cfg(feature = "wayland")]
+            if !self.cosmic.surface_views.is_empty() {
+                log::debug!("waiting for surfaces to close...");
+                let mut tasks = Vec::new();
+                for id in self.cosmic.surface_views.iter() {
+                    match id.1.1 {
+                        SurfaceIdWrapper::Window(id) => {
+                            tasks.push(window::close::<M>(id).discard());
+                        }
+                        SurfaceIdWrapper::LayerSurface(id) => {
+                            tasks.push(iced_winit::wayland::commands::layer_surface::destroy_layer_surface::<M>(id).discard());
+                        }
+                        SurfaceIdWrapper::Popup(id) => {
+                            tasks.push(
+                                iced_winit::wayland::commands::popup::destroy_popup::<M>(id)
+                                    .discard(),
+                            );
+                        }
+                        SurfaceIdWrapper::Subsurface(id) => {
+                            tasks.push(
+                                iced_winit::wayland::commands::subsurface::destroy_subsurface::<M>(
+                                    id,
+                                )
+                                .discard(),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                let on_result_message = (self.on_result)(result);
+
+                tasks.push(Task::future(async move {
+                    cosmic::action::app(on_result_message)
+                }));
+                tasks.push(command);
+                return Task::batch(tasks);
+            }
             let on_result_message = (self.on_result)(result);
+
             Task::batch([
                 command,
                 Task::future(async move { cosmic::action::app(on_result_message) }),
@@ -388,6 +427,11 @@ impl<M: Send + 'static> Dialog<M> {
 
     pub const fn window_id(&self) -> window::Id {
         self.cosmic.app.flags.window_id
+    }
+
+    #[cfg(feature = "wayland")]
+    pub fn contains_surface(&self, id: &window::Id) -> bool {
+        self.cosmic.surface_views.contains_key(id)
     }
 }
 
@@ -1428,9 +1472,6 @@ impl Application for App {
             }
             Message::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers;
-                return self.update(Message::TabMessage(tab::Message::ModifiersChanged(
-                    modifiers,
-                )));
             }
             Message::MounterItems(mounter_key, mounter_items) => {
                 // Check for unmounted folders
@@ -1954,7 +1995,11 @@ impl Application for App {
             }
         }
 
-        col = col.push(self.tab.view(&self.key_binds).map(Message::TabMessage));
+        col = col.push(
+            self.tab
+                .view(&self.key_binds, &self.modifiers)
+                .map(Message::TabMessage),
+        );
 
         col.into()
     }

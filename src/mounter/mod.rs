@@ -90,6 +90,14 @@ impl MounterItem {
             Self::None => unreachable!(),
         }
     }
+
+    pub fn is_remote(&self) -> bool {
+        match self {
+            #[cfg(feature = "gvfs")]
+            Self::Gvfs(item) => item.is_remote(),
+            Self::None => unreachable!(),
+        }
+    }
 }
 
 pub type MounterItems = Vec<MounterItem>;
@@ -108,6 +116,7 @@ pub trait Mounter: Send + Sync {
     fn mount(&self, item: MounterItem) -> Task<()>;
     fn network_drive(&self, uri: String) -> Task<()>;
     fn network_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
+    fn dir_info(&self, uri: &str) -> Option<(String, String)>;
     fn unmount(&self, item: MounterItem) -> Task<()>;
     fn subscription(&self) -> Subscription<MounterMessage>;
 }

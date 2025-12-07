@@ -79,6 +79,10 @@ use crate::{
     config::{DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig, ThumbCfg},
     dialog::DialogKind,
     fl,
+    large_image::{
+        LargeImageManager, decode_large_image, exceeds_memory_limit, should_use_dedicated_worker,
+        should_use_tiling,
+    },
     localize::{LANGUAGE_SORTER, LOCALE},
     menu, mime_app,
     mime_icon::{mime_for_path, mime_icon},
@@ -99,8 +103,10 @@ const MAX_SEARCH_RESULTS: usize = 200;
 //TODO: configurable thumbnail size?
 const THUMBNAIL_SIZE: u32 = (ICON_SIZE_GRID as u32) * (ICON_SCALE_MAX as u32);
 
+// Thumbnail generation semaphore - limits parallel thumbnail workers
+// Uses 4 workers for balanced throughput and memory usage
 pub static THUMB_SEMAPHORE: LazyLock<tokio::sync::Semaphore> =
-    LazyLock::new(|| tokio::sync::Semaphore::const_new(num_cpus::get()));
+    LazyLock::new(|| tokio::sync::Semaphore::const_new(num_cpus::get().min(4)));
 
 pub(crate) static SORT_OPTION_FALLBACK: LazyLock<FxHashMap<String, (HeadingOptions, bool)>> =
     LazyLock::new(|| {
@@ -541,11 +547,34 @@ pub fn fs_kind(metadata: &Metadata) -> FsKind {
                         let major = major_str.parse::<libc::c_uint>().ok()?;
                         let minor = minor_str.parse::<libc::c_uint>().ok()?;
                         let dev = libc::makedev(major, minor);
-                        //TODO: make sure this list is exhaustive
+                        // Network and distributed filesystem types
+                        // Based on common remote filesystem types found in /proc/mounts
                         let kind = match mount_info.fs_type.as_str() {
-                            "cifs" | "fuse.rclone" | "fuse.sshfs" | "nfs" | "nfs4" | "smb"
-                            | "smb2" => FsKind::Remote,
+                            // SMB/CIFS variants
+                            "cifs" | "smb" | "smb2" | "smbfs" => FsKind::Remote,
+
+                            // NFS variants
+                            "nfs" | "nfs4" => FsKind::Remote,
+
+                            // FUSE-based remote filesystems
+                            "fuse.rclone" | "fuse.sshfs" | "fuse.davfs2" | "fuse.ceph"
+                            | "fuse.glusterfs" | "fuse.s3fs" | "fuse.goofys" | "fuse.gcsfuse"
+                            | "fuse.afp" | "fuse.afpfs" => FsKind::Remote,
+
+                            // Other network protocols
+                            "afs" | "coda" | "ncpfs" | "davfs" | "davfs2" | "shfs" => {
+                                FsKind::Remote
+                            }
+
+                            // Cluster/distributed filesystems
+                            "ceph" | "glusterfs" | "lustre" | "gfs" | "gfs2" | "ocfs2" => {
+                                FsKind::Remote
+                            }
+
+                            // GVFS (GNOME Virtual File System)
                             "fuse.gvfsd-fuse" => FsKind::Gvfs,
+
+                            // Everything else is local
                             _ => FsKind::Local,
                         };
                         Some((dev, kind))
@@ -623,7 +652,7 @@ fn display_name_for_file(path: &Path, name: &str, get_from_gvfs: bool, is_deskto
         );
     } else if get_from_gvfs {
         #[cfg(feature = "gvfs")]
-        return Item::display_name(glib::filename_display_name(path).as_str())
+        return Item::display_name(glib::filename_display_name(path).as_str());
     }
     Item::display_name(name)
 }
@@ -1387,12 +1416,19 @@ pub struct EditLocation {
 
 impl EditLocation {
     pub fn resolve(&self) -> Option<Location> {
-        let Some(selected) = self.selected else {
-            return Some(self.location.clone());
-        };
-        let completions = self.completions.as_ref()?;
-        let completion = completions.get(selected)?;
-        Some(self.location.with_path(completion.1.clone()))
+        if let Location::Network(uri, _, path) = &self.location {
+            MOUNTERS
+                .values()
+                .find_map(|mounter| mounter.dir_info(uri))
+                .map(|(uri, display_name)| Location::Network(uri, display_name, path.clone()))
+        } else {
+            let Some(selected) = self.selected else {
+                return Some(self.location.clone());
+            };
+            let completions = self.completions.as_ref()?;
+            let completion = completions.get(selected)?;
+            Some(self.location.with_path(completion.1.clone()))
+        }
     }
 
     pub fn select(&mut self, forwards: bool) {
@@ -1457,7 +1493,15 @@ impl std::fmt::Display for Location {
 
 impl Location {
     pub fn normalize(&self) -> Self {
-        if let Some(mut path) = self.path_opt().cloned() {
+        if let Location::Network(uri, ..) = self {
+            if !uri.ends_with('/') {
+                let mut uri = uri.clone();
+                uri.push('/');
+                self.with_uri(uri)
+            } else {
+                self.clone()
+            }
+        } else if let Some(mut path) = self.path_opt().cloned() {
             // Add trailing slash if location is a path
             path.push("");
             self.with_path(path)
@@ -1509,9 +1553,16 @@ impl Location {
             Self::Search(_, term, show_hidden, time) => {
                 Self::Search(path, term.clone(), *show_hidden, *time)
             }
-            Self::Network(id, name, path) => Self::Network(id.clone(), name.clone(), path.clone()),
 
             other => other.clone(),
+        }
+    }
+
+    pub fn with_uri(&self, uri: String) -> Self {
+        if let Self::Network(_, name, path) = self {
+            Self::Network(uri, name.clone(), path.clone())
+        } else {
+            self.clone()
         }
     }
 
@@ -1649,7 +1700,6 @@ pub enum Message {
     ItemUp,
     Location(Location),
     LocationUp,
-    ModifiersChanged(Modifiers),
     Open(Option<PathBuf>),
     Reload,
     RightClick(Option<Point>, Option<usize>),
@@ -1679,6 +1729,7 @@ pub enum Message {
     HighlightDeactivate(usize),
     HighlightActivate(usize),
     DirectorySize(PathBuf, DirSize),
+    ImageDecoded(PathBuf, u32, u32, Vec<u8>, Option<(u32, u32)>, u64), // path, width, height, pixels, display_size, generation
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1819,10 +1870,17 @@ impl ItemThumbnail {
             ThumbnailCacher::new(path, ThumbnailSize::from_pixel_size(thumbnail_size));
         match thumbnail_cacher.as_ref() {
             Ok(cache) => match cache.get_cached_thumbnail() {
-                CachedThumbnail::Valid((path, size)) => {
+                CachedThumbnail::Valid((thumbnail_path, size)) => {
+                    // Check original image dimensions even when loading cached thumbnail
+                    // This prevents trying to load huge images in preview mode
+                    let original_dims = match image::image_dimensions(path) {
+                        Ok((width, height)) => Some((width, height)),
+                        Err(_) => size.map(|s| (s.pixel_size(), s.pixel_size())),
+                    };
+
                     return Self::Image(
-                        widget::image::Handle::from_path(path),
-                        size.map(|s| (s.pixel_size(), s.pixel_size())),
+                        widget::image::Handle::from_path(thumbnail_path),
+                        original_dims,
                     );
                 }
                 CachedThumbnail::Failed => {
@@ -1862,6 +1920,45 @@ impl ItemThumbnail {
         let mut tried_supported_file = false;
         // First try built-in image thumbnailer
         if mime.type_() == mime::IMAGE && check_size("image", max_size_mb * 1000 * 1000) {
+            // Check if image dimensions would exceed available memory budget
+            // The GPU tiling system can handle large images, but we still need to decode them first
+            let dimensions_ok = match image::image_dimensions(path) {
+                Ok((width, height)) => {
+                    if exceeds_memory_limit(width, height, max_mem) {
+                        log::warn!(
+                            "skipping thumbnail generation for {}: {}x{} image would exceed {}MB memory budget",
+                            path.display(),
+                            width,
+                            height,
+                            max_mem
+                        );
+                        false
+                    } else {
+                        if should_use_tiling(width, height) {
+                            log::info!(
+                                "Large image {}x{} detected, will use GPU tiling for display",
+                                width,
+                                height
+                            );
+                        }
+                        true
+                    }
+                }
+                Err(err) => {
+                    log::debug!(
+                        "failed to read dimensions for {}: {}, will try decoding",
+                        path.display(),
+                        err
+                    );
+                    true // If we can't read dimensions, try anyway
+                }
+            };
+
+            if !dimensions_ok {
+                // Skip this image entirely since it is too large to safely decode
+                return Self::NotImage;
+            }
+
             tried_supported_file = true;
             let dyn_img: Option<image::DynamicImage> = match mime.subtype().as_str() {
                 "jxl" => match File::open(path) {
@@ -1915,10 +2012,15 @@ impl ItemThumbnail {
             };
 
             if let Some(dyn_img) = dyn_img {
+                let (img_width, img_height) = (dyn_img.width(), dyn_img.height());
+
                 if let Ok(cacher) = thumbnail_cacher.as_ref() {
                     match cacher.update_with_image(dyn_img) {
-                        Ok(path) => {
-                            return Self::Image(widget::image::Handle::from_path(path), None);
+                        Ok(thumb_path) => {
+                            return Self::Image(
+                                widget::image::Handle::from_path(thumb_path),
+                                Some((img_width, img_height)),
+                            );
                         }
                         Err(err) => {
                             log::warn!("cacher failed to decode {}: {}", path.display(), err);
@@ -1935,7 +2037,7 @@ impl ItemThumbnail {
                             thumbnail.height(),
                             thumbnail.into_raw(),
                         ),
-                        Some((dyn_img.width(), dyn_img.height())),
+                        Some((img_width, img_height)),
                     );
                 }
             }
@@ -2149,12 +2251,9 @@ impl Item {
             .unwrap_or(&ItemThumbnail::NotImage)
         {
             ItemThumbnail::NotImage => icon,
-            ItemThumbnail::Image(handle, _) => {
-                if let Some(path) = self.path_opt() {
-                    if self.mime.type_() == mime::IMAGE {
-                        return widget::image(widget::image::Handle::from_path(path)).into();
-                    }
-                }
+            ItemThumbnail::Image(handle, _original_dims) => {
+                // Preview pane: ALWAYS show thumbnail for instant, responsive UI
+                // Full resolution loading happens in gallery mode
                 widget::image(handle.clone()).into()
             }
             ItemThumbnail::Svg(handle) => widget::svg(handle.clone()).into(),
@@ -2549,13 +2648,13 @@ pub struct Tab {
     select_range: Option<(usize, usize)>,
     clicked: Option<usize>,
     selected_clicked: bool,
-    modifiers: Modifiers,
     last_right_click: Option<usize>,
     search_context: Option<SearchContext>,
     date_time_formatter: DateTimeFormatter<fieldsets::YMDT>,
     time_formatter: DateTimeFormatter<fieldsets::T>,
     watch_drag: bool,
     window_id: Option<window::Id>,
+    large_image_manager: LargeImageManager,
 }
 
 async fn calculate_dir_size(path: &Path, controller: Controller) -> Result<u64, OperationError> {
@@ -2670,13 +2769,13 @@ impl Tab {
             clicked: None,
             dnd_hovered: None,
             selected_clicked: false,
-            modifiers: Modifiers::default(),
             last_right_click: None,
             search_context: None,
             date_time_formatter: date_time_formatter(config.military_time),
             time_formatter: time_formatter(config.military_time),
             watch_drag: true,
             window_id,
+            large_image_manager: LargeImageManager::new(),
         }
     }
 
@@ -2970,6 +3069,77 @@ impl Tab {
         last
     }
 
+    fn trigger_async_decode(&mut self) -> Vec<Command> {
+        // Only trigger decode in gallery mode for the currently selected image
+        if !self.gallery {
+            return Vec::new();
+        }
+
+        let Some(index) = self.select_focus else {
+            return Vec::new();
+        };
+
+        let Some(items) = &self.items_opt else {
+            return Vec::new();
+        };
+
+        let Some(item) = items.get(index) else {
+            return Vec::new();
+        };
+
+        let Some(ItemThumbnail::Image(_, original_dims)) = &item.thumbnail_opt else {
+            return Vec::new();
+        };
+
+        if let Some((w, h)) = original_dims {
+            if !should_use_tiling(*w, *h) {
+                return Vec::new();
+            }
+        }
+
+        let Some(path) = item.path_opt() else {
+            return Vec::new();
+        };
+
+        // Clone path to avoid borrow checker issues
+        let path = path.to_path_buf();
+
+        // Get display size for adaptive resolution
+        let display_dimensions = self
+            .size_opt
+            .get()
+            .map(|size| (size.width as u32, size.height as u32));
+
+        // Try to decode the image using LargeImageManager with adaptive resolution
+        let (should_decode, target_dimensions, generation) = self
+            .large_image_manager
+            .try_decode(&path, display_dimensions);
+        if should_decode {
+            vec![Command::Iced(
+                cosmic::iced::Task::perform(
+                    decode_large_image(path, target_dimensions),
+                    move |result| {
+                        result
+                            .map(|(path, width, height, pixels)| {
+                                Message::ImageDecoded(
+                                    path,
+                                    width,
+                                    height,
+                                    pixels,
+                                    display_dimensions,
+                                    generation,
+                                )
+                            })
+                            .unwrap_or_else(|| Message::AutoScroll(None))
+                    },
+                )
+                .into(),
+            )]
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn change_location(&mut self, location: &Location, history_i_opt: Option<usize>) {
         self.location = location.normalize();
         self.location_ancestors = self.location.ancestors();
@@ -2992,10 +3162,14 @@ impl Tab {
             {
                 let mut remove = false;
                 if let Some(last_location) = self.history.last() {
-                    if let Some(last_path) = last_location.path_opt() {
-                        if let Some(path) = location.path_opt() {
-                            remove = last_path == path;
-                        }
+                    if let Location::Network(last_uri, ..) = last_location
+                        && let Location::Network(uri, ..) = location
+                    {
+                        remove = last_uri == uri;
+                    } else if let Some(last_path) = last_location.path_opt()
+                        && let Some(path) = location.path_opt()
+                    {
+                        remove = last_path == path;
                     }
                 }
                 if remove {
@@ -3244,16 +3418,14 @@ impl Tab {
             }
             Message::ContextMenu(point_opt, _) => {
                 self.edit_location = None;
-                if point_opt.is_none() || !mod_shift {
-                    self.context_menu = point_opt;
-                    self.location_context_menu_index = None;
+                self.context_menu = point_opt;
+                self.location_context_menu_index = None;
 
-                    //TODO: hack for clearing selecting when right clicking empty space
-                    if self.context_menu.is_some() && self.last_right_click.take().is_none() {
-                        if let Some(ref mut items) = self.items_opt {
-                            for item in items.iter_mut() {
-                                item.selected = false;
-                            }
+                //TODO: hack for clearing selecting when right clicking empty space
+                if self.context_menu.is_some() && self.last_right_click.take().is_none() {
+                    if let Some(ref mut items) = self.items_opt {
+                        for item in items.iter_mut() {
+                            item.selected = false;
                         }
                     }
                 }
@@ -3343,8 +3515,10 @@ impl Tab {
             }
             Message::EditLocationComplete(selected) => {
                 if let Some(mut edit_location) = self.edit_location.take() {
-                    edit_location.selected = Some(selected);
-                    cd = edit_location.resolve();
+                    if !matches!(edit_location.location, Location::Network(..)) {
+                        edit_location.selected = Some(selected);
+                        cd = edit_location.resolve();
+                    }
                 }
             }
             Message::EditLocationEnable => {
@@ -3385,6 +3559,10 @@ impl Tab {
             }
             Message::Gallery(gallery) => {
                 self.gallery = gallery;
+
+                if gallery {
+                    commands.extend(self.trigger_async_decode());
+                }
             }
             Message::GalleryPrevious | Message::GalleryNext => {
                 let mut pos_opt = None;
@@ -3412,6 +3590,8 @@ impl Tab {
                 if let Some((row, col)) = pos_opt {
                     // Should mod_shift be available?
                     self.select_position(row, col, mod_shift);
+
+                    commands.extend(self.trigger_async_decode());
                 }
                 if let Some(offset) = self.select_focus_scroll() {
                     commands.push(Command::Iced(
@@ -3427,6 +3607,10 @@ impl Tab {
                     for (_, item) in &indices {
                         if item.selected && item.can_gallery() {
                             self.gallery = !self.gallery;
+
+                            if self.gallery {
+                                commands.extend(self.trigger_async_decode());
+                            }
                             break;
                         }
                     }
@@ -3629,9 +3813,6 @@ impl Tab {
                         cd = Some(Location::Path(parent.to_owned()));
                     }
                 }
-            }
-            Message::ModifiersChanged(modifiers) => {
-                self.modifiers = modifiers;
             }
             Message::Open(path_opt) => {
                 match path_opt {
@@ -3915,6 +4096,18 @@ impl Tab {
                         }
                     }
                 }
+            }
+            Message::ImageDecoded(path, width, height, pixels, display_size, generation) => {
+                // Create handle from pre-decoded RGBA data (fast!)
+                let handle = widget::image::Handle::from_rgba(width, height, pixels);
+
+                // Store decoded image handle if generation still matches (not superseded)
+                self.large_image_manager.store_decoded_with_generation(
+                    path,
+                    handle,
+                    display_size,
+                    generation,
+                );
             }
             Message::ToggleSort(heading_option) => {
                 if !matches!(self.location, Location::Search(..)) {
@@ -4279,26 +4472,66 @@ impl Tab {
                         .unwrap_or(&ItemThumbnail::NotImage)
                     {
                         ItemThumbnail::NotImage => {}
-                        ItemThumbnail::Image(handle, _) => {
-                            if let Some(path) = item.path_opt() {
-                                element_opt = Some(
-                                    widget::container(
-                                        //TODO: use widget::image::viewer, when its zoom can be reset
-                                        widget::image(widget::image::Handle::from_path(path)),
-                                    )
-                                    .center(Length::Fill)
-                                    .into(),
-                                );
+                        ItemThumbnail::Image(handle, original_dims) => {
+                            // Determine which image to show based on async decode state
+                            let mut is_loading = false;
+                            let mut error_msg_opt = None;
+                            let image_handle = if let Some(path) = item.path_opt() {
+                                if let Some(error_msg) = self.large_image_manager.get_error(path) {
+                                    error_msg_opt = Some(error_msg.clone());
+                                    handle.clone()
+                                } else if self.large_image_manager.is_decoding(path) {
+                                    // Currently decoding (initial or re-decode) --> show cached/thumbnail with loading indicator
+                                    is_loading = true;
+                                    // Use decoded handle if available (re-decode), otherwise thumbnail (initial decode)
+                                    self.large_image_manager
+                                        .get_decoded(path)
+                                        .cloned()
+                                        .unwrap_or_else(|| handle.clone())
+                                } else if let Some(decoded_handle) =
+                                    self.large_image_manager.get_decoded(path)
+                                {
+                                    // Decoded and not currently decoding --> use it
+                                    decoded_handle.clone()
+                                } else if let Some((w, h)) = original_dims {
+                                    // Check if image needs tiling
+                                    if should_use_tiling(*w, *h) {
+                                        // Large image --> show thumbnail only
+                                        handle.clone()
+                                    } else {
+                                        // Normal-sized image --> load full resolution directly
+                                        widget::image::Handle::from_path(path)
+                                    }
+                                } else {
+                                    // No dimensions available --> show thumbnail
+                                    handle.clone()
+                                }
                             } else {
-                                element_opt = Some(
-                                    widget::container(
-                                        //TODO: use widget::image::viewer, when its zoom can be reset
-                                        widget::image(handle.clone()),
-                                    )
-                                    .center(Length::Fill)
-                                    .into(),
-                                );
-                            }
+                                handle.clone()
+                            };
+
+                            let content: cosmic::Element<'_, Message> =
+                                if let Some(error_msg) = error_msg_opt {
+                                    widget::column()
+                                        .push(widget::image(image_handle))
+                                        .push(widget::text(format!("⚠ {}", error_msg)).size(13))
+                                        .padding(space_xs)
+                                        .align_x(cosmic::iced::Alignment::Center)
+                                        .into()
+                                } else if is_loading {
+                                    widget::column()
+                                        .push(widget::image(image_handle))
+                                        .push(widget::text("Loading higher resolution...").size(14))
+                                        .padding(space_xs)
+                                        .align_x(cosmic::iced::Alignment::Center)
+                                        .into()
+                                } else {
+                                    //TODO: use widget::image::viewer, when its zoom can be reset
+                                    widget::image(image_handle).into()
+                                };
+
+                            element_opt =
+                                Some(widget::container(content).center(Length::Fill).into());
                         }
                         ItemThumbnail::Svg(handle) => {
                             element_opt = Some(
@@ -4518,65 +4751,82 @@ impl Tab {
             .padding([0, theme::active().cosmic().corner_radii.radius_xs[0] as u16]);
 
         if let Some(edit_location) = &self.edit_location {
-            if let Some(location) = edit_location.resolve() {
-                //TODO: allow editing other locations
-                if let Some(path) = location.path_opt() {
-                    row = row.push(
-                        widget::button::custom(
-                            widget::icon::from_name("window-close-symbolic").size(16),
-                        )
-                        .on_press(Message::EditLocation(None))
-                        .padding(space_xxs)
-                        .class(theme::Button::Icon),
-                    );
-                    let text_input = widget::text_input("", path.to_string_lossy().into_owned())
+            let mut text_input = None;
+
+            //TODO: allow editing other locations
+            if let Location::Network(ref uri, ..) = edit_location.location {
+                let location = edit_location.location.clone();
+                text_input = Some(
+                    widget::text_input("", uri.clone())
+                        .id(self.edit_location_id.clone())
+                        .on_input(move |input| {
+                            Message::EditLocation(Some(location.with_uri(input).into()))
+                        })
+                        .on_submit(|_| Message::EditLocationSubmit)
+                        .line_height(1.0),
+                );
+            } else if let Some(resolved_location) = edit_location.resolve()
+                && let Some(path) = resolved_location.path_opt().cloned()
+            {
+                text_input = Some(
+                    widget::text_input("", path.to_string_lossy().into_owned())
                         .id(self.edit_location_id.clone())
                         .on_input(move |input| {
                             Message::EditLocation(Some(
-                                location.with_path(PathBuf::from(input)).into(),
+                                resolved_location.with_path(PathBuf::from(input)).into(),
                             ))
                         })
                         .on_submit(|_| Message::EditLocationSubmit)
-                        .line_height(1.0);
-                    let mut popover =
-                        widget::popover(text_input).position(widget::popover::Position::Bottom);
-                    if let Some(completions) = &edit_location.completions {
-                        if !completions.is_empty() {
-                            let mut column =
-                                widget::column::with_capacity(completions.len()).padding(space_xxs);
-                            for (i, (name, _path)) in completions.iter().enumerate() {
-                                let selected = edit_location.selected == Some(i);
-                                column = column.push(
-                                    widget::button::custom(widget::text::body(name))
-                                        //TODO: match to design
-                                        .class(if selected {
-                                            theme::Button::Standard
-                                        } else {
-                                            theme::Button::HeaderBar
-                                        })
-                                        .on_press(Message::EditLocationComplete(i))
-                                        .padding(space_xxs)
-                                        .width(Length::Fill),
-                                );
-                            }
-                            popover = popover.popup(
-                                widget::container(column)
-                                    .class(theme::Container::Dropdown)
-                                    //TODO: This is a hack to get the popover to be the right width
-                                    .max_width(size.width - 140.0),
+                        .line_height(1.0),
+                );
+            }
+            if let Some(text_input) = text_input {
+                row = row.push(
+                    widget::button::custom(
+                        widget::icon::from_name("window-close-symbolic").size(16),
+                    )
+                    .on_press(Message::EditLocation(None))
+                    .padding(space_xxs)
+                    .class(theme::Button::Icon),
+                );
+                let mut popover =
+                    widget::popover(text_input).position(widget::popover::Position::Bottom);
+                if let Some(completions) = &edit_location.completions {
+                    if !completions.is_empty() {
+                        let mut column =
+                            widget::column::with_capacity(completions.len()).padding(space_xxs);
+                        for (i, (name, _path)) in completions.iter().enumerate() {
+                            let selected = edit_location.selected == Some(i);
+                            column = column.push(
+                                widget::button::custom(widget::text::body(name))
+                                    //TODO: match to design
+                                    .class(if selected {
+                                        theme::Button::Standard
+                                    } else {
+                                        theme::Button::HeaderBar
+                                    })
+                                    .on_press(Message::EditLocationComplete(i))
+                                    .padding(space_xxs)
+                                    .width(Length::Fill),
                             );
                         }
+                        popover = popover.popup(
+                            widget::container(column)
+                                .class(theme::Container::Dropdown)
+                                //TODO: This is a hack to get the popover to be the right width
+                                .max_width(size.width - 140.0),
+                        );
                     }
-                    row = row.push(popover);
-                    let mut column = widget::column::with_capacity(4).padding([0, space_s]);
-                    column = column.push(row);
-                    column = column.push(accent_rule);
-                    if self.config.view == View::List && !condensed {
-                        column = column.push(heading_row);
-                        column = column.push(heading_rule);
-                    }
-                    return column.into();
                 }
+                row = row.push(popover);
+                let mut column = widget::column::with_capacity(4).padding([0, space_s]);
+                column = column.push(row);
+                column = column.push(accent_rule);
+                if self.config.view == View::List && !condensed {
+                    column = column.push(heading_row);
+                    column = column.push(heading_rule);
+                }
+                return column.into();
             }
         } else if let Some(path) = self.location.path_opt() {
             row = row.push(
@@ -5511,11 +5761,12 @@ impl Tab {
         (drag_col, mouse_area.into(), true)
     }
 
-    pub fn view_responsive(
-        &self,
-        key_binds: &HashMap<KeyBind, Action>,
+    pub fn view_responsive<'a>(
+        &'a self,
+        key_binds: &'a HashMap<KeyBind, Action>,
+        modifiers: &'a Modifiers,
         size: Size,
-    ) -> Element<'_, Message> {
+    ) -> Element<'a, Message> {
         // Update cached size
         self.size_opt.set(Some(size));
 
@@ -5589,7 +5840,7 @@ impl Tab {
             .on_resize(Message::Resize)
             .on_back_press(move |_point_opt| Message::GoPrevious)
             .on_forward_press(move |_point_opt| Message::GoNext)
-            .on_scroll(|delta| respond_to_scroll_direction(delta, self.modifiers))
+            .on_scroll(|delta| respond_to_scroll_direction(delta, modifiers))
             .on_right_press(move |p| {
                 Message::ContextMenu(
                     if self.context_menu.is_some() { None } else { p },
@@ -5601,7 +5852,7 @@ impl Tab {
         let mut popover = widget::popover(mouse_area);
         if let Some(point) = self.context_menu {
             if !cfg!(feature = "wayland") || !crate::is_wayland() {
-                let context_menu = menu::context_menu(self, key_binds, &self.modifiers);
+                let context_menu = menu::context_menu(self, key_binds, &modifiers);
                 popover = popover
                     .popup(context_menu)
                     .position(widget::popover::Position::Point(point));
@@ -5715,8 +5966,12 @@ impl Tab {
         dnd_dest.into()
     }
 
-    pub fn view<'a>(&'a self, key_binds: &'a HashMap<KeyBind, Action>) -> Element<'a, Message> {
-        widget::responsive(|size| self.view_responsive(key_binds, size)).into()
+    pub fn view<'a>(
+        &'a self,
+        key_binds: &'a HashMap<KeyBind, Action>,
+        modifiers: &'a Modifiers,
+    ) -> Element<'a, Message> {
+        widget::responsive(|size| self.view_responsive(key_binds, modifiers, size)).into()
     }
 
     pub fn subscription(&self, preview: bool) -> Subscription<Message> {
@@ -5770,13 +6025,30 @@ impl Tab {
                     let max_jobs = jobs;
                     let max_mb = u64::from(self.thumb_config.max_mem_mb.get());
                     let max_size = u64::from(self.thumb_config.max_size_mb.get());
+
+                    // Determine effective memory budget based on image size
+                    let (effective_max_mb, effective_jobs) = if mime.type_() == mime::IMAGE {
+                        match image::image_dimensions(&path) {
+                            Ok((width, height)) => {
+                                let (_use_dedicated, eff_mb, eff_jobs) =
+                                    should_use_dedicated_worker(width, height, max_mb, max_jobs);
+                                (eff_mb, eff_jobs)
+                            }
+                            Err(_) => (max_mb, max_jobs),
+                        }
+                    } else {
+                        (max_mb, max_jobs)
+                    };
+
                     subscriptions.push(Subscription::run_with_id(
                         ("thumbnail", path.clone()),
                         stream::channel(1, move |mut output| async move {
                             let message = {
                                 let path = path.clone();
 
+                                // Acquire semaphore permit
                                 _ = THUMB_SEMAPHORE.acquire().await;
+
                                 tokio::task::spawn_blocking(move || {
                                     let start = Instant::now();
                                     let thumbnail = ItemThumbnail::new(
@@ -5784,8 +6056,8 @@ impl Tab {
                                         metadata,
                                         mime,
                                         THUMBNAIL_SIZE,
-                                        max_mb,
-                                        max_jobs,
+                                        effective_max_mb,
+                                        effective_jobs,
                                         max_size,
                                     );
                                     log::debug!(
@@ -6034,7 +6306,7 @@ impl Tab {
     }
 }
 
-pub fn respond_to_scroll_direction(delta: ScrollDelta, modifiers: Modifiers) -> Option<Message> {
+pub fn respond_to_scroll_direction(delta: ScrollDelta, modifiers: &Modifiers) -> Option<Message> {
     if !modifiers.control() {
         return None;
     }
@@ -6509,7 +6781,7 @@ mod tests {
     #[test]
     fn tab_scroll_up_with_ctrl_modifier_zooms() -> io::Result<()> {
         let message_maybe =
-            respond_to_scroll_direction(ScrollDelta::Pixels { x: 0.0, y: 1.0 }, Modifiers::CTRL);
+            respond_to_scroll_direction(ScrollDelta::Pixels { x: 0.0, y: 1.0 }, &Modifiers::CTRL);
         assert!(message_maybe.is_some());
         assert!(matches!(message_maybe.unwrap(), Message::ZoomIn));
         Ok(())
@@ -6517,8 +6789,10 @@ mod tests {
 
     #[test]
     fn tab_scroll_up_without_ctrl_modifier_does_not_zoom() -> io::Result<()> {
-        let message_maybe =
-            respond_to_scroll_direction(ScrollDelta::Pixels { x: 0.0, y: 1.0 }, Modifiers::empty());
+        let message_maybe = respond_to_scroll_direction(
+            ScrollDelta::Pixels { x: 0.0, y: 1.0 },
+            &Modifiers::empty(),
+        );
         assert!(message_maybe.is_none());
         Ok(())
     }
@@ -6526,7 +6800,7 @@ mod tests {
     #[test]
     fn tab_scroll_down_with_ctrl_modifier_zooms() -> io::Result<()> {
         let message_maybe =
-            respond_to_scroll_direction(ScrollDelta::Pixels { x: 0.0, y: -1.0 }, Modifiers::CTRL);
+            respond_to_scroll_direction(ScrollDelta::Pixels { x: 0.0, y: -1.0 }, &Modifiers::CTRL);
         assert!(message_maybe.is_some());
         assert!(matches!(message_maybe.unwrap(), Message::ZoomOut));
         Ok(())
@@ -6536,7 +6810,7 @@ mod tests {
     fn tab_scroll_down_without_ctrl_modifier_does_not_zoom() -> io::Result<()> {
         let message_maybe = respond_to_scroll_direction(
             ScrollDelta::Pixels { x: 0.0, y: -1.0 },
-            Modifiers::empty(),
+            &Modifiers::empty(),
         );
         assert!(message_maybe.is_none());
         Ok(())
