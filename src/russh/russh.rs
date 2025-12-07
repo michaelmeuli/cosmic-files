@@ -143,13 +143,89 @@ fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String>
     Ok(items)
 }
 
+pub fn remote_file_from_uri(uri: &str) -> Result<RemoteFile, String> {
+    let url = Url::parse(uri).map_err(|e| format!("Invalid remote URI {uri}: {e}"))?;
+
+    if url.scheme() != "ssh" {
+        return Err(format!(
+            "Unsupported scheme '{}', expected ssh://",
+            url.scheme()
+        ));
+    }
+
+    let host = url.host_str().ok_or("Missing host in ssh URI")?.to_string();
+
+    let port = url.port().unwrap_or(22);
+    let username = if url.username().is_empty() {
+        None
+    } else {
+        Some(url.username().to_string())
+    };
+
+    let mut path = url.path().to_string();
+    if path.is_empty() {
+        path = "/".into();
+    }
+
+    // Remove trailing slash except root
+    if path.len() > 1 && path.ends_with('/') {
+        path.pop();
+    }
+
+    Ok(RemoteFile {
+        uri: uri.to_string(),
+        host,
+        port,
+        username,
+        path,
+    })
+}
+
+pub async fn resolve_symlink(
+    client: &Client,
+    remotefile: &RemoteFile,
+) -> Result<RemoteFile, String> {
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| e.to_string())?;
+    let sftp = SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    match sftp.read_link(&remotefile.path).await {
+        Ok(link_path) => {
+            // Build new URI using same host/username but new path
+            let new_uri = format!(
+                "ssh://{}{}:{}{}",
+                remotefile
+                    .username
+                    .clone()
+                    .map(|u| u + "@")
+                    .unwrap_or_default(),
+                remotefile.host,
+                remotefile.port,
+                link_path
+            );
+            remote_file_from_uri(&new_uri)
+        }
+        Err(_) => Ok(remotefile.clone()), // not a symlink → keep original
+    }
+}
+
 async fn remote_sftp_list(
     client: &Client,
     uri: &str,
     sizes: IconSizes,
 ) -> Result<Vec<tab::Item>, String> {
     log::info!("remote_sftp_list: listing uri {}", uri);
+
+    let file = remote_file_from_uri(uri)?;
+    log::info!("remote_sftp_list: parsed remote file {:?}", file);
+
     let force_dir = uri.starts_with("ssh:///");
+
     let url = Url::parse(uri).map_err(|e| format!("bad uri: {e}"))?;
     let mut path = url.path().to_string();
     if path.is_empty() {
@@ -167,10 +243,14 @@ async fn remote_sftp_list(
         .read_dir(path.clone())
         .await
         .map_err(|e| format!("read_dir {path}: {e:?}"))?;
+
     let mut items = Vec::new();
     for entry in entries {
         let child_path = PathBuf::from(entry.file_name());
         let info = entry.metadata();
+        if info.is_symlink() {
+            let file = resolve_symlink(client, &file).await?;
+        }
         let name = child_path
             .file_name()
             .and_then(|s| s.to_str())
@@ -198,7 +278,11 @@ async fn remote_sftp_list(
                 new_path.to_string_lossy(),
             )
         };
-        let location = Location::Remote(child_uri, name.clone(), None);
+        let location = Location::Remote(
+            child_uri,
+            name.clone(),
+            Some(PathBuf::from(file.path.clone())),
+        );
 
         let metadata = if !force_dir {
             let mtime = info
@@ -245,13 +329,16 @@ async fn remote_sftp_list(
             )
         };
 
+        // Check if item is hidden
+        let hidden = name.starts_with('.');
+
         items.push(tab::Item {
             name: name.clone(),
             is_mount_point: false,
             is_client_point: true,
             display_name: name,
             metadata,
-            hidden: false,
+            hidden,
             location_opt: Some(location),
             mime,
             icon_handle_grid,
@@ -298,6 +385,15 @@ fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> Clie
             anonymous_opt: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteFile {
+    pub uri: String,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub path: String,
 }
 
 enum Cmd {
