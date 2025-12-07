@@ -62,7 +62,7 @@ md-5 = "0.10.6"
 png = "0.18"
 jxl-oxide = { version = "0.12.5", features = ["image"] }
 num_cpus = "1.17.0"
-async-ssh2-tokio = { version = "0.10.0", optional = true }
+async-ssh2-tokio = { version = "0.12.1", optional = true }
 russh-sftp = { version = "2.1.1", optional = true }
 
 
