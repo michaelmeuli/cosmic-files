@@ -8,7 +8,8 @@ use cosmic::{
     widget,
 };
 use std::{
-    any::TypeId, cell::Cell, collections::HashMap, future::pending, path::PathBuf, sync::Arc,
+    any::TypeId, cell::Cell, collections::HashMap, future::pending, path::Path, path::PathBuf,
+    sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock, mpsc};
 
@@ -111,6 +112,36 @@ fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String>
     Ok(items)
 }
 
+pub async fn dir_info(client: &Client, uri: &str) -> Result<(String, String), String> {
+    let remote_file = remote_file_from_uri(uri)?;
+    let resolved_uri = remote_file.uri();
+
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| e.to_string())?;
+    let sftp = SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Err(err) = sftp.metadata(&remote_file.path).await {
+        return Err(format!(
+            "dir_info(): metadata error for {}: {}",
+            remote_file.path, err
+        ));
+    }
+
+    // Display name = last component of `remote_file.path`
+    let display_name = Path::new(&remote_file.path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&remote_file.path)
+        .to_string();
+
+    Ok((resolved_uri, display_name))
+}
+
 pub fn remote_file_from_uri(uri: &str) -> Result<RemoteFile, String> {
     let url = Url::parse(uri).map_err(|e| format!("Invalid remote URI {uri}: {e}"))?;
     if url.scheme() != "ssh" {
@@ -207,10 +238,7 @@ async fn remote_sftp_list(
         let child_path = PathBuf::from(entry.file_name());
         let info = entry.metadata();
         if info.is_symlink() {
-            log::info!(
-                "remote_sftp_list: resolving symlink for {:?}",
-                child_path
-            );
+            log::info!("remote_sftp_list: resolving symlink for {:?}", child_path);
             remote_file = resolve_symlink(client, &remote_file).await?;
         }
         let name = child_path
@@ -369,6 +397,7 @@ enum Cmd {
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
+    DirInfo(String, mpsc::Sender<Result<(String, String), glib::Error>>),
     Disconnect(ClientItem),
 }
 
@@ -702,6 +731,9 @@ impl Russh {
                             let result = remote_sftp_list(&client, &norm_uri, sizes).await;
                             let _ = items_tx.send(result).await;
                         }
+                        Cmd::DirInfo(uri, result_tx) => {
+                            result_tx.send(dir_info(&uri)).await.unwrap();
+                        }
                         Cmd::Disconnect(client_item) => {
                             let ClientItem::Russh(mut item) = client_item else {
                                 continue;
@@ -770,6 +802,14 @@ impl Connector for Russh {
             .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
             .unwrap();
         items_rx.blocking_recv()
+    }
+
+    fn dir_info(&self, uri: &str) -> Option<(String, String)> {
+        let (result_tx, mut result_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(Cmd::DirInfo(uri.to_string(), result_tx))
+            .unwrap();
+        result_rx.blocking_recv().and_then(|res| res.ok())
     }
 
     fn disconnect(&self, item: ClientItem) -> Task<()> {

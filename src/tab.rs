@@ -1421,6 +1421,11 @@ impl EditLocation {
                 .values()
                 .find_map(|mounter| mounter.dir_info(uri))
                 .map(|(uri, display_name)| Location::Network(uri, display_name, path.clone()))
+        } else if let Location::Remote(uri, _, path) = &self.location {
+            CLIENTS
+                .values()
+                .find_map(|client| client.dir_info(uri))
+                .map(|(uri, display_name)| Location::Remote(uri, display_name, path.clone()))
         } else {
             let Some(selected) = self.selected else {
                 return Some(self.location.clone());
@@ -1561,7 +1566,10 @@ impl Location {
     pub fn with_uri(&self, uri: String) -> Self {
         if let Self::Network(_, name, path) = self {
             Self::Network(uri, name.clone(), path.clone())
-        } else {
+        } else if let Self::Remote(_, name, path) = self {
+            Self::Remote(uri, name.clone(), path.clone())
+        }
+        else {
             self.clone()
         }
     }
