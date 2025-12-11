@@ -5161,7 +5161,7 @@ impl Application for App {
                     self.remote_drive(),
                     Message::ToggleContextPage(ContextPage::RemoteDrive),
                 )
-                .title(fl!("add-network-drive"))
+                .title(fl!("add-remote-drive"))
                 .header(text_input)
                 .footer(widget::row::with_children([
                     widget::horizontal_space().into(),

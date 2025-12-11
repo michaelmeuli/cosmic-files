@@ -157,6 +157,7 @@ support = Support
 
 ## Add Network Drive
 add-network-drive = Add network drive
+add-remote-drive = Add remote drive
 connect = Connect
 connect-anonymously = Connect anonymously
 connecting = Connecting...

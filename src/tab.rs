@@ -5911,7 +5911,7 @@ impl Tab {
                 tab_column = tab_column.push(
                     widget::layer_container(widget::row::with_children([
                         widget::horizontal_space().into(),
-                        widget::button::standard(fl!("add-network-drive"))
+                        widget::button::standard(fl!("add-remote-drive"))
                             .on_press(Message::AddRemoteDrive)
                             .into(),
                     ]))
