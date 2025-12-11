@@ -397,7 +397,7 @@ enum Cmd {
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
-    DirInfo(String, mpsc::Sender<Result<(String, String), glib::Error>>),
+    DirInfo(String, mpsc::Sender<Result<(String, String), anyhow::Error>>),
     Disconnect(ClientItem),
 }
 
@@ -732,7 +732,31 @@ impl Russh {
                             let _ = items_tx.send(result).await;
                         }
                         Cmd::DirInfo(uri, result_tx) => {
-                            result_tx.send(dir_info(&uri)).await.unwrap();
+                            let remote_file = match remote_file_from_uri(&uri) {
+                                Ok(rf) => rf,
+                                Err(e) => {
+                                    log::error!(
+                                        "Cmd::DirInfo: remote_file_from_uri() failed: {}",
+                                        e
+                                    );
+                                    let _ = result_tx.send(Err(anyhow::anyhow!(e))).await;
+                                    continue;
+                                }
+                            };
+                            let host = remote_file.host.as_str();
+                            let client = {
+                                let read = clients.read().await;
+                                match read.get(host) {
+                                    Some(c) => Arc::clone(c),
+                                    None => {
+                                        let msg = format!("No SSH client connected for host: {}", host);
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(msg))).await;
+                                        continue;
+                                    }
+                                }
+                            };
+                            let result = dir_info(&client, &uri).await.map_err(|e| anyhow::anyhow!(e));
+                            result_tx.send(result).await.unwrap();
                         }
                         Cmd::Disconnect(client_item) => {
                             let ClientItem::Russh(mut item) = client_item else {
