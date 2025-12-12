@@ -1475,9 +1475,9 @@ pub enum Location {
     Network(String, String, Option<PathBuf>),
     Path(PathBuf),
     Recents,
+    Remote(String, String, Option<PathBuf>),
     Search(PathBuf, String, bool, Instant),
     Trash,
-    Remote(String, String, Option<PathBuf>),
 }
 
 impl std::fmt::Display for Location {
@@ -1489,9 +1489,9 @@ impl std::fmt::Display for Location {
             Self::Network(uri, ..) => write!(f, "{uri}"),
             Self::Path(path) => write!(f, "{}", path.display()),
             Self::Recents => write!(f, "recents"),
+            Self::Remote(..) => write!(f, "remote"),
             Self::Search(path, term, ..) => write!(f, "search {} for {}", path.display(), term),
             Self::Trash => write!(f, "trash"),
-            Self::Remote(..) => write!(f, "remote"),
         }
     }
 }
@@ -1543,6 +1543,7 @@ impl Location {
             Self::Path(path) => Some(path),
             Self::Search(path, ..) => Some(path),
             Self::Network(_, _, path) => path.as_ref(),
+            Self::Remote(_, _, path) => path.as_ref(),
             _ => None,
         }
     }
@@ -1553,6 +1554,7 @@ impl Location {
             Self::Path(path) => Some(path),
             Self::Search(path, ..) => Some(path),
             Self::Network(_, _, path) => path,
+            Self::Remote(_, _, path) => path,
             _ => None,
         }
     }
@@ -3534,7 +3536,10 @@ impl Tab {
             }
             Message::EditLocationComplete(selected) => {
                 if let Some(mut edit_location) = self.edit_location.take() {
-                    if !matches!(edit_location.location, Location::Network(..)) {
+                    if !matches!(
+                        edit_location.location,
+                        Location::Network(..) | Location::Remote(..)
+                    ) {
                         edit_location.selected = Some(selected);
                         cd = edit_location.resolve();
                     }
@@ -4774,6 +4779,17 @@ impl Tab {
 
             //TODO: allow editing other locations
             if let Location::Network(ref uri, ..) = edit_location.location {
+                let location = edit_location.location.clone();
+                text_input = Some(
+                    widget::text_input("", uri.clone())
+                        .id(self.edit_location_id.clone())
+                        .on_input(move |input| {
+                            Message::EditLocation(Some(location.with_uri(input).into()))
+                        })
+                        .on_submit(|_| Message::EditLocationSubmit)
+                        .line_height(1.0),
+                );
+            } else if let Location::Remote(ref uri, ..) = edit_location.location {
                 let location = edit_location.location.clone();
                 text_input = Some(
                     widget::text_input("", uri.clone())
