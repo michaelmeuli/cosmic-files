@@ -1602,7 +1602,7 @@ impl App {
         }
         if !CLIENTS.is_empty() {
             nav_model = nav_model.insert(|b| {
-                b.text(fl!("networks"))
+                b.text(fl!("remotes"))
                     .icon(icon::icon(
                         icon::from_name("network-workgroup-symbolic")
                             .size(16)
@@ -1610,7 +1610,7 @@ impl App {
                     ))
                     .data(Location::Remote(
                         "ssh:///".to_string(),
-                        fl!("networks"),
+                        fl!("remotes"),
                         None,
                     ))
                     .divider_above()

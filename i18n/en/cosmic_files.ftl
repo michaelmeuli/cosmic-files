@@ -5,6 +5,7 @@ no-results = No results found
 filesystem = Filesystem
 home = Home
 networks = Networks
+remotes = Remotes
 notification-in-progress = File operations are in progress
 trash = Trash
 recents = Recents
