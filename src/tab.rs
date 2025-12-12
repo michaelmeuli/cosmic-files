@@ -87,9 +87,9 @@ use crate::{
     menu, mime_app,
     mime_icon::{mime_for_path, mime_icon},
     mounter::MOUNTERS,
-    russh::CLIENTS,
     mouse_area,
     operation::{Controller, OperationError},
+    russh::CLIENTS,
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
 };
@@ -1361,7 +1361,7 @@ pub fn scan_desktop(
                 Some(item)
             }));
         }
-    } 
+    }
 
     if desktop_config.show_trash {
         let name = fl!("trash");
@@ -1491,7 +1491,7 @@ impl std::fmt::Display for Location {
             Self::Recents => write!(f, "recents"),
             Self::Search(path, term, ..) => write!(f, "search {} for {}", path.display(), term),
             Self::Trash => write!(f, "trash"),
-            Self::Remote(..) => write!(f, "remote")
+            Self::Remote(..) => write!(f, "remote"),
         }
     }
 }
@@ -1499,6 +1499,14 @@ impl std::fmt::Display for Location {
 impl Location {
     pub fn normalize(&self) -> Self {
         if let Location::Network(uri, ..) = self {
+            if !uri.ends_with('/') {
+                let mut uri = uri.clone();
+                uri.push('/');
+                self.with_uri(uri)
+            } else {
+                self.clone()
+            }
+        } else if let Location::Remote(uri, ..) = self {
             if !uri.ends_with('/') {
                 let mut uri = uri.clone();
                 uri.push('/');
@@ -1568,8 +1576,7 @@ impl Location {
             Self::Network(uri, name.clone(), path.clone())
         } else if let Self::Remote(_, name, path) = self {
             Self::Remote(uri, name.clone(), path.clone())
-        }
-        else {
+        } else {
             self.clone()
         }
     }
