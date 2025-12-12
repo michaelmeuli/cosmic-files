@@ -3181,6 +3181,10 @@ impl Tab {
                         && let Location::Network(uri, ..) = location
                     {
                         remove = last_uri == uri;
+                    } else if let Location::Remote(last_uri, ..) = last_location
+                        && let Location::Remote(uri, ..) = location
+                    {
+                        remove = last_uri == uri;
                     } else if let Some(last_path) = last_location.path_opt()
                         && let Some(path) = location.path_opt()
                     {
