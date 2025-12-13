@@ -2616,7 +2616,7 @@ impl Application for App {
                         Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
                     );
                 }
-                Location::Path(path) | Location::Network(_, _, Some(path)) => {
+                Location::Path(path) | Location::Network(_, _, Some(path)) | Location::Remote(_, _, Some(path)) => {
                     match path.try_exists() {
                         Ok(true) => true,
                         Ok(false) => {
