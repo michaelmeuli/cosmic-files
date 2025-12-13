@@ -158,7 +158,8 @@ pub fn context_menu<'a>(
             | Location::Path(..)
             | Location::Search(..)
             | Location::Recents
-            | Location::Network(_, _, Some(_)),
+            | Location::Network(_, _, Some(_))
+            | Location::Remote(_, _, Some(_)),
         ) => {
             if selected_trash_only {
                 children.push(menu_item(fl!("open"), Action::Open).into());
