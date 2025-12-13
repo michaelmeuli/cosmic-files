@@ -264,6 +264,7 @@ async fn remote_sftp_list(
             name.clone(),
             Some(PathBuf::from(remote_file.path.clone())),
         );
+        log::info!("remote_sftp_list: child location {:?}", location);
 
         let metadata = if !force_dir {
             let mtime = info
@@ -647,7 +648,9 @@ impl Russh {
                                         is_connected: true,
                                         icon_opt: None,
                                         icon_symbolic_opt: None,
-                                        path_opt: None,
+                                        path_opt: Some(PathBuf::from(
+                                            remote_file.path.clone(),
+                                        )),
                                         uri: norm_uri.clone(),
                                         host: host.to_string(),
                                         port,
