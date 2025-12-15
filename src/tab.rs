@@ -1416,16 +1416,16 @@ pub struct EditLocation {
 
 impl EditLocation {
     pub fn resolve(&self) -> Option<Location> {
-        if let Location::Network(uri, _, path) = &self.location {
+        if let Location::Network(uri, ..) = &self.location {
             MOUNTERS
                 .values()
                 .find_map(|mounter| mounter.dir_info(uri))
-                .map(|(uri, display_name)| Location::Network(uri, display_name, path.clone()))
+                .map(|(uri, display_name, path_opt)| Location::Network(uri, display_name, path_opt))
         } else if let Location::Remote(uri, _, path) = &self.location {
             CLIENTS
                 .values()
                 .find_map(|client| client.dir_info(uri))
-                .map(|(uri, display_name)| Location::Remote(uri, display_name, path.clone()))
+                .map(|(uri, display_name, path_opt)| Location::Remote(uri, display_name, path_opt))
         } else {
             let Some(selected) = self.selected else {
                 return Some(self.location.clone());
