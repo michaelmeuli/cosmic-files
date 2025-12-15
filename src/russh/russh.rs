@@ -73,7 +73,7 @@ fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String>
         let name = v.name;
         let uri = v.uri;
         let display_name = v.display_name;
-        let location = Location::Remote(uri, display_name.clone(), None);
+        let location = Location::Remote(uri, display_name.clone(), Some("/".into()));
 
         let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
             let file_icon = |size| widget::icon::from_name("folder").size(size).handle();
