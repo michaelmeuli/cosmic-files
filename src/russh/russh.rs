@@ -112,7 +112,7 @@ fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String>
     Ok(items)
 }
 
-pub async fn dir_info(client: &Client, uri: &str) -> Result<(String, String), String> {
+pub async fn dir_info(client: &Client, uri: &str) -> Result<(String, String, Option<PathBuf>), String> {
     let remote_file = remote_file_from_uri(uri)?;
     let resolved_uri = remote_file.uri();
 
@@ -138,8 +138,9 @@ pub async fn dir_info(client: &Client, uri: &str) -> Result<(String, String), St
         .and_then(|s| s.to_str())
         .unwrap_or(&remote_file.path)
         .to_string();
+    let filepath: Option<PathBuf> = Some(PathBuf::from(&remote_file.path));
 
-    Ok((resolved_uri, display_name))
+    Ok((resolved_uri, display_name, filepath))
 }
 
 pub fn remote_file_from_uri(uri: &str) -> Result<RemoteFile, String> {
@@ -398,7 +399,7 @@ enum Cmd {
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
-    DirInfo(String, mpsc::Sender<Result<(String, String), anyhow::Error>>),
+    DirInfo(String, mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>),
     Disconnect(ClientItem),
 }
 
@@ -831,7 +832,7 @@ impl Connector for Russh {
         items_rx.blocking_recv()
     }
 
-    fn dir_info(&self, uri: &str) -> Option<(String, String)> {
+    fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)> {
         let (result_tx, mut result_rx) = mpsc::channel(1);
         self.command_tx
             .send(Cmd::DirInfo(uri.to_string(), result_tx))

@@ -1421,7 +1421,7 @@ impl EditLocation {
                 .values()
                 .find_map(|mounter| mounter.dir_info(uri))
                 .map(|(uri, display_name, path_opt)| Location::Network(uri, display_name, path_opt))
-        } else if let Location::Remote(uri, _, path) = &self.location {
+        } else if let Location::Remote(uri, ..) = &self.location {
             CLIENTS
                 .values()
                 .find_map(|client| client.dir_info(uri))
