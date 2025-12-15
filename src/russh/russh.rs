@@ -263,7 +263,7 @@ async fn remote_sftp_list(
         let location = Location::Remote(
             child_uri,
             name.clone(),
-            Some(PathBuf::from(remote_file.path.clone())),
+            Some(new_path.clone()),
         );
         log::info!("remote_sftp_list: child location {:?}", location);
 
