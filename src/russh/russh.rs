@@ -112,7 +112,10 @@ fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String>
     Ok(items)
 }
 
-pub async fn dir_info(client: &Client, uri: &str) -> Result<(String, String, Option<PathBuf>), String> {
+pub async fn dir_info(
+    client: &Client,
+    uri: &str,
+) -> Result<(String, String, Option<PathBuf>), String> {
     let remote_file = remote_file_from_uri(uri)?;
     let resolved_uri = remote_file.uri();
 
@@ -260,11 +263,7 @@ async fn remote_sftp_list(
             new_path.to_string_lossy(),
         );
 
-        let location = Location::Remote(
-            child_uri,
-            name.clone(),
-            Some(new_path.clone()),
-        );
+        let location = Location::Remote(child_uri, name.clone(), Some(new_path.clone()));
         log::info!("remote_sftp_list: child location {:?}", location);
 
         let metadata = if !force_dir {
@@ -399,7 +398,10 @@ enum Cmd {
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
-    DirInfo(String, mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>),
+    DirInfo(
+        String,
+        mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>,
+    ),
     Disconnect(ClientItem),
 }
 
@@ -649,9 +651,7 @@ impl Russh {
                                         is_connected: true,
                                         icon_opt: None,
                                         icon_symbolic_opt: None,
-                                        path_opt: Some(PathBuf::from(
-                                            remote_file.path.clone(),
-                                        )),
+                                        path_opt: Some(PathBuf::from(remote_file.path.clone())),
                                         uri: norm_uri.clone(),
                                         host: host.to_string(),
                                         port,
@@ -697,7 +697,7 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteScan(uri, sizes, items_tx) => {
-                            log::info!("RemoteScan: scanning uri {}", uri);
+                            log::info!("Cmd::RemoteScan: scanning uri {}", uri);
                             if uri == "ssh:///" {
                                 let result =
                                     virtual_remote_root_items(sizes).map_err(|e| e.to_string());
@@ -718,22 +718,73 @@ impl Russh {
                             };
                             let norm_uri = remote_file.uri();
                             let host = remote_file.host.as_str();
-
-                            log::info!("RemoteScan: normalized uri {}, host {}", norm_uri, host);
-                            let client = {
-                                let read = clients.read().await;
-                                match read.get(host) {
-                                    Some(c) => Arc::clone(c), // clone Arc<Client>
-                                    None => {
-                                        let msg =
-                                            format!("No SSH client connected for host: {}", host);
-                                        let _ = items_tx.send(Err(msg)).await;
-                                        continue;
-                                    }
+                            let port = remote_file.port;
+                            let username = match remote_file.username {
+                                Some(u) => u,
+                                None => {
+                                    event_tx
+                                        .send(Event::RemoteResult(
+                                            norm_uri,
+                                            Err("No username specified in URI".into()),
+                                        ))
+                                        .unwrap();
+                                    return;
                                 }
                             };
-                            let result = remote_sftp_list(&client, &norm_uri, sizes).await;
-                            let _ = items_tx.send(result).await;
+
+                            let existing_client = {
+                                let read = clients.read().await;
+                                read.get(host).cloned()
+                            };
+                            if let Some(client) = existing_client {
+                                let result = remote_sftp_list(&client, &norm_uri, sizes).await;
+                                let _ = items_tx.send(result).await;
+                            } else {
+                                let key_path = match get_key_files() {
+                                    Ok(key_pair) => key_pair.0,
+                                    Err(e) => {
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Err(e)))
+                                            .unwrap();
+                                        return;
+                                    }
+                                };
+                                let auth = AuthMethod::with_key_file(key_path, None);
+                                match Client::connect(
+                                    (host, port),
+                                    username.as_str(),
+                                    auth.clone(),
+                                    ServerCheckMethod::NoCheck,
+                                )
+                                .await
+                                {
+                                    Ok(client) => {
+                                        {
+                                            let mut write = clients.write().await;
+                                            write.insert(host.to_string(), Arc::new(client));
+                                        }
+                                        let client = {
+                                            let read = clients.read().await;
+                                            Arc::clone(read.get(host).unwrap())
+                                        };
+                                        let result =
+                                            remote_sftp_list(&client, &norm_uri, sizes).await;
+                                        let _ = items_tx.send(result).await;
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Ok(true)))
+                                            .unwrap();
+                                    }
+                                    Err(err) => {
+                                        let msg = format!(
+                                            "Cmd::RemoteScan: Connecting fresh session failed: {}",
+                                            err
+                                        );
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Err(msg)))
+                                            .unwrap();
+                                    }
+                                }
+                            }
                         }
                         Cmd::DirInfo(uri, result_tx) => {
                             let remote_file = match remote_file_from_uri(&uri) {
@@ -753,13 +804,16 @@ impl Russh {
                                 match read.get(host) {
                                     Some(c) => Arc::clone(c),
                                     None => {
-                                        let msg = format!("No SSH client connected for host: {}", host);
+                                        let msg =
+                                            format!("No SSH client connected for host: {}", host);
                                         let _ = result_tx.send(Err(anyhow::anyhow!(msg))).await;
                                         continue;
                                     }
                                 }
                             };
-                            let result = dir_info(&client, &uri).await.map_err(|e| anyhow::anyhow!(e));
+                            let result = dir_info(&client, &uri)
+                                .await
+                                .map_err(|e| anyhow::anyhow!(e));
                             result_tx.send(result).await.unwrap();
                         }
                         Cmd::Disconnect(client_item) => {
