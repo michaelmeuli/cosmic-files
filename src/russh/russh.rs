@@ -749,14 +749,24 @@ impl Russh {
                             result_tx.send(result).await.unwrap();
                         }
                         Cmd::Disconnect(client_item) => {
-                            let ClientItem::Russh(mut item) = client_item else {
+                            log::info!("Disconnect command received");
+                            let ClientItem::Russh(item) = client_item else {
                                 continue;
                             };
                             {
                                 let mut write = clients.write().await;
                                 write.remove(&item.host);
                             }
-                            item.is_connected = false;
+                            client_items.retain(|ci| {
+                                if let ClientItem::Russh(r) = ci {
+                                    r.host != item.host
+                                } else {
+                                    true
+                                }
+                            });
+                            let event_tx = event_tx.clone();
+                            let _ = event_tx.send(Event::Changed);
+                            log::info!("Disconnected from {}", item.host);
                         }
                     }
                 }
