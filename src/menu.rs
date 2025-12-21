@@ -158,8 +158,7 @@ pub fn context_menu<'a>(
             | Location::Path(..)
             | Location::Search(..)
             | Location::Recents
-            | Location::Network(_, _, Some(_))
-            | Location::Remote(_, _, Some(_)),
+            | Location::Network(_, _, Some(_)),
         ) => {
             if selected_trash_only {
                 children.push(menu_item(fl!("open"), Action::Open).into());
@@ -288,8 +287,7 @@ pub fn context_menu<'a>(
             | Location::Path(..)
             | Location::Search(..)
             | Location::Recents
-            | Location::Network(_, _, Some(_))
-            | Location::Remote(_, _, Some(_)),
+            | Location::Network(_, _, Some(_)),
         ) => {
             if selected > 0 {
                 if selected_dir == 1 && selected == 1 || selected_dir == 0 {
@@ -336,8 +334,8 @@ pub fn context_menu<'a>(
         }
         (_, Location::Remote(..)) => {
             if selected > 0 {
-                if selected_dir == 1 && selected == 1 || selected_dir == 0 {
-                    children.push(menu_item(fl!("open"), Action::Open).into());
+                if matches!(tab.mode, tab::Mode::App) {
+                    children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
                 }
             } else {
                 if tab.mode.multiple() {
