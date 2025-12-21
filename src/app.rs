@@ -2815,9 +2815,40 @@ impl Application for App {
                             None
                         }
                     });
+                    let is_remote = self.tab_model.data::<Tab>(entity).and_then(|tab| {
+                        let in_current_tab = tab
+                            .location
+                            .path_opt()
+                            .zip(path.parent())
+                            .is_some_and(|(t_path, parent)| parent == t_path);
+                        let tab = if in_current_tab {
+                            self.tab_model
+                                .data::<Tab>(self.tab_model.active())
+                                .unwrap_or(tab)
+                        } else {
+                            tab
+                        };
+
+                        let name = Location::Path(path.clone()).title();
+                        if let Location::Remote(uri, _, _) = tab
+                            .items_opt
+                            .as_ref()
+                            .and_then(|items| items.iter().find(|&i| i.path_opt() == Some(&path)))
+                            .unwrap()
+                            .location_opt
+                            .as_ref()
+                            .unwrap()
+                        {
+                            Some((uri.clone(), name, path.clone()))
+                        } else {
+                            None
+                        }
+                    });
                     let name = Location::Path(path.clone()).title();
                     let favorite = if let Some((uri, _, _)) = is_network.clone() {
                         Favorite::Network { uri, name, path }
+                    } else if let Some((uri, _, _)) = is_remote.clone() {
+                        Favorite::Remote { uri, name, path }
                     } else {
                         Favorite::from_path(path)
                     };
