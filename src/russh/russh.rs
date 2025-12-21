@@ -531,19 +531,16 @@ impl Russh {
                         Cmd::RemoteDrive(uri, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
-
                             let remote_file = match remote_file_from_uri(&uri) {
                                 Ok(rf) => rf,
-                                Err(e) => {
-                                    log::error!("Cmd::RemoteDrive: {}", e);
-                                    if let Some(tx) = result_tx_opt.take() {
-                                        let _ = tx.send(Err(anyhow::anyhow!(e.clone())));
+                                Err(err) => {
+                                    if let Some(result_tx) = result_tx_opt.take() {
+                                        _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                     }
-                                    let _ = event_tx.send(Event::RemoteResult(uri, Err(e)));
+                                    let _ = event_tx.send(Event::RemoteResult(uri, Err(err.to_string())));
                                     continue;
                                 }
                             };
-
                             let norm_uri = remote_file.uri();
                             let host = remote_file.host.as_str();
                             let port = remote_file.port;
@@ -551,37 +548,31 @@ impl Russh {
                                 Some(u) => u,
                                 None => {
                                     let msg = "No username specified in URI";
-                                    log::error!("Cmd::RemoteDrive: {} {}", msg, uri);
-
-                                    if let Some(tx) = result_tx_opt.take() {
-                                        let _ = tx.send(Err(anyhow::anyhow!(msg)));
+                                    if let Some(result_tx) = result_tx_opt.take() {
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(msg)));
                                     }
                                     let _ = event_tx.send(Event::RemoteResult(
                                         norm_uri.clone(),
-                                        Err(msg.into()),
+                                        Err(msg.to_string()),
                                     ));
                                     continue;
                                 }
                             };
-
                             let auth = match get_key_files() {
                                 Ok((key_path, _)) => AuthMethod::with_key_file(key_path, None),
-                                Err(e) => {
-                                    log::error!("Cmd::RemoteDrive: get_key_files(): {}", e);
-                                    if let Some(tx) = result_tx_opt.take() {
-                                        let _ = tx.send(Err(anyhow::anyhow!(e.clone())));
+                                Err(err) => {
+                                    if let Some(result_tx) = result_tx_opt.take() {
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(err.to_string())));
                                     }
                                     let _ = event_tx
-                                        .send(Event::RemoteResult(norm_uri.clone(), Err(e)));
+                                        .send(Event::RemoteResult(norm_uri.clone(), Err(err.to_string())));
                                     continue;
                                 }
                             };
-
                             let existing_client = {
                                 let read = clients.read().await;
                                 read.contains_key(host)
                             };
-
                             let client_item = ClientItem::Russh(Item {
                                 name: host.to_string(),
                                 is_connected: true,
@@ -591,11 +582,10 @@ impl Russh {
                                 uri: norm_uri.clone(),
                                 host: host.to_string(),
                                 port,
-                                username: username.to_string(),
+                                username: username.clone(),
                                 auth: auth.clone(),
                                 server_check: ServerCheckMethod::NoCheck,
                             });
-
                             if existing_client {
                                 let has_item = client_items.iter().any(|item| {
                                     matches!(
@@ -607,13 +597,13 @@ impl Russh {
                                     client_items.push(client_item);
                                     let _ = event_tx.send(Event::Changed);
                                 }
-                                if let Some(tx) = result_tx_opt.take() {
-                                    let _ = tx.send(Ok(()));
+                                if let Some(result_tx) = result_tx_opt.take() {
+                                    let _ = result_tx.send(Ok(()));
                                 }
-                                let _ = event_tx.send(Event::RemoteResult(norm_uri.clone(), Ok(true)));
+                                let _ =
+                                    event_tx.send(Event::RemoteResult(norm_uri.clone(), Ok(true)));
                                 continue;
                             }
-
                             match Client::connect(
                                 (host, port),
                                 username.as_str(),
@@ -629,20 +619,21 @@ impl Russh {
                                     }
                                     client_items.push(client_item);
                                     let _ = event_tx.send(Event::Changed);
-                                    if let Some(tx) = result_tx_opt.take() {
-                                        let _ = tx.send(Ok(()));
+                                    if let Some(result_tx) = result_tx_opt.take() {
+                                        let _ = result_tx.send(Ok(()));
                                     }
-                                    let _ = event_tx.send(Event::RemoteResult(norm_uri, Ok(true)));
+                                    let _ = event_tx.send(Event::RemoteResult(norm_uri.clone(), Ok(true)));
                                 }
                                 Err(err) => {
                                     let msg = format!(
-                                        "Cmd::RemoteDrive: Connecting fresh session failed: {}",
+                                        "Connecting fresh session failed: {}",
                                         err
                                     );
-                                    if let Some(tx) = result_tx_opt.take() {
-                                        let _ = tx.send(Err(anyhow::anyhow!(msg.clone())));
+                                    if let Some(result_tx) = result_tx_opt.take() {
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(msg.clone())));
                                     }
-                                    let _ = event_tx.send(Event::RemoteResult(norm_uri.clone(), Err(msg)));
+                                    let _ = event_tx
+                                        .send(Event::RemoteResult(norm_uri.clone(), Err(msg.clone())));
                                 }
                             }
                         }
