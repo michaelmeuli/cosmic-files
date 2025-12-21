@@ -3368,11 +3368,70 @@ impl Application for App {
                 return Task::batch(commands);
             }
             Message::ClientItems(client_key, client_items) => {
-                log::info!("received client items for {client_key:?}");
-                log::info!("items: {client_items:?}");
+                // Check for unconnected folders
+                let mut disconnected = Vec::new();
+                if let Some(old_items) = self.client_items.get(&client_key) {
+                    for old_item in old_items {
+                        if let Some(old_path) = old_item.path() {
+                            if old_item.is_connected() {
+                                let mut still_connected = false;
+                                for item in &client_items {
+                                    if let Some(path) = item.path() {
+                                        if path == old_path && item.is_connected() {
+                                            still_connected = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !still_connected {
+                                    disconnected.push(old_path);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Go back to home in any tabs that were unmounted
+                let mut commands = Vec::new();
+                {
+                    let home_location = Location::Path(home_dir());
+                    let entities: Box<[_]> = self.tab_model.iter().collect();
+                    for entity in entities {
+                        let title_opt = self.tab_model.data_mut::<Tab>(entity).and_then(|tab| {
+                            disconnected
+                                .iter()
+                                .any(|disconnected| {
+                                    tab.location
+                                        .path_opt()
+                                        .is_some_and(|location| location.starts_with(disconnected))
+                                })
+                                .then(|| {
+                                    tab.change_location(&home_location, None);
+                                    tab.title()
+                                })
+                        });
+                        if let Some(title) = title_opt {
+                            self.tab_model.text_set(entity, title);
+                            commands.push(self.update_tab(entity, home_location.clone(), None));
+                        }
+                    }
+                    if !commands.is_empty() {
+                        commands.push(self.update_title());
+                        commands.push(self.update_watcher());
+                    }
+                }
+
+                // Insert new items
                 self.client_items.insert(client_key, client_items);
+
                 // Update nav bar
+                //TODO: this could change favorites IDs while they are in use
                 self.update_nav_model();
+
+                // Update desktop tabs
+                commands.push(self.update_desktop());
+
+                return Task::batch(commands);
             }
             Message::MountResult(mounter_key, item, res) => match res {
                 Ok(true) => {
