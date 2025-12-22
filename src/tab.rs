@@ -5505,6 +5505,10 @@ impl Tab {
                             Some(mtime) => self.format_time(mtime).to_string(),
                             None => String::new(),
                         },
+                        ItemMetadata::RusshPath { .. } => match item.metadata.modified() {
+                            Some(mtime) => self.format_time(mtime).to_string(),
+                            None => String::new(),
+                        },
                         _ => String::new(),
                     };
 
