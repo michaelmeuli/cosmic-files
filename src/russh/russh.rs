@@ -269,12 +269,25 @@ async fn remote_sftp_list(
             let size_opt = (!is_dir).then_some(info.size).flatten();
             let mut children_opt = None;
             if is_dir {
-                // Cannot map remote SFTP entries to a local filesystem path here,
-                // so avoid using a non-existent `file` variable; leave a safe default.
-                // TODO: consider querying the SFTP session for child count asynchronously.
-                children_opt = Some(0);
+                let mut count = 0;
+                match sftp.read_dir(new_path.to_string_lossy().to_string()).await {
+                    Ok(mut dir) => {
+                        while let Some(entry) = dir.next() {
+                            if entry.file_name() == "." || entry.file_name() == ".." {
+                                continue;
+                            }
+                            count += 1;
+                        }
+                    }
+                    Err(_) => {
+                        log::info!(
+                            "Could not read directory to count children: {}",
+                            new_path.display()
+                        );
+                    },
+                }
+                children_opt = Some(count);
             }
-            // TODO: ItemMetadata::Russh
             ItemMetadata::RusshPath {
                 mtime,
                 size_opt,
