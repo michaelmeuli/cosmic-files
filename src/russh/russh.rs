@@ -725,7 +725,7 @@ impl Russh {
                                     }
                                     Err(err) => {
                                         let msg = format!(
-                                            "Cmd::RemoteScan: Connecting fresh session failed: {}",
+                                            "Connecting fresh session failed: {}",
                                             err
                                         );
                                         event_tx

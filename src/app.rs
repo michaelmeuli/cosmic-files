@@ -3608,11 +3608,6 @@ impl Application for App {
                 }
             }
             Message::RemoteResult(client_key, uri, res) => {
-                log::info!("Message::RemoteResult: client_key {:?}, uri {}", client_key, uri);
-                log::info!(
-                    "Message::RemoteResult: remote_drive_connecting {:?}",
-                    self.remote_drive_connecting
-                );
                 if self
                     .remote_drive_connecting
                     .as_ref()
