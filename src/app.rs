@@ -2515,10 +2515,8 @@ impl Application for App {
     }
 
     fn on_nav_select(&mut self, entity: Entity) -> Task<Self::Message> {
-        log::info!("on_nav_select: activating entity {:?}", entity);
         self.nav_model.activate(entity);
         if let Some(location) = self.nav_model.data::<Location>(entity) {
-            log::info!("found Location in nav_model: {:?}", location); //Remote("ssh://michael@localhost:22/", "localhost", None)
             let should_open = match location {
                 #[cfg(feature = "gvfs")]
                 Location::Network(uri, name, Some(path))

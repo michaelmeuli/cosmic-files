@@ -417,8 +417,6 @@ enum Event {
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
 }
-// async_ssh2_tokio::client::Client
-// pub async fn connect(addr: impl ToSocketAddrsWithHostname, username: &str, auth: AuthMethod, server_check: ServerCheckMethod) -> Result<Self, crate::Error>
 
 #[derive(Clone, Debug)]
 pub struct Item {
