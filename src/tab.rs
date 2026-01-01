@@ -1600,16 +1600,62 @@ impl Location {
             Self::Network(uri, _, _) => scan_network(uri, sizes),
             Self::Remote(uri, _, _) => scan_remote(uri, sizes),
         };
-        let parent_item_opt = match self.path_opt() {
-            Some(path) => match item_from_path(path, sizes) {
-                Ok(item) => Some(item),
-                Err(err) => {
-                    log::warn!("failed to get item for {}: {}", path.display(), err);
-                    None
+        let parent_item_opt = match self {
+            Self::Remote(uri, name, path_opt) => {
+                let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+                    let file_icon = |size| {
+                        widget::icon::from_name("folder")
+                        .size(size)
+                        .handle()
+                    };
+                    (
+                        // TODO: get mime from content_type?
+                        "inode/directory".parse().unwrap(),
+                        file_icon(sizes.grid()),
+                        file_icon(sizes.list()),
+                        file_icon(sizes.list_condensed()),
+                    )
+                };
+                Some(Item {
+                    name: name.clone(),
+                    display_name: Item::display_name(name),
+                    is_mount_point: false,
+                    is_client_point: true,
+                    metadata: ItemMetadata::SimpleDir { entries: 0 },
+                    hidden: false,
+                    location_opt: Some(Location::Remote(
+                        uri.clone(),
+                        name.clone(),
+                        path_opt.clone(),
+                    )),
+                    mime,
+                    icon_handle_grid,
+                    icon_handle_list,
+                    icon_handle_list_condensed,
+                    thumbnail_opt: Some(ItemThumbnail::NotImage),
+                    button_id: widget::Id::unique(),
+                    pos_opt: Cell::new(None),
+                    rect_opt: Cell::new(None),
+                    selected: false,
+                    highlighted: false,
+                    overlaps_drag_rect: false,
+                    dir_size: DirSize::NotDirectory,
+                    cut: false,
+                })
+            }
+            _ => {
+                match self.path_opt() {
+                    Some(path) => match item_from_path(path, sizes) {
+                        Ok(item) => Some(item),
+                        Err(err) => {
+                            log::warn!("failed to get item for {}: {}", path.display(), err);
+                            None
+                        }
+                    },
+                    //TODO: support other locations?
+                    None => None,
                 }
-            },
-            //TODO: support other locations?
-            None => None,
+            }
         };
         (parent_item_opt, items)
     }
