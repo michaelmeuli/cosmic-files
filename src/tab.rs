@@ -2539,6 +2539,16 @@ impl Item {
             }
         }
 
+        match self.metadata {
+            #[cfg(feature = "russh")]
+            ItemMetadata::RusshPath { .. } => {
+                if let Some(children) = self.metadata.children_count() {
+                    details = details.push(widget::text::body(fl!("items", items = children)));
+                }
+            }
+            _ => (),
+        }
+
         if let Some(path) = self.path_opt() {
             if let Ok(img) = image::image_dimensions(path) {
                 let (width, height) = img;
