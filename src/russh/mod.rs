@@ -116,6 +116,7 @@ pub trait Connector: Send + Sync {
     fn connect(&self, item: ClientItem) -> Task<()>;
     fn remote_drive(&self, uri: String) -> Task<()>;
     fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
+    fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>>;
     fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)>;
     fn disconnect(&self, item: ClientItem) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;

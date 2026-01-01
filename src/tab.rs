@@ -1277,6 +1277,19 @@ pub fn scan_remote(uri: &str, sizes: IconSizes) -> Vec<Item> {
     Vec::new()
 }
 
+pub fn item_from_remote(uri: &str, sizes: IconSizes) -> Result<Item, String> {
+    for (_key, client) in CLIENTS.iter() {
+        match client.remote_parent_item(uri, sizes) {
+            Some(Ok(item)) => return Ok(item),
+            Some(Err(err)) => {
+                log::warn!("failed to scan remote {:?}: {}", uri, err);
+            }
+            None => {}
+        }
+    }
+    Err(format!("no client found for remote uri: {}", uri))
+}
+
 //TODO: organize desktop items based on display
 pub fn scan_desktop(
     tab_path: &PathBuf,
@@ -1601,47 +1614,18 @@ impl Location {
             Self::Remote(uri, _, _) => scan_remote(uri, sizes),
         };
         let parent_item_opt = match self {
-            Self::Remote(uri, name, path_opt) => {
-                let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
-                    let file_icon = |size| {
-                        widget::icon::from_name("folder")
-                        .size(size)
-                        .handle()
-                    };
-                    (
-                        // TODO: get mime from content_type?
-                        "inode/directory".parse().unwrap(),
-                        file_icon(sizes.grid()),
-                        file_icon(sizes.list()),
-                        file_icon(sizes.list_condensed()),
-                    )
-                };
-                Some(Item {
-                    name: name.clone(),
-                    display_name: Item::display_name(name),
-                    is_mount_point: false,
-                    is_client_point: true,
-                    metadata: ItemMetadata::SimpleDir { entries: 0 },
-                    hidden: false,
-                    location_opt: Some(Location::Remote(
-                        uri.clone(),
-                        name.clone(),
-                        path_opt.clone(),
-                    )),
-                    mime,
-                    icon_handle_grid,
-                    icon_handle_list,
-                    icon_handle_list_condensed,
-                    thumbnail_opt: Some(ItemThumbnail::NotImage),
-                    button_id: widget::Id::unique(),
-                    pos_opt: Cell::new(None),
-                    rect_opt: Cell::new(None),
-                    selected: false,
-                    highlighted: false,
-                    overlaps_drag_rect: false,
-                    dir_size: DirSize::NotDirectory,
-                    cut: false,
-                })
+            Self::Remote(uri, _, path_opt) => {
+                match path_opt {
+                    Some(path) => match item_from_remote(uri, sizes) {
+                        Ok(item) => Some(item),
+                        Err(err) => {
+                            log::warn!("failed to get item for {}: {}", path.display(), err);
+                            None
+                        }
+                    },
+                    // If no path, try to get item from remote
+                    None => None,
+                }
             }
             _ => {
                 match self.path_opt() {
@@ -1918,6 +1902,8 @@ impl ItemMetadata {
             ItemMetadata::Path { children_opt, .. } => children_opt.as_ref(),
             #[cfg(feature = "gvfs")]
             ItemMetadata::GvfsPath { children_opt, .. } => children_opt.as_ref(),
+            #[cfg(feature = "russh")]
+            ItemMetadata::RusshPath { children_opt, .. } => children_opt.as_ref(),
             _ => None,
         }
     }

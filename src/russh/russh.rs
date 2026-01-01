@@ -284,7 +284,7 @@ async fn remote_sftp_list(
                             "Could not read directory to count children: {}",
                             new_path.display()
                         );
-                    },
+                    }
                 }
                 children_opt = Some(count);
             }
@@ -346,6 +346,125 @@ async fn remote_sftp_list(
     Ok(items)
 }
 
+async fn remote_sftp_parent(
+    client: &Client,
+    uri: &str,
+    sizes: IconSizes,
+) -> Result<tab::Item, String> {
+    let mut remote_file = remote_file_from_uri(uri)?;
+    let path = remote_file.path.clone();
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| e.to_string())?;
+    let sftp = SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|e| e.to_string())?;
+    let metadata = sftp
+        .metadata(path.clone())
+        .await
+        .map_err(|e| format!("metadata {path}: {e:?}"))?;
+
+    let name = remote_file.path.clone();
+    let child_uri = format!(
+        "ssh://{}{}:{}{}",
+        remote_file
+            .username
+            .clone()
+            .map(|u| u + "@")
+            .unwrap_or_default(),
+        remote_file.host,
+        remote_file.port,
+        remote_file.path.clone(),
+    );
+
+    let location = Location::Remote(
+        child_uri,
+        name.clone(),
+        Some(PathBuf::from(remote_file.path.clone())),
+    );
+
+    let item_metadata = {
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let is_dir = metadata.is_dir();
+        let size_opt = (!is_dir).then_some(metadata.size).flatten();
+        let mut children_opt = None;
+        if is_dir {
+            let mut count = 0;
+            match sftp.read_dir(remote_file.path.clone()).await {
+                Ok(mut dir) => {
+                    while let Some(entry) = dir.next() {
+                        if entry.file_name() == "." || entry.file_name() == ".." {
+                            continue;
+                        }
+                        count += 1;
+                        log::info!("Count: {}", count);
+                    }
+                }
+                Err(_) => {
+                    log::info!(
+                        "Could not read directory to count children: {}",
+                        remote_file.path.clone()
+                    );
+                }
+            }
+            children_opt = Some(count);
+        }
+        ItemMetadata::RusshPath {
+            mtime,
+            size_opt,
+            children_opt,
+        }
+    };
+    let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+        let file_icon = |size| {
+            widget::icon::from_name(if metadata.is_dir() {
+                "folder"
+            } else {
+                "text-x-generic"
+            })
+            .size(size)
+            .handle()
+        };
+        (
+            "inode/directory".parse().unwrap(),
+            file_icon(sizes.grid()),
+            file_icon(sizes.list()),
+            file_icon(sizes.list_condensed()),
+        )
+    };
+    let hidden = name.starts_with('.');
+    let item = tab::Item {
+        name: name.clone(),
+        is_mount_point: false,
+        is_client_point: true,
+        display_name: name,
+        metadata: item_metadata,
+        hidden,
+        location_opt: Some(location),
+        mime,
+        icon_handle_grid,
+        icon_handle_list,
+        icon_handle_list_condensed,
+        thumbnail_opt: Some(ItemThumbnail::NotImage),
+        button_id: widget::Id::unique(),
+        pos_opt: Cell::new(None),
+        rect_opt: Cell::new(None),
+        selected: false,
+        highlighted: false,
+        overlaps_drag_rect: false,
+        dir_size: DirSize::NotDirectory,
+        cut: false,
+    };
+    Ok(item)
+}
+
 fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> ClientAuth {
     let auth = ClientAuth {
         message: String::new(),
@@ -403,6 +522,7 @@ enum Cmd {
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
+    RemoteParent(String, IconSizes, mpsc::Sender<Result<tab::Item, String>>),
     DirInfo(
         String,
         mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>,
@@ -548,7 +668,8 @@ impl Russh {
                                     if let Some(result_tx) = result_tx_opt.take() {
                                         _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                     }
-                                    let _ = event_tx.send(Event::RemoteResult(uri, Err(err.to_string())));
+                                    let _ = event_tx
+                                        .send(Event::RemoteResult(uri, Err(err.to_string())));
                                     continue;
                                 }
                             };
@@ -573,10 +694,13 @@ impl Russh {
                                 Ok((key_path, _)) => AuthMethod::with_key_file(key_path, None),
                                 Err(err) => {
                                     if let Some(result_tx) = result_tx_opt.take() {
-                                        let _ = result_tx.send(Err(anyhow::anyhow!(err.to_string())));
+                                        let _ =
+                                            result_tx.send(Err(anyhow::anyhow!(err.to_string())));
                                     }
-                                    let _ = event_tx
-                                        .send(Event::RemoteResult(norm_uri.clone(), Err(err.to_string())));
+                                    let _ = event_tx.send(Event::RemoteResult(
+                                        norm_uri.clone(),
+                                        Err(err.to_string()),
+                                    ));
                                     continue;
                                 }
                             };
@@ -633,18 +757,18 @@ impl Russh {
                                     if let Some(result_tx) = result_tx_opt.take() {
                                         let _ = result_tx.send(Ok(()));
                                     }
-                                    let _ = event_tx.send(Event::RemoteResult(norm_uri.clone(), Ok(true)));
+                                    let _ = event_tx
+                                        .send(Event::RemoteResult(norm_uri.clone(), Ok(true)));
                                 }
                                 Err(err) => {
-                                    let msg = format!(
-                                        "Connecting fresh session failed: {}",
-                                        err
-                                    );
+                                    let msg = format!("Connecting fresh session failed: {}", err);
                                     if let Some(result_tx) = result_tx_opt.take() {
                                         let _ = result_tx.send(Err(anyhow::anyhow!(msg.clone())));
                                     }
-                                    let _ = event_tx
-                                        .send(Event::RemoteResult(norm_uri.clone(), Err(msg.clone())));
+                                    let _ = event_tx.send(Event::RemoteResult(
+                                        norm_uri.clone(),
+                                        Err(msg.clone()),
+                                    ));
                                 }
                             }
                         }
@@ -722,10 +846,83 @@ impl Russh {
                                             .unwrap();
                                     }
                                     Err(err) => {
-                                        let msg = format!(
-                                            "Connecting fresh session failed: {}",
-                                            err
-                                        );
+                                        let msg =
+                                            format!("Connecting fresh session failed: {}", err);
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Err(msg)))
+                                            .unwrap();
+                                    }
+                                }
+                            }
+                        }
+                        Cmd::RemoteParent(uri, sizes, items_tx) => {
+                            let remote_file = match remote_file_from_uri(&uri) {
+                                Ok(rf) => rf,
+                                Err(e) => {
+                                    let _ = items_tx.send(Err(e)).await;
+                                    continue;
+                                }
+                            };
+                            let norm_uri = remote_file.uri();
+                            let host = remote_file.host.as_str();
+                            let port = remote_file.port;
+                            let username = match remote_file.username {
+                                Some(u) => u,
+                                None => {
+                                    event_tx
+                                        .send(Event::RemoteResult(
+                                            norm_uri,
+                                            Err("No username specified in URI".into()),
+                                        ))
+                                        .unwrap();
+                                    continue;
+                                }
+                            };
+                            let existing_client = {
+                                let read = clients.read().await;
+                                read.get(host).cloned()
+                            };
+                            if let Some(client) = existing_client {
+                                let result = remote_sftp_parent(&client, &norm_uri, sizes).await;
+                                let _ = items_tx.send(result).await;
+                            } else {
+                                let key_path = match get_key_files() {
+                                    Ok(key_pair) => key_pair.0,
+                                    Err(e) => {
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Err(e)))
+                                            .unwrap();
+                                        continue;
+                                    }
+                                };
+                                let auth = AuthMethod::with_key_file(key_path, None);
+                                match Client::connect(
+                                    (host, port),
+                                    username.as_str(),
+                                    auth.clone(),
+                                    ServerCheckMethod::NoCheck,
+                                )
+                                .await
+                                {
+                                    Ok(client) => {
+                                        {
+                                            let mut write = clients.write().await;
+                                            write.insert(host.to_string(), Arc::new(client));
+                                        }
+                                        let client = {
+                                            let read = clients.read().await;
+                                            Arc::clone(read.get(host).unwrap())
+                                        };
+                                        let result =
+                                            remote_sftp_parent(&client, &norm_uri, sizes).await;
+                                        let _ = items_tx.send(result).await;
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Ok(true)))
+                                            .unwrap();
+                                    }
+                                    Err(err) => {
+                                        let msg =
+                                            format!("Connecting fresh session failed: {}", err);
                                         event_tx
                                             .send(Event::RemoteResult(norm_uri, Err(msg)))
                                             .unwrap();
@@ -840,6 +1037,24 @@ impl Connector for Russh {
         {
             log::error!(
                 "remote_scan: failed to send Cmd::RemoteScan for uri {}: {}",
+                uri,
+                e
+            );
+            return Some(Err("command channel closed".into()));
+        }
+
+        items_rx.blocking_recv()
+    }
+
+    fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>> {
+        let (items_tx, mut items_rx) = mpsc::channel(1);
+
+        if let Err(e) = self
+            .command_tx
+            .send(Cmd::RemoteParent(uri.to_string(), sizes, items_tx))
+        {
+            log::error!(
+                "remote_parent: failed to send Cmd::RemoteParent for uri {}: {}",
                 uri,
                 e
             );
