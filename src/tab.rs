@@ -2542,8 +2542,17 @@ impl Item {
         match self.metadata {
             #[cfg(feature = "russh")]
             ItemMetadata::RusshPath { .. } => {
-                if let Some(children) = self.metadata.children_count() {
-                    details = details.push(widget::text::body(fl!("items", items = children)));
+                if self.metadata.is_dir() {
+                    if let Some(children) = self.metadata.children_count() {
+                        details = details.push(widget::text::body(fl!("items", items = children)));
+                    }
+                } else {
+                    if let Some(size) = self.metadata.file_size() {
+                        details = details.push(widget::text::body(fl!(
+                            "item-size",
+                            size = format_size(size)
+                        )));
+                    }
                 }
             }
             _ => (),
