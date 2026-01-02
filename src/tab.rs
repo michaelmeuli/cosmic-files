@@ -2318,6 +2318,8 @@ impl Item {
             ItemMetadata::Path { metadata, .. } => Some(metadata.clone()),
             #[cfg(feature = "gvfs")]
             ItemMetadata::GvfsPath { .. } => self.path_opt().and_then(|p| fs::metadata(p).ok()),
+            #[cfg(feature = "russh")]
+            ItemMetadata::RusshPath { .. } => None,
             _ => {
                 //TODO: other metadata types
                 None
@@ -2537,34 +2539,35 @@ impl Item {
                     ),
                 ));
             }
-        }
-
-        match self.metadata {
-            #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { .. } => {
-                if self.metadata.is_dir() {
-                    if let Some(children) = self.metadata.children_count() {
-                        details = details.push(widget::text::body(fl!("items", items = children)));
+        } else {
+            match self.metadata {
+                #[cfg(feature = "russh")]
+                ItemMetadata::RusshPath { .. } => {
+                    if self.metadata.is_dir() {
+                        if let Some(children) = self.metadata.children_count() {
+                            details =
+                                details.push(widget::text::body(fl!("items", items = children)));
+                        }
+                    } else {
+                        if let Some(size) = self.metadata.file_size() {
+                            details = details.push(widget::text::body(fl!(
+                                "item-size",
+                                size = format_size(size)
+                            )));
+                        }
                     }
-                } else {
-                    if let Some(size) = self.metadata.file_size() {
+                    let date_time_formatter = date_time_formatter(military_time);
+                    let time_formatter = time_formatter(military_time);
+                    if let Some(time) = self.metadata.modified() {
                         details = details.push(widget::text::body(fl!(
-                            "item-size",
-                            size = format_size(size)
+                            "item-modified",
+                            modified = format_time(time, &date_time_formatter, &time_formatter)
+                                .to_string()
                         )));
                     }
                 }
-                let date_time_formatter = date_time_formatter(military_time);
-                let time_formatter = time_formatter(military_time);
-                if let Some(time) = self.metadata.modified() {
-                    details = details.push(widget::text::body(fl!(
-                        "item-modified",
-                        modified =
-                            format_time(time, &date_time_formatter, &time_formatter).to_string()
-                    )));
-                }
+                _ => (),
             }
-            _ => (),
         }
 
         if let Some(path) = self.path_opt() {
