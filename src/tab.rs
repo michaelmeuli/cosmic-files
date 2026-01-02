@@ -2554,6 +2554,15 @@ impl Item {
                         )));
                     }
                 }
+                let date_time_formatter = date_time_formatter(military_time);
+                let time_formatter = time_formatter(military_time);
+                if let Some(time) = self.metadata.modified() {
+                    details = details.push(widget::text::body(fl!(
+                        "item-modified",
+                        modified =
+                            format_time(time, &date_time_formatter, &time_formatter).to_string()
+                    )));
+                }
             }
             _ => (),
         }
