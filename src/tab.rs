@@ -2570,18 +2570,34 @@ impl Item {
             }
         }
 
-        if let Some(path) = self.path_opt() {
-            if let Ok(img) = image::image_dimensions(path) {
-                let (width, height) = img;
-                details = details.push(widget::text::body(format!("{width}x{height}")));
-            }
-        }
-        column = column.push(details);
+        match self.metadata {
+            #[cfg(feature = "russh")]
+            ItemMetadata::RusshPath { .. } => {
+                column = column.push(details);
 
-        if let Some(path) = self.path_opt() {
-            column = column.push(
-                widget::button::standard(fl!("open")).on_press(Message::Open(Some(path.clone()))),
-            );
+                if let Some(path) = self.path_opt() {
+                    column = column.push(
+                        widget::button::standard(fl!("open"))
+                            .on_press(Message::Open(Some(path.clone()))),
+                    );
+                }
+            }
+            _ => {
+                if let Some(path) = self.path_opt() {
+                    if let Ok(img) = image::image_dimensions(path) {
+                        let (width, height) = img;
+                        details = details.push(widget::text::body(format!("{width}x{height}")));
+                    }
+                }
+                column = column.push(details);
+
+                if let Some(path) = self.path_opt() {
+                    column = column.push(
+                        widget::button::standard(fl!("open"))
+                            .on_press(Message::Open(Some(path.clone()))),
+                    );
+                }
+            }
         }
 
         if !settings.is_empty() {
