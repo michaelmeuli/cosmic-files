@@ -6139,6 +6139,7 @@ impl Tab {
         let mut mime_type_counts: BTreeMap<String, u64> = BTreeMap::new();
         let mut calculating_dir_size = false;
         let mut dir_size_error: Option<String> = None;
+        let mut show_size = true;
 
         for item in selected_items.iter() {
             *mime_type_counts.entry(item.mime.to_string()).or_insert(0) += 1;
@@ -6159,6 +6160,20 @@ impl Tab {
                     };
                 } else {
                     total_size = total_size.saturating_add(metadata.len());
+                }
+            } else {
+                match item.metadata {
+                    #[cfg(feature = "russh")]
+                    ItemMetadata::RusshPath { .. } => {
+                        if item.metadata.is_dir() {
+                            show_size = false;
+                        } else {
+                            if let Some(size) = item.metadata.file_size() {
+                                total_size = total_size.saturating_add(size);
+                            }
+                        }
+                    }
+                    _ => (),
                 }
             }
         }
@@ -6192,7 +6207,9 @@ impl Tab {
             }
         };
 
-        details = details.push(widget::text::body(fl!("item-size", size = size)));
+        if show_size {
+            details = details.push(widget::text::body(fl!("item-size", size = size)));
+        }
 
         column = column.push(details);
 
