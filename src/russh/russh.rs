@@ -362,7 +362,7 @@ async fn remote_sftp_parent(
     uri: &str,
     sizes: IconSizes,
 ) -> Result<tab::Item, String> {
-    let mut remote_file = remote_file_from_uri(uri)?;
+    let remote_file = remote_file_from_uri(uri)?;
     let path = remote_file.path.clone();
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     channel
@@ -377,7 +377,12 @@ async fn remote_sftp_parent(
         .await
         .map_err(|e| format!("metadata {path}: {e:?}"))?;
 
-    let name = remote_file.path.clone();
+    let child_path = PathBuf::from(remote_file.path.clone());
+    let name = child_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
     let child_uri = format!(
         "ssh://{}{}:{}{}",
         remote_file
@@ -415,7 +420,6 @@ async fn remote_sftp_parent(
                             continue;
                         }
                         count += 1;
-                        log::info!("Count: {}", count);
                     }
                 }
                 Err(_) => {
