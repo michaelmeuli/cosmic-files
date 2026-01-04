@@ -245,8 +245,8 @@ async fn remote_sftp_list(
             .unwrap_or("")
             .to_string();
         let new_path = PathBuf::from(&path).join(&child_path);
-        let child_uri = format!(
-            "ssh://{}{}:{}{}",
+        let mut url = Url::parse(&format!(
+            "ssh://{}{}:{}",
             remote_file
                 .username
                 .clone()
@@ -254,9 +254,10 @@ async fn remote_sftp_list(
                 .unwrap_or_default(),
             remote_file.host,
             remote_file.port,
-            new_path.to_string_lossy(),
-        );
-
+        ))
+        .unwrap();
+        url.set_path(&new_path.to_string_lossy());
+        let child_uri = url.to_string();
         let location = Location::Remote(child_uri, name.clone(), Some(new_path.clone()));
 
         let metadata = if !force_dir {
@@ -379,10 +380,10 @@ async fn remote_sftp_parent(
 
     let child_path = PathBuf::from(remote_file.path.clone());
     let name = child_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
     let child_uri = format!(
         "ssh://{}{}:{}{}",
         remote_file
