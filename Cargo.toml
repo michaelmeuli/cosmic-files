@@ -64,6 +64,7 @@ jxl-oxide = { version = "0.12.5", features = ["image"] }
 num_cpus = "1.17.0"
 async-ssh2-tokio = { version = "0.12.1", optional = true }
 russh-sftp = { version = "2.1.1", optional = true }
+mime = "0.3.17"
 
 
 # Completion-based IO runtime to enable io_uring / IOCP file IO support.

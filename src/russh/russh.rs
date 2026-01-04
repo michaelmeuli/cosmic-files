@@ -18,6 +18,7 @@ use crate::{
     config::IconSizes,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
+use mime_guess::MimeGuess;
 use tokio::runtime::Builder;
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
@@ -298,9 +299,19 @@ async fn remote_sftp_list(
         };
 
         let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
+            let mime = if metadata.is_dir() {
+                "inode/directory".parse().unwrap()
+            } else {
+                MimeGuess::from_path(&name).first_or_octet_stream()
+            };
+            let mime_clone = mime.clone();
             let file_icon = |size| {
                 widget::icon::from_name(if metadata.is_dir() {
                     "folder"
+                } else if mime_clone.type_() == mime::IMAGE {
+                    "image-x-generic"
+                } else if mime_clone == mime::APPLICATION_PDF {
+                    "application-pdf"
                 } else {
                     "text-x-generic"
                 })
@@ -309,7 +320,7 @@ async fn remote_sftp_list(
             };
             (
                 // TODO: get mime from content_type?
-                "inode/directory".parse().unwrap(),
+                mime,
                 file_icon(sizes.grid()),
                 file_icon(sizes.list()),
                 file_icon(sizes.list_condensed()),

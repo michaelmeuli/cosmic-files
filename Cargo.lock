@@ -1686,6 +1686,7 @@ dependencies = [
  "log",
  "lzma-rust2 0.15.1",
  "md-5",
+ "mime 0.3.17",
  "mime_guess",
  "notify-debouncer-full",
  "notify-rust",
