@@ -770,6 +770,8 @@ pub struct App {
     windows: FxHashMap<window::Id, Window>,
     nav_dnd_hover: Option<(Location, Instant)>,
     tab_dnd_hover: Option<(Entity, Instant)>,
+    type_select_prefix: String,
+    type_select_last_key: Option<Instant>,
     nav_drag_id: DragId,
     tab_drag_id: DragId,
     auto_scroll_speed: Option<i16>,
@@ -2129,6 +2131,12 @@ impl App {
                     Some(self.config.type_to_search),
                     Message::SetTypeToSearch,
                 ))
+                .add(widget::radio(
+                    widget::text::body(fl!("type-to-search-select")),
+                    TypeToSearch::SelectByPrefix,
+                    Some(self.config.type_to_search),
+                    Message::SetTypeToSearch,
+                ))
                 .into(),
             widget::settings::section()
                 .title(fl!("other"))
@@ -2360,6 +2368,8 @@ impl Application for App {
             windows: FxHashMap::default(),
             nav_dnd_hover: None,
             tab_dnd_hover: None,
+            type_select_prefix: String::new(),
+            type_select_last_key: None,
             nav_drag_id: DragId::new(),
             tab_drag_id: DragId::new(),
             auto_scroll_speed: None,
@@ -3318,6 +3328,28 @@ impl Application for App {
                                             path_string.push_str(&text);
                                             tab.edit_location =
                                                 Some(location.with_path(path_string.into()).into());
+                                        }
+                                    }
+                                }
+                                TypeToSearch::SelectByPrefix => {
+                                    // Reset buffer if timeout elapsed
+                                    if let Some(last_key) = self.type_select_last_key {
+                                        if last_key.elapsed() >= tab::TYPE_SELECT_TIMEOUT {
+                                            self.type_select_prefix.clear();
+                                        }
+                                    }
+
+                                    // Accumulate character and select
+                                    self.type_select_prefix.push_str(&text.to_lowercase());
+                                    self.type_select_last_key = Some(Instant::now());
+
+                                    if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {
+                                        tab.select_by_prefix(&self.type_select_prefix);
+                                        if let Some(offset) = tab.select_focus_scroll() {
+                                            return scrollable::scroll_to(
+                                                tab.scrollable_id.clone(),
+                                                offset,
+                                            );
                                         }
                                     }
                                 }
@@ -4580,10 +4612,19 @@ impl Application for App {
                         tab.sort_name = sort.0;
                         tab.sort_direction = sort.1;
 
+                        let mut tasks = Vec::with_capacity(2);
+
                         if let Some(selection_paths) = selection_paths {
                             tab.select_paths(selection_paths);
+
+                            // Ensure selected path is scrolled to after redraw
+                            tasks.push(Task::done(cosmic::action::app(Message::TabMessage(
+                                Some(entity),
+                                tab::Message::ScrollToFocused,
+                            ))));
                         }
-                        return clipboard::read_data::<ClipboardPaste>().map(|p| {
+
+                        tasks.push(clipboard::read_data::<ClipboardPaste>().map(|p| {
                             cosmic::action::app(Message::CutPaths(match p {
                                 Some(s) => match s.kind {
                                     ClipboardKind::Copy => Vec::new(),
@@ -4591,7 +4632,9 @@ impl Application for App {
                                 },
                                 None => Vec::new(),
                             }))
-                        });
+                        }));
+
+                        return Task::batch(tasks);
                     }
                 }
             }

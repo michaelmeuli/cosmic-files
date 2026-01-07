@@ -112,6 +112,7 @@ impl Favorite {
 pub enum TypeToSearch {
     Recursive,
     EnterPath,
+    SelectByPrefix,
 }
 
 #[derive(Clone, CosmicConfigEntry, Debug, Deserialize, Eq, PartialEq, Serialize)]
