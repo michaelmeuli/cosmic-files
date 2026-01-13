@@ -110,7 +110,6 @@ pub enum ClientMessage {
     RemoteResult(String, Result<bool, String>),
 }
 
-
 pub trait Connector: Send + Sync {
     fn items(&self, sizes: IconSizes) -> Option<ClientItems>;
     fn connect(&self, item: ClientItem) -> Task<()>;
@@ -121,7 +120,6 @@ pub trait Connector: Send + Sync {
     fn disconnect(&self, item: ClientItem) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ClientKey(pub &'static str);

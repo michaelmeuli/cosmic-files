@@ -2615,10 +2615,7 @@ impl Application for App {
                         })
                     {
                         if let Some(client) = CLIENTS.get(&key) {
-                            log::info!(
-                                "found Connector, calling client.remote_drive: {}",
-                                uri
-                            );
+                            log::info!("found Connector, calling client.remote_drive: {}", uri);
                             return client.remote_drive(uri.clone()).map(move |()| {
                                 cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount {
                                     entity,
@@ -2639,38 +2636,38 @@ impl Application for App {
                         Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
                     );
                 }
-                Location::Path(path) | Location::Network(_, _, Some(path)) | Location::Remote(_, _, Some(path)) => {
-                    match path.try_exists() {
-                        Ok(true) => true,
-                        Ok(false) => {
-                            log::warn!(
-                                "failed to open favorite, path does not exist: {}",
-                                path.display()
-                            );
-                            return self.push_dialog(
-                                DialogPage::FavoritePathError {
-                                    path: path.clone(),
-                                    entity,
-                                },
-                                Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
-                            );
-                        }
-                        Err(err) => {
-                            log::warn!(
-                                "failed to open favorite for path: {}, {}",
-                                path.display(),
-                                err
-                            );
-                            return self.push_dialog(
-                                DialogPage::FavoritePathError {
-                                    path: path.clone(),
-                                    entity,
-                                },
-                                Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
-                            );
-                        }
+                Location::Path(path)
+                | Location::Network(_, _, Some(path))
+                | Location::Remote(_, _, Some(path)) => match path.try_exists() {
+                    Ok(true) => true,
+                    Ok(false) => {
+                        log::warn!(
+                            "failed to open favorite, path does not exist: {}",
+                            path.display()
+                        );
+                        return self.push_dialog(
+                            DialogPage::FavoritePathError {
+                                path: path.clone(),
+                                entity,
+                            },
+                            Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
+                        );
                     }
-                }
+                    Err(err) => {
+                        log::warn!(
+                            "failed to open favorite for path: {}, {}",
+                            path.display(),
+                            err
+                        );
+                        return self.push_dialog(
+                            DialogPage::FavoritePathError {
+                                path: path.clone(),
+                                entity,
+                            },
+                            Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
+                        );
+                    }
+                },
 
                 _ => true,
             };
@@ -3673,7 +3670,7 @@ impl Application for App {
                         });
                     }
                 }
-            },
+            }
             Message::NewItem(entity_opt, dir) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
                 if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {
