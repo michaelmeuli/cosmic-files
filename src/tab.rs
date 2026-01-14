@@ -64,7 +64,7 @@ use std::{
     hash::Hash,
     io::{BufRead, BufReader},
     os::unix::fs::MetadataExt,
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock, RwLock, atomic},
     time::{Duration, Instant, SystemTime},
@@ -312,10 +312,19 @@ pub fn folder_icon_symbolic(path: &PathBuf, icon_size: u16) -> widget::icon::Han
     .handle()
 }
 
+//TODO: replace with Path::has_trailing_sep when stable
+fn has_trailing_sep(path: &Path) -> bool {
+    path.as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .copied()
+        .is_some_and(|b| path::is_separator(b as char))
+}
+
 fn tab_complete(path: &Path) -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
-    let parent = if path.exists() {
-        // Do not show completion if already on an existing path
-        return Ok(Vec::new());
+    let parent = if has_trailing_sep(path) && path.is_dir() {
+        // Show completions inside existing child directory instead of parent
+        path
     } else {
         path.parent()
             .ok_or_else(|| format!("path has no parent {}", path.display()))?
@@ -1447,7 +1456,7 @@ impl EditLocation {
             };
             let completions = self.completions.as_ref()?;
             let completion = completions.get(selected)?;
-            Some(self.location.with_path(completion.1.clone()))
+            Some(self.location.with_path(completion.1.clone()).normalize())
         }
     }
 
@@ -1467,6 +1476,14 @@ impl EditLocation {
                     selected = 0;
                 }
                 self.selected = Some(selected);
+
+                // Automatically resolve if there is only one completion
+                if completions.len() == 1 {
+                    if let Some(resolved) = self.resolve() {
+                        self.location = resolved;
+                        self.selected = None;
+                    }
+                }
             }
         } else {
             self.selected = None;
@@ -1530,8 +1547,14 @@ impl Location {
                 self.clone()
             }
         } else if let Some(mut path) = self.path_opt().cloned() {
-            // Add trailing slash if location is a path
-            path.push("");
+            // Canonicalize path, if possible
+            if let Ok(canonical) = fs::canonicalize(&path) {
+                path = canonical;
+            }
+            // Add trailing slash if location is a directory
+            if path.is_dir() {
+                path.push("");
+            }
             self.with_path(path)
         } else {
             self.clone()
@@ -1676,7 +1699,7 @@ impl Location {
     pub fn expand_tilde(path: PathBuf) -> PathBuf {
         let mut components = path.components();
         match components.next() {
-            Some(std::path::Component::Normal(os_str)) if os_str == "~" => {
+            Some(path::Component::Normal(os_str)) if os_str == "~" => {
                 if let Some(home) = dirs::home_dir() {
                     home.join(components.as_path())
                 } else {
@@ -1749,6 +1772,7 @@ pub enum Message {
     EditLocationComplete(usize),
     EditLocationEnable,
     EditLocationSubmit,
+    EditLocationTab,
     OpenInNewTab(PathBuf),
     EmptyTrash,
     #[cfg(feature = "desktop")]
@@ -3672,8 +3696,27 @@ impl Tab {
                 self.edit_location = Some(self.location.clone().into());
             }
             Message::EditLocationSubmit => {
-                if let Some(edit_location) = self.edit_location.take() {
+                if let Some(mut edit_location) = self.edit_location.take() {
+                    // Select first completion if current location does not exist
+                    if edit_location.selected.is_none()
+                        && edit_location
+                            .completions
+                            .as_ref()
+                            .map_or(false, |completions| !completions.is_empty())
+                        && edit_location
+                            .location
+                            .path_opt()
+                            .map_or(false, |path| !path.exists())
+                    {
+                        edit_location.selected = Some(0);
+                    }
+
                     cd = edit_location.resolve();
+                }
+            }
+            Message::EditLocationTab => {
+                if let Some(edit_location) = &mut self.edit_location {
+                    edit_location.select(!modifiers.contains(Modifiers::SHIFT));
                 }
             }
             Message::OpenInNewTab(path) => {
@@ -4377,6 +4420,7 @@ impl Tab {
 
         // Change directory if requested
         if let Some(mut location) = cd {
+            location = location.normalize();
             if matches!(self.mode, Mode::Desktop) {
                 match location {
                     Location::Path(path) => {
@@ -4939,6 +4983,8 @@ impl Tab {
                             ))
                         })
                         .on_submit(|_| Message::EditLocationSubmit)
+                        .on_tab(Message::EditLocationTab)
+                        .on_unfocus(Message::EditLocation(None))
                         .line_height(1.0),
                 );
             }
