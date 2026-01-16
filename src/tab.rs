@@ -90,7 +90,7 @@ use crate::{
     mime_icon::{mime_for_path, mime_icon},
     mounter::MOUNTERS,
     mouse_area,
-    operation::{Controller, OperationError},
+    operation::{Controller, OperationError, recursive::Op},
     russh::CLIENTS,
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
@@ -1766,6 +1766,7 @@ pub enum Message {
     LocationContextMenuPoint(Option<Point>),
     LocationContextMenuIndex(Option<Point>, Option<usize>),
     LocationMenuAction(LocationMenuAction),
+    Download(Option<PathBuf>),
     Drag(Option<Rectangle>),
     DragEnd,
     EditLocation(Option<EditLocation>),
@@ -2604,7 +2605,7 @@ impl Item {
                 if let Some(path) = self.path_opt() {
                     column = column.push(
                         widget::button::standard(fl!("open"))
-                            .on_press(Message::Open(Some(path.clone()))),
+                            .on_press(Message::Download(Some(path.clone()))),
                     );
                 }
             }
@@ -3598,6 +3599,21 @@ impl Tab {
                         for item in items.iter_mut() {
                             item.selected = false;
                         }
+                    }
+                }
+            }
+            Message::Download(path_opt) => {
+                match path_opt {
+                    Some(path) => {
+                        if path.is_dir() {
+                            cd = Some(Location::Remote(path, _, _));
+                        } else {
+                            commands.push(Command::DownloadFile(vec![path]));
+                        }
+                    }
+                    // Open selected items
+                    None => {
+                        // TODO: copy from Message::Open
                     }
                 }
             }
