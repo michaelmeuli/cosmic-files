@@ -2601,11 +2601,14 @@ impl Item {
             ItemMetadata::RusshPath { .. } => {
                 column = column.push(details);
 
-                if let Some(path) = self.path_opt() {
-                    column = column.push(
-                        widget::button::standard(fl!("open"))
-                            .on_press(Message::Open(Some(path.clone()))),
-                    );
+                if self.metadata.is_dir() {
+                    if let Some(_path) = self.path_opt() {
+                        if self.selected {
+                            column = column.push(
+                                widget::button::standard(fl!("open")).on_press(Message::Open(None)),
+                            );
+                        }
+                    }
                 }
             }
             _ => {
@@ -4008,6 +4011,19 @@ impl Tab {
                 }
             }
             Message::Open(path_opt) => {
+                // if let Some(location) = &clicked_item.location_opt {
+                //     log::info!("Double click on location: {:?}", location);
+                //     if clicked_item.metadata.is_dir() {
+                //         cd = Some(location.clone());
+                //     } else if let Some(path) = location.path_opt() {
+                //         commands.push(Command::OpenFile(vec![path.clone()]));
+                //     } else {
+                //         log::warn!("no path for item {clicked_item:?}");
+                //     }
+                // } else {
+                //     log::warn!("no location for item {clicked_item:?}");
+                // }
+
                 match path_opt {
                     Some(path) => {
                         if path.is_dir() {
