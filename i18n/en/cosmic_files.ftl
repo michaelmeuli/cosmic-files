@@ -76,6 +76,7 @@ name-no-slashes = Name cannot contain slashes
 cancel = Cancel
 create = Create
 open = Open
+download = Download
 open-file = Open file
 open-folder = Open folder
 open-in-new-tab = Open in new tab

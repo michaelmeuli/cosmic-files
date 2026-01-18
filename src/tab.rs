@@ -1735,6 +1735,7 @@ pub enum Command {
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
     ContextMenu(Option<Point>, Option<window::Id>),
     Delete(Vec<PathBuf>),
+    DownloadFile(Vec<String>),
     DropFiles(PathBuf, ClipboardPaste),
     EmptyTrash,
     #[cfg(feature = "desktop")]
@@ -1766,7 +1767,7 @@ pub enum Message {
     LocationContextMenuPoint(Option<Point>),
     LocationContextMenuIndex(Option<Point>, Option<usize>),
     LocationMenuAction(LocationMenuAction),
-    Download(Vec<String>),
+    Download(String),
     Drag(Option<Rectangle>),
     DragEnd,
     EditLocation(Option<EditLocation>),
@@ -2611,10 +2612,12 @@ impl Item {
                         }
                     }
                 } else {
-                    if let Some(Location::Remote(uri, user, path_opt)) = self.location_opt {
+                    if let Some(Location::Remote(uri, _user, _path_opt)) = self.location_opt.clone()
+                    {
                         if self.selected {
                             column = column.push(
-                                widget::button::standard(fl!("download")).on_press(Message::Download(vec![uri.clone()])),
+                                widget::button::standard(fl!("download"))
+                                    .on_press(Message::Download(uri.clone())),
                             );
                         }
                     }
@@ -3615,20 +3618,8 @@ impl Tab {
                     }
                 }
             }
-            Message::Download(uris) => {
-                match path_opt {
-                    Some(path) => {
-                        if path.is_dir() {
-                            cd = Some(Location::Remote(path, _, _));
-                        } else {
-                            commands.push(Command::DownloadFile(vec![path]));
-                        }
-                    }
-                    // Open selected items
-                    None => {
-                        // TODO: copy from Message::Open
-                    }
-                }
+            Message::Download(uri) => {
+                commands.push(Command::DownloadFile(vec![uri]));
             }
             Message::LocationContextMenuPoint(point_opt) => {
                 self.context_menu = None;
@@ -4037,19 +4028,6 @@ impl Tab {
                 }
             }
             Message::Open(path_opt) => {
-                // if let Some(location) = &clicked_item.location_opt {
-                //     log::info!("Double click on location: {:?}", location);
-                //     if clicked_item.metadata.is_dir() {
-                //         cd = Some(location.clone());
-                //     } else if let Some(path) = location.path_opt() {
-                //         commands.push(Command::OpenFile(vec![path.clone()]));
-                //     } else {
-                //         log::warn!("no path for item {clicked_item:?}");
-                //     }
-                // } else {
-                //     log::warn!("no location for item {clicked_item:?}");
-                // }
-
                 match path_opt {
                     Some(path) => {
                         if path.is_dir() {
