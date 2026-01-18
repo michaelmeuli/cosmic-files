@@ -53,6 +53,9 @@ extract-password-required = Password required
 extract-to = Extract To...
 extract-to-title = Extract to folder
 
+## Download Dialog
+download-to-title = Download to folder
+
 ## Empty Trash Dialog
 empty-trash = Empty trash
 empty-trash-title = Empty trash?

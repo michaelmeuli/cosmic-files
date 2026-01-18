@@ -346,6 +346,7 @@ pub enum Message {
     DesktopConfig(DesktopConfig),
     DesktopViewOptions,
     DesktopDialogs(bool),
+    DownloadToResult(DialogResult),
     DialogCancel,
     DialogComplete,
     Eject,
@@ -993,6 +994,34 @@ impl App {
             );
             let set_title_task = dialog.set_title(fl!("extract-to-title"));
             dialog.set_accept_label(fl!("extract-here"));
+            self.windows.insert(
+                dialog.window_id(),
+                Window::new(WindowKind::FileDialog(Some(
+                    paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
+                ))),
+            );
+            self.file_dialog_opt = Some(dialog);
+            Task::batch([set_title_task, dialog_task])
+        } else {
+            Task::none()
+        }
+    }
+
+    fn download_file(&mut self, uris: &Vec<String>) -> Task<Message> {
+        if let Some(destination) = uris
+            .first()
+            .and_then(|first| first.as_ref().parent())
+            .map(Path::to_path_buf)
+        {
+            let (mut dialog, dialog_task) = Dialog::new(
+                DialogSettings::new()
+                    .kind(DialogKind::OpenFolder)
+                    .path(destination),
+                Message::FileDialogMessage,
+                Message::DownloadToResult,
+            );
+            let set_title_task = dialog.set_title(fl!("download-to-title"));
+            dialog.set_accept_label(fl!("download"));
             self.windows.insert(
                 dialog.window_id(),
                 Window::new(WindowKind::FileDialog(Some(
@@ -3274,6 +3303,31 @@ impl Application for App {
                 }
                 self.file_dialog_opt = None;
             }
+            Message::DownloadToResult(result) => {
+                match result {
+                    DialogResult::Cancel => {}
+                    DialogResult::Open(selected_paths) => {
+                        let mut download_paths = None;
+                        if let Some(file_dialog) = &self.file_dialog_opt {
+                            if let Some(window) = self.windows.remove(&file_dialog.window_id()) {
+                                if let WindowKind::FileDialog(paths) = window.kind {
+                                    download_paths = paths;
+                                }
+                            }
+                        }
+                        if let Some(download_paths) = download_paths {
+                            if !selected_paths.is_empty() {
+                                self.file_dialog_opt = None;
+                                return self.operation(Operation::DownloadFile {
+                                    paths: download_paths,
+                                    to: selected_paths[0].clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+                self.file_dialog_opt = None;
+            }
             Message::FileDialogMessage(dialog_message) => {
                 if let Some(dialog) = &mut self.file_dialog_opt {
                     return dialog.update(dialog_message);
@@ -4480,6 +4534,7 @@ impl Application for App {
                             }
                         }
                         tab::Command::Delete(paths) => commands.push(self.delete(paths)),
+                        tab::Command::DownloadFile(uris) => commands.push(self.download_file(&uris)),
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }
