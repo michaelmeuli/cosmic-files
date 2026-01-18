@@ -1766,7 +1766,7 @@ pub enum Message {
     LocationContextMenuPoint(Option<Point>),
     LocationContextMenuIndex(Option<Point>, Option<usize>),
     LocationMenuAction(LocationMenuAction),
-    Download(Option<PathBuf>),
+    Download(Vec<String>),
     Drag(Option<Rectangle>),
     DragEnd,
     EditLocation(Option<EditLocation>),
@@ -2607,6 +2607,14 @@ impl Item {
                         if self.selected {
                             column = column.push(
                                 widget::button::standard(fl!("open")).on_press(Message::Open(None)),
+                            );
+                        }
+                    }
+                } else {
+                    if let Some(Location::Remote(uri, user, path_opt)) = self.location_opt {
+                        if self.selected {
+                            column = column.push(
+                                widget::button::standard(fl!("download")).on_press(Message::Download(vec![uri.clone()])),
                             );
                         }
                     }
@@ -3607,7 +3615,7 @@ impl Tab {
                     }
                 }
             }
-            Message::Download(path_opt) => {
+            Message::Download(uris) => {
                 match path_opt {
                     Some(path) => {
                         if path.is_dir() {

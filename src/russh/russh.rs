@@ -544,6 +544,7 @@ enum Cmd {
         mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>,
     ),
     Disconnect(ClientItem),
+    Download(String, Option<PathBuf>),
 }
 
 enum Event {
@@ -991,6 +992,102 @@ impl Russh {
                             let event_tx = event_tx.clone();
                             let _ = event_tx.send(Event::Changed);
                             log::info!("Disconnected from {}", item.host);
+                        }
+                        Cmd::Download(uri, local_path_opt) => {
+                            let remote_file = match remote_file_from_uri(&uri) {
+                                Ok(rf) => rf,
+                                Err(e) => {
+                                    let _ = items_tx.send(Err(e)).await;
+                                    continue;
+                                }
+                            };
+                            let norm_uri = remote_file.uri();
+                            let host = remote_file.host.as_str();
+                            let port = remote_file.port;
+                            let username = match remote_file.username {
+                                Some(u) => u,
+                                None => {
+                                    event_tx
+                                        .send(Event::RemoteResult(
+                                            norm_uri,
+                                            Err("No username specified in URI".into()),
+                                        ))
+                                        .unwrap();
+                                    continue;
+                                }
+                            };
+                            let existing_client = {
+                                let read = clients.read().await;
+                                read.get(host).cloned()
+                            };
+                            let local_path = local_path_opt.or_else(|| {
+                                log::info!(
+                                    "No local path specified for download, using default download directory"
+                                );
+                                let default = dirs::download_dir();
+                                if default.is_none() {
+                                    log::info!("Warning: no default download directory found");
+                                }
+                                default
+                            });
+                            let local_path =
+                                local_path.unwrap_or_else(|| std::env::current_dir().unwrap());
+                            log::info!(
+                                "Downloading remote file {} to local path {:?}",
+                                remote_file.path,
+                                local_path
+                            );
+                            if let Some(client) = existing_client {
+                                let result = client
+                                    .download_file(remote_file.path, local_path.as_path())
+                                    .await;
+                                let _ = items_tx
+                                    .send(result.map(|_| true).map_err(|e| e.to_string()))
+                                    .await;
+                            } else {
+                                let key_path = match get_key_files() {
+                                    Ok(key_pair) => key_pair.0,
+                                    Err(e) => {
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Err(e)))
+                                            .unwrap();
+                                        continue;
+                                    }
+                                };
+                                let auth = AuthMethod::with_key_file(key_path, None);
+                                match Client::connect(
+                                    (host, port),
+                                    username.as_str(),
+                                    auth.clone(),
+                                    ServerCheckMethod::NoCheck,
+                                )
+                                .await
+                                {
+                                    Ok(client) => {
+                                        {
+                                            let mut write = clients.write().await;
+                                            write.insert(host.to_string(), Arc::new(client));
+                                        }
+                                        let client = {
+                                            let read = clients.read().await;
+                                            Arc::clone(read.get(host).unwrap())
+                                        };
+                                        let result =
+                                            remote_sftp_parent(&client, &norm_uri, sizes).await;
+                                        let _ = items_tx.send(result).await;
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Ok(true)))
+                                            .unwrap();
+                                    }
+                                    Err(err) => {
+                                        let msg =
+                                            format!("Connecting fresh session failed: {}", err);
+                                        event_tx
+                                            .send(Event::RemoteResult(norm_uri, Err(msg)))
+                                            .unwrap();
+                                    }
+                                }
+                            }
                         }
                     }
                 }
