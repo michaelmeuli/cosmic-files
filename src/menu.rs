@@ -336,6 +336,7 @@ pub fn context_menu<'a>(
             if selected > 0 {
                 if matches!(tab.mode, tab::Mode::App) {
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
+                    children.push(menu_item(fl!("download-to"), Action::DownloadTo).into());
                 }
             } else {
                 if tab.mode.multiple() {

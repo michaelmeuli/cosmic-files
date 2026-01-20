@@ -54,6 +54,7 @@ extract-to = Extract To...
 extract-to-title = Extract to folder
 
 ## Download Dialog
+download-to = Download To...
 download-to-title = Download to folder
 
 ## Empty Trash Dialog

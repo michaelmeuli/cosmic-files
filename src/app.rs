@@ -155,6 +155,7 @@ pub enum Action {
     CosmicSettingsWallpaper,
     DesktopViewOptions,
     Delete,
+    DownloadTo,
     EditHistory,
     EditLocation,
     Eject,
@@ -222,6 +223,7 @@ impl Action {
             Self::CosmicSettingsWallpaper => Message::CosmicSettings("wallpaper"),
             Self::Delete => Message::Delete(entity_opt),
             Self::DesktopViewOptions => Message::DesktopViewOptions,
+            Self::DownloadTo => Message::DownloadTo(entity_opt),
             Self::EditHistory => Message::ToggleContextPage(ContextPage::EditHistory),
             Self::EditLocation => Message::TabMessage(entity_opt, tab::Message::EditLocationEnable),
             Self::Eject => Message::Eject,
@@ -346,6 +348,7 @@ pub enum Message {
     DesktopConfig(DesktopConfig),
     DesktopViewOptions,
     DesktopDialogs(bool),
+    DownloadTo(Option<Entity>),
     DownloadToResult(DialogResult),
     DialogCancel,
     DialogComplete,
@@ -677,6 +680,7 @@ pub enum WindowKind {
     Desktop(Entity),
     DesktopViewOptions,
     Dialogs(widget::Id),
+    DownloadDialog(Option<Box<[String]>>),
     FileDialog(Option<Box<[PathBuf]>>),
     Preview(Option<Entity>, PreviewKind),
 }
@@ -1008,10 +1012,7 @@ impl App {
     }
 
     fn download_file(&mut self, uris: &Vec<String>) -> Task<Message> {
-        if let Some(destination) = uris
-            .first()
-            .and_then(|first| first.as_ref().parent())
-            .map(Path::to_path_buf)
+        if let Some(destination) = dirs::download_dir()
         {
             let (mut dialog, dialog_task) = Dialog::new(
                 DialogSettings::new()
@@ -1024,8 +1025,8 @@ impl App {
             dialog.set_accept_label(fl!("download"));
             self.windows.insert(
                 dialog.window_id(),
-                Window::new(WindowKind::FileDialog(Some(
-                    paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
+                Window::new(WindowKind::DownloadDialog(Some(
+                    uris.iter().map(|x| x.to_string()).collect(),
                 ))),
             );
             self.file_dialog_opt = Some(dialog);
@@ -3258,6 +3259,10 @@ impl Application for App {
                     self.update(Message::DialogUpdate(dialog_page)),
                     self.update(Message::DialogComplete),
                 ]);
+            }
+            Message::DownloadTo(entity_opt) => {
+                let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                return self.extract_to(&selected_paths);
             }
             Message::ExtractHere(entity_opt) => {
                 let paths: Box<[_]> = self.selected_paths(entity_opt).collect();

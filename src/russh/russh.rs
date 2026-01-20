@@ -1159,6 +1159,18 @@ impl Connector for Russh {
         items_rx.blocking_recv()
     }
 
+    fn download_file(&self, uri: &str, local_path_opt: Option<PathBuf>) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                command_tx
+                    .send(Cmd::Download(uri.to_string(), local_path_opt))
+                    .unwrap();
+            },
+            |_| {},
+        )
+    }
+
     fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
 
