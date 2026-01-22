@@ -118,6 +118,7 @@ pub trait Connector: Send + Sync {
     fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>>;
     fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)>;
     fn disconnect(&self, item: ClientItem) -> Task<()>;
+    fn download_file(&self, uris: Vec<String>, to: PathBuf) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 

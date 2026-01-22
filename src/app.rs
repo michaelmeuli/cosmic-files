@@ -680,7 +680,7 @@ pub enum WindowKind {
     Desktop(Entity),
     DesktopViewOptions,
     Dialogs(widget::Id),
-    DownloadDialog(Option<Box<[String]>>),
+    DownloadDialog(Option<Vec<String>>),
     FileDialog(Option<Box<[PathBuf]>>),
     Preview(Option<Entity>, PreviewKind),
 }
@@ -1011,9 +1011,8 @@ impl App {
         }
     }
 
-    fn download_file(&mut self, uris: &Vec<String>) -> Task<Message> {
-        if let Some(destination) = dirs::download_dir()
-        {
+    fn download_to(&mut self, uris: &Vec<String>) -> Task<Message> {
+        if let Some(destination) = dirs::download_dir() {
             let (mut dialog, dialog_task) = Dialog::new(
                 DialogSettings::new()
                     .kind(DialogKind::OpenFolder)
@@ -1508,6 +1507,21 @@ impl App {
                 tab.selected_locations()
                     .into_iter()
                     .filter_map(Location::into_path_opt)
+            })
+    }
+
+    fn selected_uris(
+        &self,
+        entity_opt: Option<Entity>,
+    ) -> impl Iterator<Item = String> + use<'_> {
+        let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
+        self.tab_model
+            .data::<Tab>(entity)
+            .into_iter()
+            .flat_map(|tab| {
+                tab.selected_locations()
+                    .into_iter()
+                    .filter_map(Location::into_uri_opt)
             })
     }
 
@@ -3261,8 +3275,8 @@ impl Application for App {
                 ]);
             }
             Message::DownloadTo(entity_opt) => {
-                let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
-                return self.extract_to(&selected_paths);
+                let selected_paths: Vec<_> = self.selected_uris(entity_opt).collect();
+                return self.download_to(&selected_paths);
             }
             Message::ExtractHere(entity_opt) => {
                 let paths: Box<[_]> = self.selected_paths(entity_opt).collect();
@@ -3315,18 +3329,19 @@ impl Application for App {
                         let mut download_paths = None;
                         if let Some(file_dialog) = &self.file_dialog_opt {
                             if let Some(window) = self.windows.remove(&file_dialog.window_id()) {
-                                if let WindowKind::FileDialog(paths) = window.kind {
-                                    download_paths = paths;
+                                if let WindowKind::DownloadDialog(uris) = window.kind {
+                                    download_paths = uris;
                                 }
                             }
                         }
                         if let Some(download_paths) = download_paths {
                             if !selected_paths.is_empty() {
                                 self.file_dialog_opt = None;
-                                return self.operation(Operation::DownloadFile {
-                                    paths: download_paths,
-                                    to: selected_paths[0].clone(),
-                                });
+                                let to = selected_paths[0].clone();
+                                for (_key, client) in CLIENTS.iter() {
+                                match client.download_file(download_paths, to) {
+                                    }
+                                }
                             }
                         }
                     }
@@ -4539,7 +4554,7 @@ impl Application for App {
                             }
                         }
                         tab::Command::Delete(paths) => commands.push(self.delete(paths)),
-                        tab::Command::DownloadFile(uris) => commands.push(self.download_file(&uris)),
+                        tab::Command::DownloadFile(uris) => commands.push(self.download_to(&uris)),
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }

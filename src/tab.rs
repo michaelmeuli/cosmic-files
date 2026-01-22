@@ -1597,6 +1597,13 @@ impl Location {
         }
     }
 
+    pub(crate) fn into_uri_opt(self) -> Option<String> {
+        match self {
+            Self::Remote(uri, _, _) => Some(uri),
+            _ => None,
+        }
+    }
+
     pub fn with_path(&self, path: PathBuf) -> Self {
         let path = Self::expand_tilde(path);
         match self {

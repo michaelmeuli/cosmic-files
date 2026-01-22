@@ -8,8 +8,7 @@ use cosmic::{
     widget,
 };
 use std::{
-    any::TypeId, cell::Cell, collections::HashMap, future::pending, path::Path, path::PathBuf,
-    sync::Arc,
+    any::TypeId, cell::Cell, collections::HashMap, future::pending, path::{Path, PathBuf}, result, sync::Arc
 };
 use tokio::sync::{Mutex, RwLock, mpsc};
 
@@ -544,7 +543,7 @@ enum Cmd {
         mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>,
     ),
     Disconnect(ClientItem),
-    Download(String, Option<PathBuf>),
+    Download(Vec<String>, Option<PathBuf>, tokio::sync::oneshot::Sender<anyhow::Result<()>>),
 }
 
 enum Event {
@@ -623,10 +622,10 @@ impl Russh {
                         Cmd::Rescan => {
                             event_tx.send(Event::Items(client_items.clone())).unwrap();
                         }
-                        Cmd::Connect(client_item, complete_tx) => {
+                        Cmd::Connect(client_item, result_tx) => {
                             let client_item_clone = client_item.clone();
                             let ClientItem::Russh(item) = client_item else {
-                                _ = complete_tx.send(Err(anyhow::anyhow!("No client item")));
+                                _ = result_tx.send(Err(anyhow::anyhow!("No client item")));
                                 continue;
                             };
                             let event_tx = event_tx.clone();
@@ -657,7 +656,7 @@ impl Russh {
                                         auth: item.auth.clone(),
                                         server_check: item.server_check.clone(),
                                     }));
-                                    _ = complete_tx.send(Ok(()));
+                                    _ = result_tx.send(Ok(()));
                                     event_tx
                                         .send(Event::ClientResult(
                                             client_item_clone.clone(),
@@ -666,7 +665,7 @@ impl Russh {
                                         .unwrap();
                                 }
                                 Err(err) => {
-                                    _ = complete_tx.send(Err(anyhow::anyhow!("{err:?}")));
+                                    _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                     event_tx
                                         .send(Event::ClientResult(
                                             client_item_clone,
@@ -993,11 +992,12 @@ impl Russh {
                             let _ = event_tx.send(Event::Changed);
                             log::info!("Disconnected from {}", item.host);
                         }
-                        Cmd::Download(uri, local_path_opt) => {
+                        Cmd::Download(uris, local_path_opt, result_tx) => {
+                            let uri = uris.first().cloned().unwrap_or_default();
                             let remote_file = match remote_file_from_uri(&uri) {
                                 Ok(rf) => rf,
                                 Err(e) => {
-                                    let _ = items_tx.send(Err(e)).await;
+                                    let _ = result_tx.send(Err(anyhow::anyhow!(e))).await;
                                     continue;
                                 }
                             };
@@ -1013,6 +1013,7 @@ impl Russh {
                                             Err("No username specified in URI".into()),
                                         ))
                                         .unwrap();
+                                    let _ = result_tx.send(Err(anyhow::anyhow!("No username specified in URI"))).await;
                                     continue;
                                 }
                             };
@@ -1159,15 +1160,21 @@ impl Connector for Russh {
         items_rx.blocking_recv()
     }
 
-    fn download_file(&self, uri: &str, local_path_opt: Option<PathBuf>) -> Task<()> {
+    fn download_file(&self, uris: Vec<String>, to: PathBuf) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
             async move {
+                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
                 command_tx
-                    .send(Cmd::Download(uri.to_string(), local_path_opt))
+                    .send(Cmd::Download(uris, to, res_tx))
                     .unwrap();
+                res_rx.await
             },
-            |_| {},
+            |x| {
+                if let Err(err) = x {
+                    log::error!("{err:?}");
+                }
+            },
         )
     }
 
