@@ -1005,6 +1005,7 @@ impl Russh {
                         Cmd::Download(uris, path, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             let uri = uris.first().cloned().unwrap_or_default();
+                            log::info!("Download command received for URI: {}", uri);
                             let remote_file = match remote_file_from_uri(&uri) {
                                 Ok(rf) => rf,
                                 Err(err) => {
@@ -1024,11 +1025,24 @@ impl Russh {
                                 remote_file.path,
                                 path
                             );
+
                             if let Some(client) = existing_client {
-                                let _ = client
-                                    .download_file(remote_file.path, path)
-                                    .await;
-                            } 
+                                let result = client.download_file(remote_file.path, path.join("downloaded_test_file")).await;
+                                match result {
+                                    Ok(_) => {
+                                        log::info!("Download completed successfully");
+                                        if let Some(result_tx) = result_tx_opt.take() {
+                                            let _ = result_tx.send(Ok(()));
+                                        }
+                                    }
+                                    Err(err) => {
+                                        log::error!("Download failed: {}", err);
+                                        if let Some(result_tx) = result_tx_opt.take() {
+                                            _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

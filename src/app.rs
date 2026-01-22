@@ -3339,7 +3339,8 @@ impl Application for App {
                                 self.file_dialog_opt = None;
                                 let to = selected_paths[0].clone();
                                 for (_key, client) in CLIENTS.iter() {
-                                    client.download_file(download_paths.clone(), to.clone());
+                                    return client.download_file(download_paths.clone(), to.clone())
+                                        .map(|_| cosmic::action::none());
                                 }
                             }
                         }
