@@ -3339,8 +3339,7 @@ impl Application for App {
                                 self.file_dialog_opt = None;
                                 let to = selected_paths[0].clone();
                                 for (_key, client) in CLIENTS.iter() {
-                                match client.download_file(download_paths, to) {
-                                    }
+                                    client.download_file(download_paths.clone(), to.clone());
                                 }
                             }
                         }
@@ -6597,6 +6596,10 @@ impl Application for App {
                     .preview(entity_opt, kind, false)
                     .map(|x| Message::TabMessage(*entity_opt, x)),
                 WindowKind::FileDialog(..) => match &self.file_dialog_opt {
+                    Some(dialog) => return dialog.view(id),
+                    None => widget::text("Unknown window ID").into(),
+                },
+                WindowKind::DownloadDialog(..) => match &self.file_dialog_opt {
                     Some(dialog) => return dialog.view(id),
                     None => widget::text("Unknown window ID").into(),
                 },
