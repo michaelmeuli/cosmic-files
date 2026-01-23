@@ -1004,41 +1004,46 @@ impl Russh {
                         }
                         Cmd::Download(uris, path, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
-                            let uri = uris.first().cloned().unwrap_or_default();
-                            log::info!("Download command received for URI: {}", uri);
-                            let remote_file = match remote_file_from_uri(&uri) {
-                                Ok(rf) => rf,
-                                Err(err) => {
-                                    if let Some(result_tx) = result_tx_opt.take() {
-                                        _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
-                                    }
-                                    continue;
-                                }
-                            };
-                            let host = remote_file.host.as_str();
-                            let existing_client = {
-                                let read = clients.read().await;
-                                read.get(host).cloned()
-                            };
-                            log::info!(
-                                "Downloading remote file {} to local path {:?}",
-                                remote_file.path,
-                                path
-                            );
-
-                            if let Some(client) = existing_client {
-                                let result = client.download_file(remote_file.path, path.join("downloaded_test_file")).await;
-                                match result {
-                                    Ok(_) => {
-                                        log::info!("Download completed successfully");
-                                        if let Some(result_tx) = result_tx_opt.take() {
-                                            let _ = result_tx.send(Ok(()));
-                                        }
-                                    }
+                            for uri in uris.iter() {
+                                log::info!("Download command received for URI: {}", uri);
+                                let remote_file = match remote_file_from_uri(&uri) {
+                                    Ok(rf) => rf,
                                     Err(err) => {
-                                        log::error!("Download failed: {}", err);
                                         if let Some(result_tx) = result_tx_opt.take() {
                                             _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
+                                        }
+                                        continue;
+                                    }
+                                };
+                                let host = remote_file.host.as_str();
+                                let existing_client = {
+                                    let read = clients.read().await;
+                                    read.get(host).cloned()
+                                };
+                                log::info!(
+                                    "Downloading remote file {} to local path {:?}",
+                                    remote_file.path,
+                                    path
+                                );
+                                let filename = Path::new(&remote_file.path)
+                                    .file_name()
+                                    .ok_or_else(|| anyhow!("remote path has no filename"))?;
+                                if let Some(client) = existing_client {
+                                    let result = client
+                                        .download_file(remote_file.path, path.join(filename))
+                                        .await;
+                                    match result {
+                                        Ok(_) => {
+                                            log::info!("Download completed successfully");
+                                            if let Some(result_tx) = result_tx_opt.take() {
+                                                let _ = result_tx.send(Ok(()));
+                                            }
+                                        }
+                                        Err(err) => {
+                                            log::error!("Download failed: {}", err);
+                                            if let Some(result_tx) = result_tx_opt.take() {
+                                                _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
+                                            }
                                         }
                                     }
                                 }
