@@ -227,6 +227,14 @@ deleted = Deleted {$items} {$items ->
         [one] item
         *[other] items
     } from {trash}
+downloading = Downloading {$items} {$items ->
+        [one] item
+        *[other] items
+    } from "{$from}" to "{$to}" ({$progress})...
+downloaded = Downloaded {$items} {$items ->
+        [one] item
+        *[other] items
+    } from "{$from}" to "{$to}"
 emptying-trash = Emptying {trash} ({$progress})...
 emptied-trash = Emptied {trash}
 extracting = Extracting {$items} {$items ->

@@ -28,7 +28,7 @@ use cosmic::{
         keyboard::{Event as KeyEvent, Key, Modifiers},
         stream,
         widget::scrollable,
-        window::{self, Event as WindowEvent, Id as WindowId},
+        window::{self, Event as WindowEvent, Id as WindowId}
     },
     iced_runtime::clipboard,
     iced_widget::button::focus,
@@ -680,7 +680,7 @@ pub enum WindowKind {
     Desktop(Entity),
     DesktopViewOptions,
     Dialogs(widget::Id),
-    DownloadDialog(Option<Vec<String>>),
+    DownloadDialog(Option<(Box<[PathBuf]>, Vec<String>)>),
     FileDialog(Option<Box<[PathBuf]>>),
     Preview(Option<Entity>, PreviewKind),
 }
@@ -1011,7 +1011,7 @@ impl App {
         }
     }
 
-    fn download_to(&mut self, uris: &Vec<String>) -> Task<Message> {
+    fn download_to(&mut self, paths: &[impl AsRef<Path>], uris: &Vec<String>) -> Task<Message> {
         if let Some(destination) = dirs::download_dir() {
             let (mut dialog, dialog_task) = Dialog::new(
                 DialogSettings::new()
@@ -1025,7 +1025,10 @@ impl App {
             self.windows.insert(
                 dialog.window_id(),
                 Window::new(WindowKind::DownloadDialog(Some(
-                    uris.iter().map(|x| x.to_string()).collect(),
+                    (
+                        paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
+                        uris.iter().map(|x| x.to_string()).collect(),
+                    )
                 ))),
             );
             self.file_dialog_opt = Some(dialog);
@@ -3275,8 +3278,9 @@ impl Application for App {
                 ]);
             }
             Message::DownloadTo(entity_opt) => {
-                let selected_paths: Vec<_> = self.selected_uris(entity_opt).collect();
-                return self.download_to(&selected_paths);
+                let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
+                return self.download_to(&selected_paths, &selected_uris);
             }
             Message::ExtractHere(entity_opt) => {
                 let paths: Box<[_]> = self.selected_paths(entity_opt).collect();
@@ -3326,22 +3330,27 @@ impl Application for App {
                 match result {
                     DialogResult::Cancel => {}
                     DialogResult::Open(selected_paths) => {
-                        let mut download_paths = None;
+                        let mut from_paths_and_uris = None;
                         if let Some(file_dialog) = &self.file_dialog_opt {
                             if let Some(window) = self.windows.remove(&file_dialog.window_id()) {
-                                if let WindowKind::DownloadDialog(uris) = window.kind {
-                                    download_paths = uris;
+                                if let WindowKind::DownloadDialog(paths_and_uris) = window.kind {
+                                    from_paths_and_uris = paths_and_uris;
                                 }
                             }
                         }
-                        if let Some(download_paths) = download_paths {
+                        if let Some((download_paths, download_uris)) = from_paths_and_uris {
                             if !selected_paths.is_empty() {
                                 self.file_dialog_opt = None;
-                                let to = selected_paths[0].clone();
-                                for (_key, client) in CLIENTS.iter() {
-                                    return client.download_file(download_paths.clone(), to.clone())
-                                        .map(|_| cosmic::action::none());
-                                }
+                                return self.operation(Operation::Download {
+                                    paths: download_paths,
+                                    uris: download_uris,
+                                    to: selected_paths[0].clone(),
+                                });
+                                // let to = selected_paths[0].clone();
+                                // for (_key, client) in CLIENTS.iter() {
+                                //     return client.download_file(download_uris.clone(), to.clone())
+                                //         .map(|_| cosmic::action::none());
+                                // }
                             }
                         }
                     }
@@ -4554,7 +4563,7 @@ impl Application for App {
                             }
                         }
                         tab::Command::Delete(paths) => commands.push(self.delete(paths)),
-                        tab::Command::DownloadFile(uris) => commands.push(self.download_to(&uris)),
+                        tab::Command::DownloadFile(paths, uris) => commands.push(self.download_to(&paths, &uris)),
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }

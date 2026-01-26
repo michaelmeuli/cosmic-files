@@ -1746,7 +1746,7 @@ pub enum Command {
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
     ContextMenu(Option<Point>, Option<window::Id>),
     Delete(Vec<PathBuf>),
-    DownloadFile(Vec<String>),
+    DownloadFile(Vec<PathBuf>, Vec<String>),
     DropFiles(PathBuf, ClipboardPaste),
     EmptyTrash,
     #[cfg(feature = "desktop")]
@@ -1778,7 +1778,7 @@ pub enum Message {
     LocationContextMenuPoint(Option<Point>),
     LocationContextMenuIndex(Option<Point>, Option<usize>),
     LocationMenuAction(LocationMenuAction),
-    Download(String),
+    Download(Option<(PathBuf, String)>),
     Drag(Option<Rectangle>),
     DragEnd,
     EditLocation(Option<EditLocation>),
@@ -2623,13 +2623,13 @@ impl Item {
                         }
                     }
                 } else {
-                    if let Some(Location::Remote(uri, _user, _path_opt)) = self.location_opt.clone()
+                    if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
                     {
-                        if self.selected {
-                            column = column.push(
-                                widget::button::standard(fl!("download"))
-                                    .on_press(Message::Download(uri.clone())),
-                            );
+                        if self.selected && path_opt.is_some() {
+                            column =
+                                column.push(widget::button::standard(fl!("download")).on_press(
+                                    Message::Download(Some((path_opt.unwrap(), uri.clone()))),
+                                ));
                         }
                     }
                 }
@@ -3629,9 +3629,15 @@ impl Tab {
                     }
                 }
             }
-            Message::Download(uri) => {
-                commands.push(Command::DownloadFile(vec![uri]));
-            }
+            Message::Download(path_uri_opt) => match path_uri_opt {
+                Some(path_uri) => {
+                    commands.push(Command::DownloadFile(
+                        vec![path_uri.0],
+                        vec![path_uri.1],
+                    ));
+                }
+                None => {}
+            },
             Message::LocationContextMenuPoint(point_opt) => {
                 self.context_menu = None;
                 self.location_context_menu_point = point_opt;

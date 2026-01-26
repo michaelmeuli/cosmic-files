@@ -13,6 +13,7 @@ use super::{Controller, OperationSelection, ReplaceResult, copy_unique_path};
 
 pub enum Method {
     Copy,
+    Download,
     Move { cross_device_copy: bool },
 }
 

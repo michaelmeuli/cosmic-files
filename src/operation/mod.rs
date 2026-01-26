@@ -101,6 +101,7 @@ async fn copy_or_move(
             "{} {:?} to {}",
             match method {
                 Method::Copy => "Copy",
+                Method::Download => "Download",
                 Method::Move { .. } => "Move",
             },
             paths,
@@ -264,6 +265,118 @@ fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
     to
 }
 
+async fn perform_download(
+    paths: Vec<PathBuf>,
+    to: PathBuf,
+    method: Method,
+    msg_tx: &Arc<TokioMutex<Sender<Message>>>,
+    controller: Controller,
+) -> Result<OperationSelection, OperationError> {
+    let msg_tx = msg_tx.clone();
+    let controller_c = controller.clone();
+
+    compio::runtime::spawn(async move {
+        let controller = controller_c;
+        log::info!(
+            "{} {:?} to {}",
+            match method {
+                Method::Copy => "Copy",
+                Method::Download => "Download",
+                Method::Move { .. } => "Move",
+            },
+            paths,
+            to.display()
+        );
+
+        // Handle duplicate file names by renaming paths
+        let mut from_to_pairs: Vec<(PathBuf, PathBuf)> = paths
+            .into_iter()
+            .zip(std::iter::repeat(to.as_path()))
+            .filter_map(|(from, to)| {
+                if matches!(from.parent(), Some(parent) if parent == to)
+                    && matches!(method, Method::Copy)
+                {
+                    // `from`'s parent is equal to `to` which means we're copying to the same
+                    // directory (duplicating files)
+                    let to = copy_unique_path(&from, to);
+                    Some((from, to))
+                } else if let Some(name) = from.file_name() {
+                    let to = to.join(name);
+                    Some((from, to))
+                } else {
+                    //TODO: how to handle from missing file name?
+                    None
+                }
+            })
+            .collect();
+
+        // Attempt quick and simple renames
+        //TODO: allow rename to be used for directories in recursive context?
+        if matches!(method, Method::Move { .. }) {
+            from_to_pairs.retain(|(from, to)| {
+                //TODO: show replace dialog here?
+                if to.exists() {
+                    return true;
+                }
+
+                //TODO: use compio::fs::rename?
+                match fs::rename(from, to) {
+                    Ok(()) => {
+                        log::info!("renamed {} to {}", from.display(), to.display());
+                        false
+                    }
+                    Err(err) => {
+                        log::info!(
+                            "failed to rename {} to {}, fallback to recursive move: {}",
+                            from.display(),
+                            to.display(),
+                            err
+                        );
+                        true
+                    }
+                }
+            });
+        }
+
+        let mut context = Context::new(controller.clone());
+
+        {
+            let controller = controller.clone();
+            context = context.on_progress(move |_op, progress| {
+                let item_progress = match progress.total_bytes {
+                    Some(total_bytes) => {
+                        if total_bytes == 0 {
+                            1.0
+                        } else {
+                            progress.current_bytes as f32 / total_bytes as f32
+                        }
+                    }
+                    None => 0.0,
+                };
+                let total_progress =
+                    (item_progress + progress.current_ops as f32) / progress.total_ops as f32;
+                controller.set_progress(total_progress);
+            });
+        }
+
+        {
+            let msg_tx = msg_tx.clone();
+            context = context.on_replace(move |op| {
+                let msg_tx = msg_tx.clone();
+                Box::pin(handle_replace(msg_tx, op.from.clone(), op.to.clone(), true))
+            });
+        }
+
+        context
+            .recursive_copy_or_move(from_to_pairs, method)
+            .await?;
+
+        Result::<OperationSelection, OperationError>::Ok(context.op_sel)
+    })
+    .await
+    .map_err(wrap_compio_spawn_error)?
+}
+
 fn file_name(path: &Path) -> Cow<'_, str> {
     path.file_name()
         .map_or_else(|| fl!("unknown-folder").into(), |x| x.to_string_lossy())
@@ -325,6 +438,12 @@ pub enum Operation {
     /// Delete a path from the trash
     DeleteTrash {
         items: Vec<trash::TrashItem>,
+    },
+    /// Download items
+    Download {
+        paths: Box<[PathBuf]>,
+        uris: Vec<String>,
+        to: PathBuf,
     },
     /// Empty the trash
     EmptyTrash,
@@ -462,6 +581,13 @@ impl Operation {
             Self::DeleteTrash { items } => {
                 fl!("deleting", items = items.len(), progress = progress())
             }
+            Self::Download { paths, to } => fl!(
+                "downloading",
+                items = paths.len(),
+                from = paths_parent_name(paths),
+                to = file_name(to),
+                progress = progress()
+            ),
             Self::EmptyTrash => fl!("emptying-trash", progress = progress()),
             Self::Extract {
                 paths,
@@ -531,6 +657,12 @@ impl Operation {
                 to = fl!("trash")
             ),
             Self::DeleteTrash { items } => fl!("deleted", items = items.len()),
+            Self::Download { paths, to } => fl!(
+                "downloaded",
+                items = paths.len(),
+                from = paths_parent_name(paths),
+                to = file_name(to)
+            ),
             Self::EmptyTrash => fl!("emptied-trash"),
             Self::Extract {
                 paths,
@@ -582,6 +714,7 @@ impl Operation {
             | Self::Copy { .. }
             | Self::Delete { .. }
             | Self::DeleteTrash { .. }
+            | Self::Download { .. }
             | Self::EmptyTrash
             | Self::Extract { .. }
             | Self::Move { .. }
@@ -600,6 +733,7 @@ impl Operation {
         match self {
             Self::Compress { .. } => Some(self.completed_text()),
             Self::Delete { .. } => Some(self.completed_text()),
+            Self::Download { .. } => Some(self.completed_text()),
             Self::Extract { .. } => Some(self.completed_text()),
             //TODO: more toasts
             _ => None,
@@ -848,6 +982,9 @@ impl Operation {
                     .map_err(|e| OperationError::from_err(e, &controller))?;
                 }
                 Ok(OperationSelection::default())
+            }
+            Self::Download { paths, to } => {
+                perform_download(paths, to, Method::Download, msg_tx, controller).await
             }
             Self::EmptyTrash => {
                 #[cfg(any(
