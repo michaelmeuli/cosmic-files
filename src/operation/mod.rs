@@ -267,8 +267,8 @@ fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
 
 async fn perform_download(
     paths: Vec<PathBuf>,
+    uris: Vec<String>,
     to: PathBuf,
-    method: Method,
     msg_tx: &Arc<TokioMutex<Sender<Message>>>,
     controller: Controller,
 ) -> Result<OperationSelection, OperationError> {
@@ -277,28 +277,19 @@ async fn perform_download(
 
     compio::runtime::spawn(async move {
         let controller = controller_c;
-        log::info!(
-            "{} {:?} to {}",
-            match method {
-                Method::Copy => "Copy",
-                Method::Download => "Download",
-                Method::Move { .. } => "Move",
-            },
-            paths,
-            to.display()
-        );
+        let mut reserved = HashSet::new();
+
+        log::info!("{} {:?} to {}", "Download", paths, to.display());
 
         // Handle duplicate file names by renaming paths
         let mut from_to_pairs: Vec<(PathBuf, PathBuf)> = paths
             .into_iter()
             .zip(std::iter::repeat(to.as_path()))
             .filter_map(|(from, to)| {
-                if matches!(from.parent(), Some(parent) if parent == to)
-                    && matches!(method, Method::Copy)
-                {
+                if matches!(from.parent(), Some(parent) if parent == to) {
                     // `from`'s parent is equal to `to` which means we're copying to the same
                     // directory (duplicating files)
-                    let to = copy_unique_path(&from, to);
+                    let to = download_unique_path(&from, to_dir, &mut reserved);
                     Some((from, to))
                 } else if let Some(name) = from.file_name() {
                     let to = to.join(name);
@@ -310,35 +301,13 @@ async fn perform_download(
             })
             .collect();
 
-        // Attempt quick and simple renames
-        //TODO: allow rename to be used for directories in recursive context?
-        if matches!(method, Method::Move { .. }) {
-            from_to_pairs.retain(|(from, to)| {
-                //TODO: show replace dialog here?
-                if to.exists() {
-                    return true;
-                }
-
-                //TODO: use compio::fs::rename?
-                match fs::rename(from, to) {
-                    Ok(()) => {
-                        log::info!("renamed {} to {}", from.display(), to.display());
-                        false
-                    }
-                    Err(err) => {
-                        log::info!(
-                            "failed to rename {} to {}, fallback to recursive move: {}",
-                            from.display(),
-                            to.display(),
-                            err
-                        );
-                        true
-                    }
-                }
-            });
-        }
-
         let mut context = Context::new(controller.clone());
+
+                                // let to = selected_paths[0].clone();
+                                // for (_key, client) in CLIENTS.iter() {
+                                //     return client.download_file(download_uris.clone(), to.clone())
+                                //         .map(|_| cosmic::action::none());
+                                // }
 
         {
             let controller = controller.clone();
@@ -375,6 +344,72 @@ async fn perform_download(
     })
     .await
     .map_err(wrap_compio_spawn_error)?
+}
+
+pub fn download_unique_path(from: &Path, to_dir: &Path, reserved: &mut HashSet<PathBuf>) -> PathBuf {
+    // List of compound extensions to check
+    const COMPOUND_EXTENSIONS: &[&str] = &[
+        ".tar.gz",
+        ".tar.bz2",
+        ".tar.xz",
+        ".tar.zst",
+        ".tar.lz",
+        ".tar.lzma",
+        ".tar.sz",
+        ".tar.lzo",
+        ".tar.br",
+        ".tar.Z",
+        ".tar.pz",
+    ];
+
+    let file_name = from.file_name().and_then(|n| n.to_str()).unwrap();
+    let file_name = file_name.to_string();
+
+    // --- split into stem/ext correctly ---
+    let (stem, ext) = COMPOUND_EXTENSIONS
+        .iter()
+        .copied()
+        .find(|&e| file_name.ends_with(e))
+        .map(|e| {
+            (
+                file_name.strip_suffix(e).unwrap().to_string(),
+                Some(e[1..].to_string()),
+            )
+        })
+        .unwrap_or_else(|| {
+            from.file_stem()
+                .and_then(|s| s.to_str())
+                .map_or((file_name.clone(), None), |s| {
+                    (
+                        s.to_string(),
+                        from.extension()
+                            .and_then(|e| e.to_str())
+                            .map(str::to_string),
+                    )
+                })
+        });
+
+    // --- find free name ---
+    for n in 0.. {
+        let new_name = if n == 0 {
+            file_name.clone()
+        } else {
+            match &ext {
+                Some(ext) => format!("{} ({} {}).{}", stem, fl!("copy_noun"), n, ext),
+                None => format!("{} ({} {})", stem, fl!("copy_noun"), n),
+            }
+        };
+
+        let candidate = to_dir.join(new_name);
+
+        // IMPORTANT: check both filesystem AND reserved names
+        if !candidate.exists() && !reserved.contains(&candidate) {
+            reserved.insert(candidate.clone());
+            return candidate;
+        }
+    }
+
+    unreachable!()
 }
 
 fn file_name(path: &Path) -> Cow<'_, str> {
@@ -983,8 +1018,8 @@ impl Operation {
                 }
                 Ok(OperationSelection::default())
             }
-            Self::Download { paths, to } => {
-                perform_download(paths, to, Method::Download, msg_tx, controller).await
+            Self::Download { paths, uris, to } => {
+                perform_download(paths.to_vec(), uris, to, msg_tx, controller).await
             }
             Self::EmptyTrash => {
                 #[cfg(any(
