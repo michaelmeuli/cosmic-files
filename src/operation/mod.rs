@@ -2,18 +2,20 @@ use crate::{
     app::{ArchiveType, DialogPage, Message, REPLACE_BUTTON_ID},
     config::IconSizes,
     fl,
+    russh::CLIENTS,
     spawn_detached::spawn_detached,
     tab,
 };
 use cosmic::iced::futures::{SinkExt, channel::mpsc::Sender};
 use std::{
     borrow::Cow,
+    collections::HashMap,
+    collections::HashSet,
     fmt::Formatter,
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
-    collections::HashSet,
 };
 use tokio::sync::{Mutex as TokioMutex, mpsc};
 use walkdir::WalkDir;
@@ -283,64 +285,45 @@ async fn perform_download(
         log::info!("{} {:?} to {}", "Download", paths, to.display());
 
         // Handle duplicate file names by renaming paths
-        let mut from_to_pairs: Vec<(PathBuf, PathBuf)> = paths
+        let ignored_paths = paths.clone();
+        let from_to_pairs: Vec<(PathBuf, PathBuf)> = paths
             .into_iter()
             .filter_map(|from| {
                 let name = from.file_name()?;
                 let mut target = to.join(name);
-
-                // Collision if already on disk OR already reserved in this batch
                 if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
                     target = download_unique_path(&from, &to, &mut reserved);
                 }
-
-                // Reserve no matter what
                 reserved.insert(target.clone());
-
                 Some((from, target))
             })
             .collect();
 
-        let mut context = Context::new(controller.clone());
+        let mut by_destination: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
-        // let to = selected_paths[0].clone();
-        // for (_key, client) in CLIENTS.iter() {
-        //     return client.download_file(download_uris.clone(), to.clone())
-        //         .map(|_| cosmic::action::none());
-        // }
-
-        {
-            let controller = controller.clone();
-            context = context.on_progress(move |_op, progress| {
-                let item_progress = match progress.total_bytes {
-                    Some(total_bytes) => {
-                        if total_bytes == 0 {
-                            1.0
-                        } else {
-                            progress.current_bytes as f32 / total_bytes as f32
-                        }
-                    }
-                    None => 0.0,
-                };
-                let total_progress =
-                    (item_progress + progress.current_ops as f32) / progress.total_ops as f32;
-                controller.set_progress(total_progress);
-            });
+        for (from, to) in &from_to_pairs {
+            by_destination
+                .entry(to.clone())
+                .or_default()
+                .push(from.to_string_lossy().to_string());
         }
 
-        {
-            let msg_tx = msg_tx.clone();
-            context = context.on_replace(move |op| {
-                let msg_tx = msg_tx.clone();
-                Box::pin(handle_replace(msg_tx, op.from.clone(), op.to.clone(), true))
-            });
+        for (_key, client) in CLIENTS.iter() {
+            for (to, froms) in &by_destination {
+                let _ = client
+                    .download_file(froms.clone(), to.clone())
+                    .map(|_| cosmic::action::none::<Message>());
+            }
         }
 
-        context
-            .recursive_copy_or_move(from_to_pairs, method)
-            .await?;
+        let selected_paths: Vec<PathBuf> = from_to_pairs.iter().map(|(_, to)| to.clone()).collect();
 
-        Result::<OperationSelection, OperationError>::Ok(context.op_sel)
+        let op_sel = OperationSelection {
+            selected: selected_paths.into_iter().collect(),
+            ignored: ignored_paths,
+        };
+
+        Ok(op_sel)
     })
     .await
     .map_err(wrap_compio_spawn_error)?
