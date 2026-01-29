@@ -6,10 +6,9 @@ use crate::{
     spawn_detached::spawn_detached,
     tab,
 };
-use cosmic::iced::futures::{SinkExt, channel::mpsc::Sender};
+use cosmic::iced::{Task, futures::{SinkExt, channel::mpsc::Sender}};
 use std::{
     borrow::Cow,
-    collections::HashMap,
     collections::HashSet,
     fmt::Formatter,
     fs,
@@ -268,65 +267,53 @@ fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
     to
 }
 
-async fn perform_download(
+fn perform_download(
     paths: Vec<PathBuf>,
     uris: Vec<String>,
     to: PathBuf,
-    msg_tx: &Arc<TokioMutex<Sender<Message>>>,
-    controller: Controller,
-) -> Result<OperationSelection, OperationError> {
-    let msg_tx = msg_tx.clone();
-    let controller_c = controller.clone();
+) -> (Task<()>, OperationSelection) {
+    log::info!("Download {:?} to {}", paths, to.display());
 
-    compio::runtime::spawn(async move {
-        let controller = controller_c;
-        let mut reserved = HashSet::new();
+    let mut reserved = HashSet::new();
 
-        log::info!("{} {:?} to {}", "Download", paths, to.display());
+    // Same duplicate handling idea as copy_or_move
+    let ignored_paths = paths.clone();
 
-        // Handle duplicate file names by renaming paths
-        let ignored_paths = paths.clone();
-        let from_to_pairs: Vec<(PathBuf, PathBuf)> = paths
-            .into_iter()
-            .filter_map(|from| {
-                let name = from.file_name()?;
-                let mut target = to.join(name);
-                if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
-                    target = download_unique_path(&from, &to, &mut reserved);
-                }
-                reserved.insert(target.clone());
-                Some((from, target))
-            })
-            .collect();
+    let uri_target_pairs: Vec<(String, PathBuf)> = paths
+        .into_iter()
+        .zip(uris.into_iter())
+        .filter_map(|(from, uri)| {
+            let name = from.file_name()?;
+            let mut target = to.join(name);
 
-        let mut by_destination: HashMap<PathBuf, Vec<String>> = HashMap::new();
-
-        for (from, to) in &from_to_pairs {
-            by_destination
-                .entry(to.clone())
-                .or_default()
-                .push(from.to_string_lossy().to_string());
-        }
-
-        for (_key, client) in CLIENTS.iter() {
-            for (to, froms) in &by_destination {
-                let _ = client
-                    .download_file(froms.clone(), to.clone())
-                    .map(|_| cosmic::action::none::<Message>());
+            if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
+                target = download_unique_path(&from, &to, &mut reserved);
             }
+
+            reserved.insert(target.clone());
+            Some((uri, target))
+        })
+        .collect();
+
+    // Build OperationSelection exactly like copy/move does via context
+    let selected_paths: Vec<PathBuf> = uri_target_pairs.iter().map(|(_, t)| t.clone()).collect();
+
+    let op_sel = OperationSelection {
+        selected: selected_paths.into_iter().collect(),
+        ignored: ignored_paths.into_iter().collect(),
+    };
+
+    // THIS replaces `recursive_copy_or_move(...).await`
+    let mut tasks = Vec::new();
+
+    for (_key, client) in CLIENTS.iter() {
+        for (uri, target) in &uri_target_pairs {
+            tasks.push(client.download_file(vec![uri.clone()], target.clone()));
         }
+        break;
+    }
 
-        let selected_paths: Vec<PathBuf> = from_to_pairs.iter().map(|(_, to)| to.clone()).collect();
-
-        let op_sel = OperationSelection {
-            selected: selected_paths.into_iter().collect(),
-            ignored: ignored_paths,
-        };
-
-        Ok(op_sel)
-    })
-    .await
-    .map_err(wrap_compio_spawn_error)?
+    (Task::batch(tasks), op_sel)
 }
 
 pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathBuf>) -> PathBuf {
@@ -345,7 +332,7 @@ pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathB
         ".tar.pz",
     ];
 
-    let mut to = to.to_owned();
+    let to = to.to_owned();
     let file_name = from.file_name().and_then(|n| n.to_str()).unwrap();
     let file_name = file_name.to_string();
 
@@ -600,7 +587,7 @@ impl Operation {
             Self::DeleteTrash { items } => {
                 fl!("deleting", items = items.len(), progress = progress())
             }
-            Self::Download { paths, to } => fl!(
+            Self::Download { paths, _uris, to } => fl!(
                 "downloading",
                 items = paths.len(),
                 from = paths_parent_name(paths),
@@ -676,7 +663,7 @@ impl Operation {
                 to = fl!("trash")
             ),
             Self::DeleteTrash { items } => fl!("deleted", items = items.len()),
-            Self::Download { paths, to } => fl!(
+            Self::Download { paths, uris: _, to } => fl!(
                 "downloaded",
                 items = paths.len(),
                 from = paths_parent_name(paths),
@@ -1003,7 +990,8 @@ impl Operation {
                 Ok(OperationSelection::default())
             }
             Self::Download { paths, uris, to } => {
-                perform_download(paths.to_vec(), uris, to, msg_tx, controller).await
+                let (_task, op_sel) = perform_download(paths.to_vec(), uris, to);
+                Ok(op_sel)
             }
             Self::EmptyTrash => {
                 #[cfg(any(

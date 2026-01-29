@@ -3346,11 +3346,6 @@ impl Application for App {
                                     uris: download_uris,
                                     to: selected_paths[0].clone(),
                                 });
-                                // let to = selected_paths[0].clone();
-                                // for (_key, client) in CLIENTS.iter() {
-                                //     return client.download_file(download_uris.clone(), to.clone())
-                                //         .map(|_| cosmic::action::none());
-                                // }
                             }
                         }
                     }
