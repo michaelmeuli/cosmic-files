@@ -13,6 +13,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
+    collections::HashSet,
 };
 use tokio::sync::{Mutex as TokioMutex, mpsc};
 use walkdir::WalkDir;
@@ -284,30 +285,29 @@ async fn perform_download(
         // Handle duplicate file names by renaming paths
         let mut from_to_pairs: Vec<(PathBuf, PathBuf)> = paths
             .into_iter()
-            .zip(std::iter::repeat(to.as_path()))
-            .filter_map(|(from, to)| {
-                if matches!(from.parent(), Some(parent) if parent == to) {
-                    // `from`'s parent is equal to `to` which means we're copying to the same
-                    // directory (duplicating files)
-                    let to = download_unique_path(&from, to_dir, &mut reserved);
-                    Some((from, to))
-                } else if let Some(name) = from.file_name() {
-                    let to = to.join(name);
-                    Some((from, to))
-                } else {
-                    //TODO: how to handle from missing file name?
-                    None
+            .filter_map(|from| {
+                let name = from.file_name()?;
+                let mut target = to.join(name);
+
+                // Collision if already on disk OR already reserved in this batch
+                if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
+                    target = download_unique_path(&from, &to, &mut reserved);
                 }
+
+                // Reserve no matter what
+                reserved.insert(target.clone());
+
+                Some((from, target))
             })
             .collect();
 
         let mut context = Context::new(controller.clone());
 
-                                // let to = selected_paths[0].clone();
-                                // for (_key, client) in CLIENTS.iter() {
-                                //     return client.download_file(download_uris.clone(), to.clone())
-                                //         .map(|_| cosmic::action::none());
-                                // }
+        // let to = selected_paths[0].clone();
+        // for (_key, client) in CLIENTS.iter() {
+        //     return client.download_file(download_uris.clone(), to.clone())
+        //         .map(|_| cosmic::action::none());
+        // }
 
         {
             let controller = controller.clone();
@@ -346,7 +346,7 @@ async fn perform_download(
     .map_err(wrap_compio_spawn_error)?
 }
 
-pub fn download_unique_path(from: &Path, to_dir: &Path, reserved: &mut HashSet<PathBuf>) -> PathBuf {
+pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathBuf>) -> PathBuf {
     // List of compound extensions to check
     const COMPOUND_EXTENSIONS: &[&str] = &[
         ".tar.gz",
@@ -362,6 +362,7 @@ pub fn download_unique_path(from: &Path, to_dir: &Path, reserved: &mut HashSet<P
         ".tar.pz",
     ];
 
+    let mut to = to.to_owned();
     let file_name = from.file_name().and_then(|n| n.to_str()).unwrap();
     let file_name = file_name.to_string();
 
@@ -400,7 +401,7 @@ pub fn download_unique_path(from: &Path, to_dir: &Path, reserved: &mut HashSet<P
             }
         };
 
-        let candidate = to_dir.join(new_name);
+        let candidate = to.join(new_name);
 
         // IMPORTANT: check both filesystem AND reserved names
         if !candidate.exists() && !reserved.contains(&candidate) {
