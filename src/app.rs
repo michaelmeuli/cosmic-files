@@ -3357,6 +3357,7 @@ impl Application for App {
                     }
                 }
                 self.file_dialog_opt = None;
+                return Task::perform(async {}, |_| cosmic::action::none());
             }
             Message::FileDialogMessage(dialog_message) => {
                 if let Some(dialog) = &mut self.file_dialog_opt {

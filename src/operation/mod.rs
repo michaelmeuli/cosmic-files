@@ -317,6 +317,13 @@ fn perform_download(
         })
         .collect();
 
+    log::info!(
+        "Downloading URIs to targets: {:?}",
+        uri_target_pairs
+            .iter()
+            .map(|(u, t)| format!("{} -> {}", u, t.display()))
+            .collect::<Vec<_>>()
+    );
     // Build OperationSelection exactly like copy/move does via context
     let selected_paths: Vec<PathBuf> = uri_target_pairs.iter().map(|(_, t)| t.clone()).collect();
 

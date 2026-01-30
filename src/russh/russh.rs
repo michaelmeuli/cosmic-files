@@ -1002,6 +1002,7 @@ impl Russh {
                             log::info!("Disconnected from {}", item.host);
                         }
                         Cmd::Download(uris, path, result_tx) => {
+                            log::info!("Download command received for URIs: {:?}", uris);
                             let mut result_tx_opt = Some(result_tx);
                             for uri in uris.iter() {
                                 log::info!("Download command received for URI: {}", uri);
@@ -1022,23 +1023,11 @@ impl Russh {
                                 log::info!(
                                     "Downloading remote file {} to local path {:?}",
                                     remote_file.path,
-                                    path
+                                    path.clone()
                                 );
-                                let filename = match Path::new(&remote_file.path).file_name() {
-                                    Some(name) => name.to_string_lossy().into_owned(),
-                                    None => {
-                                        if let Some(result_tx) = result_tx_opt.take() {
-                                            let _ = result_tx.send(Err(anyhow::anyhow!(
-                                                "remote path has no filename: {}",
-                                                remote_file.path
-                                            )));
-                                        }
-                                        continue;
-                                    }
-                                };
                                 if let Some(client) = existing_client {
                                     let result = client
-                                        .download_file(remote_file.path, path.join(filename))
+                                        .download_file(remote_file.path, path.clone())
                                         .await;
                                     match result {
                                         Ok(_) => {
@@ -1110,6 +1099,8 @@ impl Connector for Russh {
     }
 
     fn download_file(&self, uris: Vec<String>, to: PathBuf) -> Task<()> {
+        log::info!("Starting download task for URIs: {:?}", uris);
+        log::info!("Download target path: {:?}", to);
         let command_tx = self.command_tx.clone();
         Task::perform(
             async move {
