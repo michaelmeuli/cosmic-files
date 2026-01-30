@@ -414,9 +414,6 @@ pub enum Message {
     RemoteDriveOpenEntityAfterMount {
         entity: Entity,
     },
-    RemoteDriveOpenTabAfterMount {
-        location: Location,
-    },
     RemoteDriveSubmit,
     RemoteResult(ClientKey, String, Result<bool, String>),
     RemoveFromRecents(Option<Entity>),
