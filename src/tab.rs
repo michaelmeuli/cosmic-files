@@ -90,7 +90,7 @@ use crate::{
     mime_icon::{mime_for_path, mime_icon},
     mounter::MOUNTERS,
     mouse_area,
-    operation::{Controller, OperationError, recursive::Op},
+    operation::{Controller, OperationError},
     russh::CLIENTS,
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,

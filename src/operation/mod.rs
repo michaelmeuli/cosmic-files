@@ -103,7 +103,6 @@ async fn copy_or_move(
             "{} {:?} to {}",
             match method {
                 Method::Copy => "Copy",
-                Method::Download => "Download",
                 Method::Move { .. } => "Move",
             },
             paths,
@@ -610,7 +609,7 @@ impl Operation {
             Self::DeleteTrash { items } => {
                 fl!("deleting", items = items.len(), progress = progress())
             }
-            Self::Download { paths, _uris, to } => fl!(
+            Self::Download { paths, uris: _, to } => fl!(
                 "downloading",
                 items = paths.len(),
                 from = paths_parent_name(paths),
