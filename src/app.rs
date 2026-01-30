@@ -39,7 +39,7 @@ use cosmic::{
         dnd_destination::DragId,
         horizontal_space, icon,
         menu::{action::MenuAction, key_bind::KeyBind},
-        segmented_button::{self, Entity},
+        segmented_button::{self, Entity, ReorderEvent},
         vertical_space,
     },
 };
@@ -406,6 +406,7 @@ pub enum Message {
     PendingPauseAll(bool),
     PermanentlyDelete(Option<Entity>),
     Preview(Option<Entity>),
+    ReorderTab(ReorderEvent),
     RescanRecents,
     RescanTrash,
     RemoteAuth(ClientKey, String, ClientAuth, mpsc::Sender<ClientAuth>),
@@ -464,7 +465,7 @@ pub enum Message {
     DndHoverTabTimeout(Entity),
     DndEnterNav(Entity),
     DndExitNav,
-    DndEnterTab(Entity),
+    DndEnterTab(Entity, Vec<String>),
     DndExitTab,
     DndDropTab(Entity, Option<ClipboardPaste>, DndAction),
     DndDropNav(Entity, Option<ClipboardPaste>, DndAction),
@@ -4431,7 +4432,6 @@ impl Application for App {
                 config.show_hidden = !config.show_hidden;
                 return self.update(Message::TabConfig(config));
             }
-
             Message::TabMessage(entity_opt, tab_message) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
 
@@ -4901,11 +4901,13 @@ impl Application for App {
                     }
                 }
             }
-            Message::DndEnterTab(entity) => {
-                self.tab_dnd_hover = Some((entity, Instant::now()));
-                return Task::perform(tokio::time::sleep(HOVER_DURATION), move |()| {
-                    cosmic::Action::App(Message::DndHoverTabTimeout(entity))
-                });
+            Message::DndEnterTab(entity, mimes) => {
+                if mimes.iter().all(|m| m.as_str() != "x-cosmic-files/tab-dnd") {
+                    self.tab_dnd_hover = Some((entity, Instant::now()));
+                    return Task::perform(tokio::time::sleep(HOVER_DURATION), move |()| {
+                        cosmic::Action::App(Message::DndHoverTabTimeout(entity))
+                    });
+                }
             }
             Message::DndExitTab => {
                 self.nav_dnd_hover = None;
@@ -5330,8 +5332,12 @@ impl Application for App {
             Message::NetworkDriveOpenTabAfterMount { location } => {
                 return self.open_tab(location, false, None);
             }
-            Message::RemoteDriveOpenTabAfterMount { location } => {
-                return self.open_tab(location, false, None);
+            Message::ReorderTab(ReorderEvent {
+                dragged,
+                target,
+                position,
+            }) => {
+                _ = self.tab_model.reorder(dragged, target, position);
             }
         }
 
@@ -6503,9 +6509,12 @@ impl Application for App {
                     widget::tab_bar::horizontal(&self.tab_model)
                         .button_height(32)
                         .button_spacing(space_xxs)
+                        .enable_tab_drag(String::from("x-cosmic-files/tab-dnd"))
+                        .on_reorder(move |event| Message::ReorderTab(event))
+                        .tab_drag_threshold(25.)
                         .on_activate(Message::TabActivate)
                         .on_close(|entity| Message::TabClose(Some(entity)))
-                        .on_dnd_enter(|entity, _| Message::DndEnterTab(entity))
+                        .on_dnd_enter(|entity, mimes| Message::DndEnterTab(entity, mimes))
                         .on_dnd_leave(|_| Message::DndExitTab)
                         .on_dnd_drop(|entity, data, action| {
                             Message::DndDropTab(entity, data, action)

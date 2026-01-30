@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-files"
-version = "1.0.0"
+version = "1.0.4"
 authors = ["Jeremy Soller <jeremy@system76.com>"]
 edition = "2024"
 license = "GPL-3.0-only"
@@ -42,7 +42,7 @@ wayland-client = { version = "0.31.11", optional = true }
 xdg = { version = "3.0", optional = true }
 xdg-mime = { git = "https://github.com/ebassi/xdg-mime-rs" }
 # Compression
-bzip2 = { version = "0.6", optional = true }            #TODO: replace with pure Rust crate
+bzip2 = { version = "0.6", optional = true }           #TODO: replace with pure Rust crate
 flate2 = "1.1"
 tar = "0.4.44"
 lzma-rust2 = { version = "0.15.4", optional = true }
@@ -69,22 +69,22 @@ mime = "0.3.17"
 
 # Completion-based IO runtime to enable io_uring / IOCP file IO support.
 [dependencies.compio]
-# Patched to fix mtime: https://github.com/compio-rs/compio/pull/625
-# version = "0.17.0"
-git = "https://github.com/jackpot51/compio.git"
+version = "0.18"
 default-features = false
 features = ["fs", "io", "macros", "polling", "runtime"]
-
-[dependencies.io-uring]
-version = "0.7.11"
-default-features = false
-optional = true
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
 default-features = false
 #TODO: a11y feature crashes
-features = ["about", "autosize", "multi-window", "tokio", "winit", "surface-message"]
+features = [
+    "about",
+    "autosize",
+    "multi-window",
+    "tokio",
+    "winit",
+    "surface-message",
+]
 
 [[example]]
 name = "gio-list"
@@ -115,9 +115,7 @@ dbus-config = ["libcosmic/dbus-config"]
 desktop = ["libcosmic/desktop", "dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
 gvfs = ["dep:gio", "dep:glib"]
-russh = ["dep:async-ssh2-tokio", "dep:russh-sftp"]
-io-uring = ["compio/io-uring", "dep:io-uring"]
-io-uring-bindgen = ["io-uring?/bindgen"]
+io-uring = ["compio/io-uring"]
 jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]
 wayland = ["libcosmic/wayland", "dep:cctk", "dep:wayland-client"]
