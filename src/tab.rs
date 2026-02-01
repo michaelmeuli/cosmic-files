@@ -1778,7 +1778,7 @@ pub enum Message {
     LocationContextMenuPoint(Option<Point>),
     LocationContextMenuIndex(Option<Point>, Option<usize>),
     LocationMenuAction(LocationMenuAction),
-    Download(String),
+    Download(Option<(PathBuf, String)>),
     Drag(Option<Rectangle>),
     DragEnd,
     EditLocation(Option<EditLocation>),
