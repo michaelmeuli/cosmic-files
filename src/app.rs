@@ -4563,7 +4563,7 @@ impl Application for App {
                             }
                         }
                         tab::Command::Delete(paths) => commands.push(self.delete(paths)),
-                        tab::Command::DownloadFile(uris) => commands.push(self.download_to(&uris)),
+                        tab::Command::DownloadFile(paths, uris) => commands.push(self.download_to(&paths, &uris)),
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }
