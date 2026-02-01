@@ -2623,13 +2623,13 @@ impl Item {
                         }
                     }
                 } else {
-                    if let Some(Location::Remote(uri, _user, _path_opt)) = self.location_opt.clone()
+                    if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
                     {
-                        if self.selected {
-                            column = column.push(
-                                widget::button::standard(fl!("download"))
-                                    .on_press(Message::Download(uri.clone())),
-                            );
+                        if self.selected && path_opt.is_some() {
+                            column =
+                                column.push(widget::button::standard(fl!("download")).on_press(
+                                    Message::Download(Some((path_opt.unwrap(), uri.clone()))),
+                                ));
                         }
                     }
                 }
