@@ -10,7 +10,7 @@ use cosmic::{
 use std::{
     any::TypeId,
     cell::Cell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::pending,
     path::{Path, PathBuf},
     result,
@@ -484,6 +484,106 @@ async fn remote_sftp_parent(
         cut: false,
     };
     Ok(item)
+}
+
+fn perform_download(client: &Client, paths: Vec<PathBuf>, uris: Vec<String>, to: PathBuf) {
+    log::info!("Download {:?} to {}", paths, to.display());
+    let mut reserved = HashSet::new();
+    let ignored_paths = paths.clone();
+    let uri_target_pairs: Vec<(String, PathBuf)> = paths
+        .into_iter()
+        .zip(uris.into_iter())
+        .filter_map(|(from, uri)| {
+            let name = from.file_name()?;
+            let mut target = to.join(name);
+
+            if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
+                target = download_unique_path(&from, &to, &mut reserved);
+            }
+
+            reserved.insert(target.clone());
+            Some((uri, target))
+        })
+        .collect();
+
+    log::info!(
+        "Downloading URIs to targets: {:?}",
+        uri_target_pairs
+            .iter()
+            .map(|(u, t)| format!("{} -> {}", u, t.display()))
+            .collect::<Vec<_>>()
+    );
+
+    for (uri, target) in &uri_target_pairs {
+        client.download_file(vec![uri.clone()], target.clone());
+    }
+}
+
+pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathBuf>) -> PathBuf {
+    // List of compound extensions to check
+    const COMPOUND_EXTENSIONS: &[&str] = &[
+        ".tar.gz",
+        ".tar.bz2",
+        ".tar.xz",
+        ".tar.zst",
+        ".tar.lz",
+        ".tar.lzma",
+        ".tar.sz",
+        ".tar.lzo",
+        ".tar.br",
+        ".tar.Z",
+        ".tar.pz",
+    ];
+
+    let to = to.to_owned();
+    let file_name = from.file_name().and_then(|n| n.to_str()).unwrap();
+    let file_name = file_name.to_string();
+
+    // --- split into stem/ext correctly ---
+    let (stem, ext) = COMPOUND_EXTENSIONS
+        .iter()
+        .copied()
+        .find(|&e| file_name.ends_with(e))
+        .map(|e| {
+            (
+                file_name.strip_suffix(e).unwrap().to_string(),
+                Some(e[1..].to_string()),
+            )
+        })
+        .unwrap_or_else(|| {
+            from.file_stem()
+                .and_then(|s| s.to_str())
+                .map_or((file_name.clone(), None), |s| {
+                    (
+                        s.to_string(),
+                        from.extension()
+                            .and_then(|e| e.to_str())
+                            .map(str::to_string),
+                    )
+                })
+        });
+
+    // --- find free name ---
+    for n in 0.. {
+        let new_name = if n == 0 {
+            file_name.clone()
+        } else {
+            match &ext {
+                Some(ext) => format!("{} ({} {}).{}", stem, fl!("copy_noun"), n, ext),
+                None => format!("{} ({} {})", stem, fl!("copy_noun"), n),
+            }
+        };
+
+        let candidate = to.join(new_name);
+
+        // IMPORTANT: check both filesystem AND reserved names
+        if !candidate.exists() && !reserved.contains(&candidate) {
+            reserved.insert(candidate.clone());
+            return candidate;
+        }
+    }
+
+    unreachable!()
 }
 
 fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> ClientAuth {
@@ -1026,9 +1126,8 @@ impl Russh {
                                     path.clone()
                                 );
                                 if let Some(client) = existing_client {
-                                    let result = client
-                                        .download_file(remote_file.path, path.clone())
-                                        .await;
+                                    let result =
+                                        client.download_file(remote_file.path, path.clone()).await;
                                     match result {
                                         Ok(_) => {
                                             log::info!("Download completed successfully");
