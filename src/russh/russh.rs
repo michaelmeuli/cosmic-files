@@ -1023,23 +1023,11 @@ impl Russh {
                                 log::info!(
                                     "Downloading remote file {} to local path {:?}",
                                     remote_file.path,
-                                    path
+                                    path.clone()
                                 );
-                                let filename = match Path::new(&remote_file.path).file_name() {
-                                    Some(name) => name.to_string_lossy().into_owned(),
-                                    None => {
-                                        if let Some(result_tx) = result_tx_opt.take() {
-                                            let _ = result_tx.send(Err(anyhow::anyhow!(
-                                                "remote path has no filename: {}",
-                                                remote_file.path
-                                            )));
-                                        }
-                                        continue;
-                                    }
-                                };
                                 if let Some(client) = existing_client {
                                     let result = client
-                                        .download_file(remote_file.path, path.join(filename))
+                                        .download_file(remote_file.path, path.clone())
                                         .await;
                                     match result {
                                         Ok(_) => {
