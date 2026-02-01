@@ -3324,15 +3324,23 @@ impl Application for App {
                 match result {
                     DialogResult::Cancel => {}
                     DialogResult::Open(selected_paths) => {
-                        let mut download_paths = None;
+                        let mut from_paths_and_uris = None;
                         if let Some(file_dialog) = &self.file_dialog_opt {
                             if let Some(window) = self.windows.remove(&file_dialog.window_id()) {
-                                if let WindowKind::DownloadDialog(uris) = window.kind {
-                                    download_paths = uris;
+                                if let WindowKind::DownloadDialog(paths_and_uris) = window.kind {
+                                    from_paths_and_uris = paths_and_uris;
                                 }
                             }
                         }
-                        if let Some(download_paths) = download_paths {
+                        if let Some((download_paths, download_uris)) = from_paths_and_uris {
+                            log::info!(
+                                "download_paths: {:?}",
+                                download_paths
+                            );
+                            log::info!(
+                                "download_uris: {:?}",
+                                download_uris
+                            );
                             if !selected_paths.is_empty() {
                                 self.file_dialog_opt = None;
                                 let to = selected_paths[0].clone();
@@ -3345,6 +3353,7 @@ impl Application for App {
                     }
                 }
                 self.file_dialog_opt = None;
+                return Task::perform(async {}, |_| cosmic::action::none());
             }
             Message::FileDialogMessage(dialog_message) => {
                 if let Some(dialog) = &mut self.file_dialog_opt {
