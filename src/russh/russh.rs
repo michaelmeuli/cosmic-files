@@ -489,7 +489,6 @@ async fn remote_sftp_parent(
 fn perform_download(client: &Client, paths: Vec<PathBuf>, uris: Vec<String>, to: PathBuf) {
     log::info!("Download {:?} to {}", paths, to.display());
     let mut reserved = HashSet::new();
-    let ignored_paths = paths.clone();
     let uri_target_pairs: Vec<(String, PathBuf)> = paths
         .into_iter()
         .zip(uris.into_iter())
@@ -515,7 +514,7 @@ fn perform_download(client: &Client, paths: Vec<PathBuf>, uris: Vec<String>, to:
     );
 
     for (uri, target) in &uri_target_pairs {
-        client.download_file(vec![uri.clone()], target.clone());
+        client.download_file(uri.clone(), target.clone());
     }
 }
 
