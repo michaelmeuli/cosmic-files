@@ -678,7 +678,7 @@ pub enum WindowKind {
     Desktop(Entity),
     DesktopViewOptions,
     Dialogs(widget::Id),
-    DownloadDialog(Option<Vec<String>>),
+    DownloadDialog(Option<(Box<[PathBuf]>, Vec<String>)>),
     FileDialog(Option<Box<[PathBuf]>>),
     Preview(Option<Entity>, PreviewKind),
 }
