@@ -1746,7 +1746,7 @@ pub enum Command {
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
     ContextMenu(Option<Point>, Option<window::Id>),
     Delete(Vec<PathBuf>),
-    DownloadFile(Vec<String>),
+    DownloadFile(Vec<PathBuf>, Vec<String>),
     DropFiles(PathBuf, ClipboardPaste),
     EmptyTrash,
     #[cfg(feature = "desktop")]
