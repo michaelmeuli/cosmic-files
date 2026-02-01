@@ -3629,9 +3629,15 @@ impl Tab {
                     }
                 }
             }
-            Message::Download(uri) => {
-                commands.push(Command::DownloadFile(vec![uri]));
-            }
+            Message::Download(path_uri_opt) => match path_uri_opt {
+                Some(path_uri) => {
+                    commands.push(Command::DownloadFile(
+                        vec![path_uri.0],
+                        vec![path_uri.1],
+                    ));
+                }
+                None => {}
+            },
             Message::LocationContextMenuPoint(point_opt) => {
                 self.context_menu = None;
                 self.location_context_menu_point = point_opt;
