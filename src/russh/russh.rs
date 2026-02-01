@@ -20,6 +20,7 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
+    fl,
     config::IconSizes,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
@@ -486,7 +487,7 @@ async fn remote_sftp_parent(
     Ok(item)
 }
 
-fn perform_download(client: &Client, paths: Vec<PathBuf>, uris: Vec<String>, to: PathBuf) {
+async fn perform_download(client: &Client, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf) {
     log::info!("Download {:?} to {}", paths, to.display());
     let mut reserved = HashSet::new();
     let uri_target_pairs: Vec<(String, PathBuf)> = paths
@@ -649,6 +650,7 @@ enum Cmd {
     ),
     Disconnect(ClientItem),
     Download(
+        Box<[PathBuf]>,
         Vec<String>,
         PathBuf,
         tokio::sync::oneshot::Sender<anyhow::Result<()>>,
@@ -1101,7 +1103,7 @@ impl Russh {
                             let _ = event_tx.send(Event::Changed);
                             log::info!("Disconnected from {}", item.host);
                         }
-                        Cmd::Download(uris, path, result_tx) => {
+                        Cmd::Download(paths, uris, path, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             for uri in uris.iter() {
                                 log::info!("Download command received for URI: {}", uri);
@@ -1125,22 +1127,7 @@ impl Russh {
                                     path.clone()
                                 );
                                 if let Some(client) = existing_client {
-                                    let result =
-                                        client.download_file(remote_file.path, path.clone()).await;
-                                    match result {
-                                        Ok(_) => {
-                                            log::info!("Download completed successfully");
-                                            if let Some(result_tx) = result_tx_opt.take() {
-                                                let _ = result_tx.send(Ok(()));
-                                            }
-                                        }
-                                        Err(err) => {
-                                            log::error!("Download failed: {}", err);
-                                            if let Some(result_tx) = result_tx_opt.take() {
-                                                _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
-                                            }
-                                        }
-                                    }
+                                    perform_download(&client, paths.clone(), uris.clone(), path.clone()).await;
                                 }
                             }
                         }
@@ -1196,13 +1183,13 @@ impl Connector for Russh {
         )
     }
 
-    fn download_file(&self, uris: Vec<String>, to: PathBuf) -> Task<()> {
+    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
             async move {
                 let (res_tx, res_rx) = tokio::sync::oneshot::channel();
 
-                command_tx.send(Cmd::Download(uris, to, res_tx)).unwrap();
+                command_tx.send(Cmd::Download(paths, uris, to, res_tx)).unwrap();
                 res_rx.await
             },
             |x| {

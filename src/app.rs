@@ -3276,8 +3276,9 @@ impl Application for App {
                 ]);
             }
             Message::DownloadTo(entity_opt) => {
-                let selected_paths: Vec<_> = self.selected_uris(entity_opt).collect();
-                return self.download_to(&selected_paths);
+                let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
+                return self.download_to(&selected_paths, &selected_uris);
             }
             Message::ExtractHere(entity_opt) => {
                 let paths: Box<[_]> = self.selected_paths(entity_opt).collect();
@@ -3348,7 +3349,7 @@ impl Application for App {
                                 self.file_dialog_opt = None;
                                 let to = selected_paths[0].clone();
                                 for (_key, client) in CLIENTS.iter() {
-                                    return client.download_file(download_paths.clone(), to.clone())
+                                    return client.download_file(download_paths.clone(), download_uris.clone(), to.clone())
                                         .map(|_| cosmic::action::none());
                                 }
                             }
