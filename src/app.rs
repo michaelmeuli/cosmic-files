@@ -1009,7 +1009,7 @@ impl App {
         }
     }
 
-    fn download_to(&mut self, uris: &Vec<String>) -> Task<Message> {
+    fn download_to(&mut self, paths: &[impl AsRef<Path>], uris: &Vec<String>) -> Task<Message> {
         if let Some(destination) = dirs::download_dir() {
             let (mut dialog, dialog_task) = Dialog::new(
                 DialogSettings::new()
@@ -1023,7 +1023,10 @@ impl App {
             self.windows.insert(
                 dialog.window_id(),
                 Window::new(WindowKind::DownloadDialog(Some(
-                    uris.iter().map(|x| x.to_string()).collect(),
+                    (
+                        paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
+                        uris.iter().map(|x| x.to_string()).collect(),
+                    )
                 ))),
             );
             self.file_dialog_opt = Some(dialog);
