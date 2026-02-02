@@ -3337,14 +3337,6 @@ impl Application for App {
                             }
                         }
                         if let Some((download_paths, download_uris)) = from_paths_and_uris {
-                            log::info!(
-                                "download_paths: {:?}",
-                                download_paths
-                            );
-                            log::info!(
-                                "download_uris: {:?}",
-                                download_uris
-                            );
                             if !selected_paths.is_empty() {
                                 self.file_dialog_opt = None;
                                 let to = selected_paths[0].clone();

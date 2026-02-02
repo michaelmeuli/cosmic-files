@@ -13,15 +13,14 @@ use std::{
     collections::{HashMap, HashSet},
     future::pending,
     path::{Path, PathBuf},
-    result,
     sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
-    fl,
     config::IconSizes,
+    fl,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 use mime_guess::MimeGuess;
@@ -487,37 +486,30 @@ async fn remote_sftp_parent(
     Ok(item)
 }
 
-async fn perform_download(client: &Client, paths: Box<[PathBuf]>, to: PathBuf) {
-    log::info!("Download {:?} to {}", paths, to.display());
+async fn perform_download(
+    client: &Client,
+    paths: Box<[PathBuf]>,
+    to: PathBuf,
+) -> Result<(), anyhow::Error> {
     let mut reserved = HashSet::new();
     let path_target_pairs: Vec<(String, PathBuf)> = paths
         .into_iter()
         .filter_map(|from| {
             let name = from.file_name()?;
             let mut target = to.join(name);
-
             if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
                 target = download_unique_path(&from, &to, &mut reserved);
             }
-
             reserved.insert(target.clone());
             Some((from.to_string_lossy().to_string(), target))
         })
         .collect();
-
-    log::info!(
-        "Downloading paths to targets: {:?}",
-        path_target_pairs
-            .iter()
-            .map(|(p, t)| format!("{} -> {}", p, t.display()))
-            .collect::<Vec<_>>()
-    );
-
     for (path, target) in &path_target_pairs {
         if let Err(err) = client.download_file(path.clone(), target.clone()).await {
-            log::error!("Download failed for {}: {}", path, err);
+            return Err(anyhow::anyhow!("Download failed for {}: {}", path, err));
         }
     }
+    Ok(())
 }
 
 pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathBuf>) -> PathBuf {
@@ -1105,32 +1097,22 @@ impl Russh {
                             log::info!("Disconnected from {}", item.host);
                         }
                         Cmd::Download(paths, uris, path, result_tx) => {
-                            let mut result_tx_opt = Some(result_tx);
-                            for uri in uris.iter() {
-                                log::info!("Download command received for URI: {}", uri);
-                                let remote_file = match remote_file_from_uri(&uri) {
-                                    Ok(rf) => rf,
-                                    Err(err) => {
-                                        if let Some(result_tx) = result_tx_opt.take() {
-                                            _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
-                                        }
-                                        continue;
+                            let result: Result<(), anyhow::Error> = async {
+                                for uri in uris.iter() {
+                                    let remote_file = remote_file_from_uri(&uri)
+                                        .map_err(|e| anyhow::anyhow!(e))?;
+                                    let host = remote_file.host.as_str();
+                                    let client = {
+                                        let read = clients.read().await;
+                                        read.get(host).cloned()
                                     }
-                                };
-                                let host = remote_file.host.as_str();
-                                let existing_client = {
-                                    let read = clients.read().await;
-                                    read.get(host).cloned()
-                                };
-                                log::info!(
-                                    "Downloading remote file {} to local path {:?}",
-                                    remote_file.path,
-                                    path.clone()
-                                );
-                                if let Some(client) = existing_client {
-                                    perform_download(&client, paths.clone(), path.clone()).await;
+                                    .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
+                                    perform_download(&client, paths.clone(), path.clone()).await?;
                                 }
+                                Ok(())
                             }
+                            .await;
+                            let _ = result_tx.send(result);
                         }
                     }
                 }
@@ -1190,7 +1172,9 @@ impl Connector for Russh {
             async move {
                 let (res_tx, res_rx) = tokio::sync::oneshot::channel();
 
-                command_tx.send(Cmd::Download(paths, uris, to, res_tx)).unwrap();
+                command_tx
+                    .send(Cmd::Download(paths, uris, to, res_tx))
+                    .unwrap();
                 res_rx.await
             },
             |x| {
