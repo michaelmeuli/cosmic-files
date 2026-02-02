@@ -487,13 +487,12 @@ async fn remote_sftp_parent(
     Ok(item)
 }
 
-async fn perform_download(client: &Client, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf) {
+async fn perform_download(client: &Client, paths: Box<[PathBuf]>, to: PathBuf) {
     log::info!("Download {:?} to {}", paths, to.display());
     let mut reserved = HashSet::new();
-    let uri_target_pairs: Vec<(String, PathBuf)> = paths
+    let path_target_pairs: Vec<(String, PathBuf)> = paths
         .into_iter()
-        .zip(uris.into_iter())
-        .filter_map(|(from, uri)| {
+        .filter_map(|from| {
             let name = from.file_name()?;
             let mut target = to.join(name);
 
@@ -502,20 +501,22 @@ async fn perform_download(client: &Client, paths: Box<[PathBuf]>, uris: Vec<Stri
             }
 
             reserved.insert(target.clone());
-            Some((uri, target))
+            Some((from.to_string_lossy().to_string(), target))
         })
         .collect();
 
     log::info!(
-        "Downloading URIs to targets: {:?}",
-        uri_target_pairs
+        "Downloading paths to targets: {:?}",
+        path_target_pairs
             .iter()
-            .map(|(u, t)| format!("{} -> {}", u, t.display()))
+            .map(|(p, t)| format!("{} -> {}", p, t.display()))
             .collect::<Vec<_>>()
     );
 
-    for (uri, target) in &uri_target_pairs {
-        client.download_file(uri.clone(), target.clone());
+    for (path, target) in &path_target_pairs {
+        if let Err(err) = client.download_file(path.clone(), target.clone()).await {
+            log::error!("Download failed for {}: {}", path, err);
+        }
     }
 }
 
@@ -1127,7 +1128,7 @@ impl Russh {
                                     path.clone()
                                 );
                                 if let Some(client) = existing_client {
-                                    perform_download(&client, paths.clone(), uris.clone(), path.clone()).await;
+                                    perform_download(&client, paths.clone(), path.clone()).await;
                                 }
                             }
                         }
