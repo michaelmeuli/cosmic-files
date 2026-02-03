@@ -1098,17 +1098,26 @@ impl Russh {
                         }
                         Cmd::Download(paths, uris, path, result_tx) => {
                             let result: Result<(), anyhow::Error> = async {
-                                for uri in uris.iter() {
-                                    let remote_file = remote_file_from_uri(&uri)
-                                        .map_err(|e| anyhow::anyhow!(e))?;
-                                    let host = remote_file.host.as_str();
-                                    let client = {
-                                        let read = clients.read().await;
-                                        read.get(host).cloned()
-                                    }
-                                    .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
-                                    perform_download(&client, paths.clone(), path.clone()).await?;
+                                let remote_files: Vec<_> = uris
+                                    .iter()
+                                    .map(|u| remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e)))
+                                    .collect::<Result<_, anyhow::Error>>()?;
+                                let host = remote_files
+                                    .first()
+                                    .ok_or_else(|| anyhow::anyhow!("No URIs provided"))?
+                                    .host
+                                    .clone();
+                                if remote_files.iter().any(|rf| rf.host != host) {
+                                    return Err(anyhow::anyhow!(
+                                        "All download URIs must be from the same host"
+                                    ));
                                 }
+                                let client = {
+                                    let read = clients.read().await;
+                                    read.get(&host).cloned()
+                                }
+                                .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
+                                perform_download(&client, paths.clone(), path.clone()).await?;
                                 Ok(())
                             }
                             .await;
