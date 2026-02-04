@@ -2720,12 +2720,11 @@ impl Application for App {
                 .map(|()| cosmic::action::none());
         }
         if let Some(data) = self.nav_model.data::<ClientData>(entity)
-            && let Some(client) = CLIENTS.get(&data.0) 
-            {
-                return client
-                    .connect(data.1.clone())
-                    .map(|()| cosmic::action::none());
-            }
+            && let Some(client) = CLIENTS.get(&data.0)
+        {
+            return client
+                .connect(data.1.clone())
+                .map(|()| cosmic::action::none());
         }
         Task::none()
     }
@@ -4948,11 +4947,10 @@ impl Application for App {
                 }
                 if let Some(data) = self.nav_model.data::<ClientData>(entity)
                     && let Some(client) = CLIENTS.get(&data.0)
-                    {
-                        return client
-                            .disconnect(data.1.clone())
-                            .map(|()| cosmic::action::none());
-                    }
+                {
+                    return client
+                        .disconnect(data.1.clone())
+                        .map(|()| cosmic::action::none());
                 }
             }
             Message::NavBarContext(entity) => {
