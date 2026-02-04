@@ -3712,7 +3712,10 @@ impl Tab {
             }
             Message::EditLocationComplete(selected) => {
                 if let Some(mut edit_location) = self.edit_location.take()
-                    && !matches!(edit_location.location, Location::Network(..) | Location::Remote(..))
+                    && !matches!(
+                        edit_location.location,
+                        Location::Network(..) | Location::Remote(..)
+                    )
                 {
                     edit_location.selected = Some(selected);
                     cd = edit_location.resolve();
