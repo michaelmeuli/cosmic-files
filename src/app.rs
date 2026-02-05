@@ -1133,7 +1133,6 @@ impl App {
         scrollable_id: widget::Id,
         window_id: Option<window::Id>,
     ) -> (Entity, Task<Message>) {
-        log::info!("Opening tab at location: {:?}", location);
         let mut tab = Tab::new(
             location.clone(),
             self.config.tab,
@@ -1673,7 +1672,6 @@ impl App {
         for (key, items) in &self.mounter_items {
             nav_items.extend(items.iter().map(|item| (*key, item)));
         }
-
         // Sort by name lexically
         nav_items.sort_by(|a, b| LANGUAGE_SORTER.compare(&a.1.name(), &b.1.name()));
         // Add items to nav model
@@ -2624,10 +2622,6 @@ impl Application for App {
                 Location::Remote(uri, name, Some(path))
                     if !path.try_exists().unwrap_or_default() =>
                 {
-                    log::info!(
-                        "attempting to open remote favorite, path does not exist: {}",
-                        path.display()
-                    );
                     let mut found = false;
 
                     if let Some(key) = self
@@ -2649,7 +2643,6 @@ impl Application for App {
                         })
                     {
                         if let Some(client) = CLIENTS.get(&key) {
-                            log::info!("found Connector, calling client.remote_drive: {}", uri);
                             return client.remote_drive(uri.clone()).map(move |()| {
                                 cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount {
                                     entity,

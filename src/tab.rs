@@ -91,7 +91,7 @@ use crate::{
     mime_icon::{mime_for_path, mime_icon},
     mounter::MOUNTERS,
     mouse_area,
-    operation::{Controller, OperationError, recursive::Op},
+    operation::{Controller, OperationError},
     russh::CLIENTS,
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
@@ -2641,8 +2641,7 @@ impl Item {
                 if let Some(path) = self.path_opt() {
                     if self.selected {
                         column = column.push(
-                            widget::button::standard(fl!("open"))
-                                .on_press(Message::Open(Some(path.clone()))),
+                            widget::button::standard(fl!("open")).on_press(Message::Open(Some(path.clone()))),
                         );
                     }
                 }
@@ -3440,7 +3439,6 @@ impl Tab {
                     .and_then(|items| click_i_opt.and_then(|click_i| items.get(click_i)))
                 {
                     if let Some(location) = &clicked_item.location_opt {
-                        log::info!("Double click on location: {:?}", location);
                         if clicked_item.metadata.is_dir() {
                             cd = Some(location.clone());
                         } else if let Some(path) = location.path_opt() {
