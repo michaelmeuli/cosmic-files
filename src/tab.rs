@@ -1697,7 +1697,7 @@ impl Location {
                 fl!("recents")
             }
             Self::Network(display_name, ..) => display_name.clone(),
-            Self::Remote(display_name, ..) => display_name.clone(),
+            Self::Remote(_, name, _) => name.clone(),
         }
     }
 
