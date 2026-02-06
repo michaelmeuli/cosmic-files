@@ -4556,6 +4556,9 @@ impl Application for App {
                         tab::Command::OpenInNewTab(path) => {
                             commands.push(self.open_tab(Location::Path(path), false, None));
                         }
+                        tab::Command::OpenUriInNewTab(uri, name, path) => {
+                            commands.push(self.open_tab(Location::Remote(uri, name, path), false, None));
+                        }
                         tab::Command::OpenInNewWindow(path) => match env::current_exe() {
                             Ok(exe) => match process::Command::new(&exe).arg(path).spawn() {
                                 Ok(_child) => {}

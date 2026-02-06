@@ -1750,6 +1750,7 @@ pub enum Command {
     Iced(TaskWrapper),
     OpenFile(Vec<PathBuf>),
     OpenInNewTab(PathBuf),
+    OpenUriInNewTab(String, String, Option<PathBuf>),
     OpenInNewWindow(PathBuf),
     OpenTrash,
     Preview(PreviewKind),
@@ -4045,6 +4046,7 @@ impl Tab {
                         enum ResolveResult {
                             Open(Option<PathBuf>),
                             OpenInTab(Option<PathBuf>),
+                            OpenUriInTab(String, String, Option<PathBuf>),
                             OpenTrash,
                             OpenProperties,
                             Cd(Location),
@@ -4069,12 +4071,23 @@ impl Tab {
                             if item.metadata.is_dir() {
                                 match mode {
                                     Mode::App => {
-                                        if is_only_one_selected {
-                                            ResolveResult::Cd(location.clone())
-                                        } else {
-                                            ResolveResult::OpenInTab(path_opt.cloned())
+                                        match &item.location_opt {
+                                            Some(Location::Remote(uri, name, path)) => {
+                                                if is_only_one_selected {
+                                                    ResolveResult::Cd(location.clone())
+                                                } else {
+                                                    ResolveResult::OpenUriInTab(uri.clone(), name.clone(), path.clone())
+                                                }
+                                            }
+                                            _ => {
+                                                if is_only_one_selected {
+                                                    ResolveResult::Cd(location.clone())
+                                                } else {
+                                                    ResolveResult::OpenInTab(path_opt.cloned())
+                                                }
+                                            }
                                         }
-                                    }
+                                    },
                                     Mode::Desktop => match location {
                                         Location::Trash => ResolveResult::OpenTrash,
                                         _ => ResolveResult::Open(path_opt.cloned()),
@@ -4100,6 +4113,9 @@ impl Tab {
                                     ResolveResult::Open(Some(p)) => open_files.push(p),
                                     ResolveResult::OpenInTab(Some(p)) => {
                                         commands.push(Command::OpenInNewTab(p))
+                                    }
+                                    ResolveResult::OpenUriInTab(uri, name, path) => {
+                                        commands.push(Command::OpenUriInNewTab(uri, name, path))
                                     }
                                     ResolveResult::Cd(loc) => cd = Some(loc),
                                     ResolveResult::OpenTrash => commands.push(Command::OpenTrash),
