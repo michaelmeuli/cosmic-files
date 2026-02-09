@@ -579,6 +579,44 @@ pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathB
     unreachable!()
 }
 
+pub async fn run_tbprofiler(
+    client: &Client,
+    paths: Box<[PathBuf]>,
+    to: PathBuf,
+) -> Result<String, anyhow::Error> {
+    let array_end = paths
+        .len()
+        .checked_div(2)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| anyhow::anyhow!("Need at least 2 paths"))?;
+    let command_run_tbprofiler = format!(
+        "sbatch --array 0-{} {} \"{}\" {} {} {}",
+        array_end,
+        "/shares/sander.imm.uzh/MM/PRJEB57919/scripts/tbprofiler.sh",
+        paths
+            .iter()
+            .map(|p| p.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(","),
+        "/shares/sander.imm.uzh/MM/PRJEB57919/raw",
+        "/shares/sander.imm.uzh/MM/PRJEB57919/out",
+        "/shares/sander.imm.uzh/MM/PRJEB57919/template/user_template.docx",
+    );
+    let res = client.execute(&command_run_tbprofiler).await?;
+    if res.exit_status != 0 {
+        return Err(anyhow::anyhow!(
+            "tbprofiler failed (exit {}):\nstdout:\n{}\nstderr:\n{}",
+            res.exit_status,
+            res.stdout,
+            res.stderr
+        ));
+    }
+    if !res.stderr.is_empty() {
+        log::warn!("tbprofiler stderr: {}", res.stderr);
+    }
+    Ok(res.stdout)
+}
+
 fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> ClientAuth {
     let auth = ClientAuth {
         message: String::new(),
@@ -1100,7 +1138,9 @@ impl Russh {
                             let result: Result<(), anyhow::Error> = async {
                                 let remote_files: Vec<_> = uris
                                     .iter()
-                                    .map(|u| remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e)))
+                                    .map(|u| {
+                                        remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e))
+                                    })
                                     .collect::<Result<_, anyhow::Error>>()?;
                                 let host = remote_files
                                     .first()
