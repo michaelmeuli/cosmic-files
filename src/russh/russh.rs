@@ -589,15 +589,16 @@ pub async fn run_tbprofiler(
         .checked_div(2)
         .and_then(|n| n.checked_sub(1))
         .ok_or_else(|| anyhow::anyhow!("Need at least 2 paths"))?;
+    let paths = paths
+        .iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(",");
     let command_run_tbprofiler = format!(
         "sbatch --array 0-{} {} \"{}\" {} {} {}",
         array_end,
         "/shares/sander.imm.uzh/MM/PRJEB57919/scripts/tbprofiler.sh",
-        paths
-            .iter()
-            .map(|p| p.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(","),
+        paths,
         "/shares/sander.imm.uzh/MM/PRJEB57919/raw",
         "/shares/sander.imm.uzh/MM/PRJEB57919/out",
         "/shares/sander.imm.uzh/MM/PRJEB57919/template/user_template.docx",
