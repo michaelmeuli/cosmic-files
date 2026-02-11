@@ -56,6 +56,7 @@ extract-to-title = Extract to folder
 ## Download Dialog
 download-to = Download To...
 download-to-title = Download to folder
+run-tb-profiler = Run TB-Profiler
 
 ## Empty Trash Dialog
 empty-trash = Empty trash

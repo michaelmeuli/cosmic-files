@@ -188,6 +188,7 @@ pub enum Action {
     RemoveFromRecents,
     Rename,
     RestoreFromTrash,
+    RunTbProfiler,
     SearchActivate,
     SelectFirst,
     SelectLast,
@@ -258,6 +259,7 @@ impl Action {
             Self::RemoveFromRecents => Message::RemoveFromRecents(entity_opt),
             Self::Rename => Message::Rename(entity_opt),
             Self::RestoreFromTrash => Message::RestoreFromTrash(entity_opt),
+            Self::RunTbProfiler => Message::RunTbProfiler(entity_opt),
             Self::SearchActivate => Message::SearchActivate,
             Self::SelectAll => Message::TabMessage(entity_opt, tab::Message::SelectAll),
             Self::SelectFirst => Message::TabMessage(entity_opt, tab::Message::SelectFirst),
@@ -427,6 +429,7 @@ pub enum Message {
     Rename(Option<Entity>),
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
+    RunTbProfiler(Option<Entity>),
     SaveSortNames,
     ScrollTab(i16),
     SearchActivate,
@@ -3732,6 +3735,13 @@ impl Application for App {
                             error,
                         });
                     }
+                }
+            }
+            Message::RunTbProfiler(entity_opt) => {
+                if let Some((_client_key, client)) = CLIENTS.iter().next() {
+                    let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                    let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
+                    return client.run_tb_profiler(selected_paths, selected_uris).map(|()| cosmic::action::none());
                 }
             }
             Message::NewItem(entity_opt, dir) => {

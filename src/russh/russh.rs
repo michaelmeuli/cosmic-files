@@ -582,7 +582,6 @@ pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathB
 pub async fn run_tbprofiler(
     client: &Client,
     paths: Box<[PathBuf]>,
-    to: PathBuf,
 ) -> Result<String, anyhow::Error> {
     let array_end = paths
         .len()
@@ -615,6 +614,7 @@ pub async fn run_tbprofiler(
     if !res.stderr.is_empty() {
         log::warn!("tbprofiler stderr: {}", res.stderr);
     }
+    log::info!("tbprofiler stdout: {}", res.stdout);
     Ok(res.stdout)
 }
 
@@ -686,6 +686,11 @@ enum Cmd {
         Vec<String>,
         PathBuf,
         tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+    ),
+    RunTbProfiler(
+        Box<[PathBuf]>,
+        Vec<String>,
+        tokio::sync::oneshot::Sender<anyhow::Result<String>>,
     ),
 }
 
@@ -1164,6 +1169,34 @@ impl Russh {
                             .await;
                             let _ = result_tx.send(result);
                         }
+                        Cmd::RunTbProfiler(paths, uris, result_tx) => {
+                            let result: Result<String, anyhow::Error> = async {
+                                let remote_files: Vec<_> = uris
+                                    .iter()
+                                    .map(|u| {
+                                        remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e))
+                                    })
+                                    .collect::<Result<_, anyhow::Error>>()?;
+                                let host = remote_files
+                                    .first()
+                                    .ok_or_else(|| anyhow::anyhow!("No URIs provided"))?
+                                    .host
+                                    .clone();
+                                if remote_files.iter().any(|rf| rf.host != host) {
+                                    return Err(anyhow::anyhow!(
+                                        "All URIs must be from the same host"
+                                    ));
+                                }
+                                let client = {
+                                    let read = clients.read().await;
+                                    read.get(&host).cloned()
+                                }
+                                .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
+                                run_tbprofiler(&client, paths.clone()).await
+                            }
+                            .await;
+                            let _ = result_tx.send(result);
+                        }
                     }
                 }
             });
@@ -1286,6 +1319,25 @@ impl Connector for Russh {
                 command_tx.send(Cmd::Disconnect(item)).unwrap();
             },
             |_| {},
+        )
+    }
+
+    fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+
+                command_tx
+                    .send(Cmd::RunTbProfiler(paths, uris, res_tx))
+                    .unwrap();
+                res_rx.await
+            },
+            |x| {
+                if let Err(err) = x {
+                    log::error!("{err:?}");
+                }
+            },
         )
     }
 
