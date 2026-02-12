@@ -2660,7 +2660,7 @@ impl Application for App {
                     }
 
                     log::warn!(
-                        "failed to open favorite, path does not exist 1: {}",
+                        "failed to open favorite, path does not exist: {}",
                         path.display()
                     );
                     return self.push_dialog(
@@ -2705,7 +2705,7 @@ impl Application for App {
                     }
 
                     log::warn!(
-                        "failed to open favorite, path does not exist 2: {}",
+                        "failed to open favorite, path does not exist: {}",
                         path.display()
                     );
                     return self.push_dialog(
@@ -2722,7 +2722,7 @@ impl Application for App {
                     Ok(true) => true,
                     Ok(false) => {
                         log::warn!(
-                            "failed to open favorite, path does not exist 3: {}",
+                            "failed to open favorite, path does not exist: {}",
                             path.display()
                         );
                         return self.push_dialog(
