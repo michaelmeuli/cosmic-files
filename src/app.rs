@@ -2672,9 +2672,7 @@ impl Application for App {
                     );
                 }
                 #[cfg(feature = "russh")]
-                Location::Remote(uri, name, Some(path))
-                    if !path.try_exists().unwrap_or_default() =>
-                {
+                Location::Remote(uri, name, Some(path)) => {
                     let mut found = false;
 
                     if let Some(key) = self
@@ -2685,7 +2683,7 @@ impl Application for App {
                                 found |= item.path().is_some_and(|p| path.starts_with(&p))
                                     || item.name() == *name
                                     || item.uri() == *uri;
-                                (!item.is_connected() && found).then_some(*k)
+                                found.then_some(*k)
                             })
                         })
                         .or(if found {
@@ -2717,8 +2715,7 @@ impl Application for App {
                     );
                 }
                 Location::Path(path)
-                | Location::Network(_, _, Some(path))
-                | Location::Remote(_, _, Some(path)) => match path.try_exists() {
+                | Location::Network(_, _, Some(path)) => match path.try_exists() {
                     Ok(true) => true,
                     Ok(false) => {
                         log::warn!(
@@ -5521,7 +5518,12 @@ impl Application for App {
                 return self.on_nav_select(entity);
             }
             Message::RemoteDriveOpenEntityAfterMount { entity } => {
-                return self.on_nav_select(entity);
+                self.nav_model.activate(entity);
+                if let Some(location) = self.nav_model.data::<Location>(entity) {
+                    log::info!("RemoteDriveOpenEntityAfterMount location: {:?}", location);
+                    let message = Message::TabMessage(None, tab::Message::Location(location.clone()));
+                    return self.update(message);
+                }
             }
             Message::NetworkDriveOpenTabAfterMount { location } => {
                 return self.open_tab(location, false, None);
