@@ -2921,7 +2921,8 @@ impl Application for App {
                             tab
                         };
 
-                        if let Location::Remote(uri, name, _) = tab
+                        let name = Location::Path(path.clone()).title();
+                        if let Location::Remote(uri, _, _) = tab
                             .items_opt
                             .as_ref()
                             .and_then(|items| items.iter().find(|&i| i.path_opt() == Some(&path)))
@@ -2938,8 +2939,8 @@ impl Application for App {
                     let name = Location::Path(path.clone()).title();
                     let favorite = if let Some((uri, _, _)) = is_network.clone() {
                         Favorite::Network { uri, name, path }
-                    } else if let Some((uri, name, _)) = is_remote.clone() {
-                        Favorite::Remote { uri, name: name.to_string(), path }
+                    } else if let Some((uri, _, _)) = is_remote.clone() {
+                        Favorite::Remote { uri, name, path }
                     } else {
                         Favorite::from_path(path)
                     };
