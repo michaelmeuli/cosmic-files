@@ -4029,6 +4029,10 @@ impl Tab {
                             commands.push(Command::OpenFile(vec![path.clone()]));
                         }
                     }
+                    #[cfg(feature = "russh")]
+                    Location::Remote(..) => {
+                        cd = Some(location);
+                    }
                     _ => {
                         cd = Some(location);
                     }
@@ -4081,21 +4085,23 @@ impl Tab {
 
                             if item.metadata.is_dir() {
                                 match mode {
-                                    Mode::App => {
-                                        match &item.location_opt {
-                                            Some(Location::Remote(uri, name, path)) => {
-                                                if is_only_one_selected {
-                                                    ResolveResult::Cd(location.clone())
-                                                } else {
-                                                    ResolveResult::OpenUriInTab(uri.clone(), name.clone(), path.clone())
-                                                }
+                                    Mode::App => match &item.location_opt {
+                                        Some(Location::Remote(uri, name, path)) => {
+                                            if is_only_one_selected {
+                                                ResolveResult::Cd(location.clone())
+                                            } else {
+                                                ResolveResult::OpenUriInTab(
+                                                    uri.clone(),
+                                                    name.clone(),
+                                                    path.clone(),
+                                                )
                                             }
-                                            _ => {
-                                                if is_only_one_selected {
-                                                    ResolveResult::Cd(location.clone())
-                                                } else {
-                                                    ResolveResult::OpenInTab(path_opt.cloned())
-                                                }
+                                        }
+                                        _ => {
+                                            if is_only_one_selected {
+                                                ResolveResult::Cd(location.clone())
+                                            } else {
+                                                ResolveResult::OpenInTab(path_opt.cloned())
                                             }
                                         }
                                     },
@@ -4539,6 +4545,7 @@ impl Tab {
                 // Select parent if location is not directory
                 let mut selected_paths = None;
                 if let Some(path) = location.path_opt()
+                    && !matches!(location, Location::Remote(..))
                     && !path.is_dir()
                     && let Some(parent) = path.parent()
                 {
@@ -4546,7 +4553,9 @@ impl Tab {
                     location = location.with_path(parent.to_path_buf());
                 }
                 if location != self.location || selected_paths.is_some() {
-                    if location.path_opt().is_none_or(|path| path.is_dir()) {
+                    if matches!(location, Location::Remote(..))
+                        || location.path_opt().is_none_or(|path| path.is_dir())
+                    {
                         if selected_paths.is_none() {
                             selected_paths =
                                 self.location.path_opt().map(|path| vec![path.clone()]);
