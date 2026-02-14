@@ -10,7 +10,7 @@ use cosmic::{
 use std::{
     any::TypeId,
     cell::Cell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     future::pending,
     path::{Path, PathBuf},
     sync::Arc,
@@ -588,16 +588,26 @@ pub async fn run_tbprofiler(
         .checked_div(2)
         .and_then(|n| n.checked_sub(1))
         .ok_or_else(|| anyhow::anyhow!("Need at least 2 paths"))?;
-    let paths = paths
+    let sample_ids: BTreeSet<String> = paths
         .iter()
-        .map(|p| p.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join(",");
+        .filter_map(|p| p.file_name())
+        .filter_map(|name| name.to_str())
+        .map(|name| {
+            name.trim_end_matches("_1.fastq.gz")
+                .trim_end_matches("_2.fastq.gz")
+                .to_string()
+        })
+        .collect();
+
+    if sample_ids.is_empty() {
+        return Err(anyhow::anyhow!("No valid FASTQ sample IDs found"));
+    }
+    let sample_ids_string = sample_ids.iter().cloned().collect::<Vec<_>>().join(",");
     let command_run_tbprofiler = format!(
         "sbatch --array 0-{} {} \"{}\" {} {} {}",
         array_end,
         "/shares/sander.imm.uzh/MM/PRJEB57919/scripts/tbprofiler.sh",
-        paths,
+        sample_ids_string,
         "/shares/sander.imm.uzh/MM/PRJEB57919/raw",
         "/shares/sander.imm.uzh/MM/PRJEB57919/out",
         "/shares/sander.imm.uzh/MM/PRJEB57919/template/user_template.docx",
