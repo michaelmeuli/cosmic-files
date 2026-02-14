@@ -10,7 +10,7 @@ use cosmic::{
 use std::{
     any::TypeId,
     cell::Cell,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     future::pending,
     path::{Path, PathBuf},
     sync::Arc,
@@ -583,26 +583,42 @@ pub async fn run_tbprofiler(
     client: &Client,
     paths: Box<[PathBuf]>,
 ) -> Result<String, anyhow::Error> {
-    let array_end = paths
-        .len()
-        .checked_div(2)
-        .and_then(|n| n.checked_sub(1))
-        .ok_or_else(|| anyhow::anyhow!("Need at least 2 paths"))?;
-    let sample_ids: BTreeSet<String> = paths
-        .iter()
-        .filter_map(|p| p.file_name())
-        .filter_map(|name| name.to_str())
-        .map(|name| {
-            name.trim_end_matches("_1.fastq.gz")
-                .trim_end_matches("_2.fastq.gz")
-                .to_string()
-        })
-        .collect();
+    let mut sample_map: BTreeMap<String, BTreeSet<u8>> = BTreeMap::new();
+    for path in paths.iter() {
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Invalid filename in path: {:?}", path))?;
 
-    if sample_ids.is_empty() {
-        return Err(anyhow::anyhow!("No valid FASTQ sample IDs found"));
+        if let Some(sample) = filename.strip_suffix("_1.fastq.gz") {
+            sample_map.entry(sample.to_string()).or_default().insert(1);
+        } else if let Some(sample) = filename.strip_suffix("_2.fastq.gz") {
+            sample_map.entry(sample.to_string()).or_default().insert(2);
+        } else {
+            return Err(anyhow::anyhow!(
+                "Unexpected FASTQ filename format: {}",
+                filename
+            ));
+        }
     }
-    let sample_ids_string = sample_ids.iter().cloned().collect::<Vec<_>>().join(",");
+    if sample_map.is_empty() {
+        return Err(anyhow::anyhow!("No valid FASTQ files provided"));
+    }
+    for (sample, reads) in &sample_map {
+        if reads.len() != 2 {
+            return Err(anyhow::anyhow!(
+                "Sample {} does not have both _1 and _2 FASTQ files",
+                sample
+            ));
+        }
+    }
+    let sample_ids: Vec<String> = sample_map.keys().cloned().collect();
+    let sample_ids_string = sample_ids.join(",");
+    let array_end = sample_ids
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| anyhow::anyhow!("Need at least 1 sample"))?;
+
     let command_run_tbprofiler = format!(
         "sbatch --array 0-{} {} \"{}\" {} {} {}",
         array_end,
