@@ -308,7 +308,7 @@ async fn remote_sftp_list(
             let mime = if metadata.is_dir() {
                 "inode/directory".parse().unwrap()
             } else {
-                MimeGuess::from_path(&name).first_or_octet_stream()
+                MimeGuess::from_path(&new_path).first_or_octet_stream()
             };
             let mime_clone = mime.clone();
             let file_icon = |size| {
