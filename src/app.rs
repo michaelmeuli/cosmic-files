@@ -1073,12 +1073,10 @@ impl App {
             dialog.set_accept_label(fl!("download"));
             self.windows.insert(
                 dialog.window_id(),
-                Window::new(WindowKind::DownloadDialog(Some(
-                    (
-                        paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
-                        uris.iter().map(|x| x.to_string()).collect(),
-                    )
-                ))),
+                Window::new(WindowKind::DownloadDialog(Some((
+                    paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
+                    uris.iter().map(|x| x.to_string()).collect(),
+                )))),
             );
             self.file_dialog_opt = Some(dialog);
             Task::batch([set_title_task, dialog_task])
@@ -1561,10 +1559,7 @@ impl App {
             })
     }
 
-    fn selected_uris(
-        &self,
-        entity_opt: Option<Entity>,
-    ) -> impl Iterator<Item = String> + use<'_> {
+    fn selected_uris(&self, entity_opt: Option<Entity>) -> impl Iterator<Item = String> + use<'_> {
         let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
         self.tab_model
             .data::<Tab>(entity)
@@ -2146,20 +2141,31 @@ impl App {
                 if let Some(tab) = self.tab_model.data::<Tab>(entity)
                     && let Some(items) = tab.items_opt()
                 {
-                    let preview_opt = {
-                        let mut selected = items.iter().filter(|item| item.selected);
+                    let preview_opt =
+                        {
+                            let mut selected = items.iter().filter(|item| item.selected);
 
-                        match (selected.next(), selected.next()) {
-                            // At least two selected items
-                            (Some(_), Some(_)) => Some(tab.multi_preview_view()),
-                            // Exactly one selected item
-                            (Some(item), None) => {
-                                Some(item.preview_view(Some(&self.mime_app_cache), military_time))
+                            match (selected.next(), selected.next()) {
+                                // At least two selected items
+                                (Some(_), Some(_)) => Some(tab.multi_preview_view()),
+                                // Exactly one selected item
+                                (Some(item), None) => {
+                                    if item.metadata.is_json() {
+                                        Some(item.preview_json(
+                                            Some(&self.mime_app_cache),
+                                            military_time,
+                                        ))
+                                    } else {
+                                        Some(item.preview_view(
+                                            Some(&self.mime_app_cache),
+                                            military_time,
+                                        ))
+                                    }
+                                }
+                                // No selected items
+                                _ => None,
                             }
-                            // No selected items
-                            _ => None,
-                        }
-                    };
+                        };
 
                     if let Some(preview) = preview_opt {
                         children.push(preview);
@@ -2714,37 +2720,38 @@ impl Application for App {
                         Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
                     );
                 }
-                Location::Path(path)
-                | Location::Network(_, _, Some(path)) => match path.try_exists() {
-                    Ok(true) => true,
-                    Ok(false) => {
-                        log::warn!(
-                            "failed to open favorite, path does not exist: {}",
-                            path.display()
-                        );
-                        return self.push_dialog(
-                            DialogPage::FavoritePathError {
-                                path: path.clone(),
-                                entity,
-                            },
-                            Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
-                        );
+                Location::Path(path) | Location::Network(_, _, Some(path)) => {
+                    match path.try_exists() {
+                        Ok(true) => true,
+                        Ok(false) => {
+                            log::warn!(
+                                "failed to open favorite, path does not exist: {}",
+                                path.display()
+                            );
+                            return self.push_dialog(
+                                DialogPage::FavoritePathError {
+                                    path: path.clone(),
+                                    entity,
+                                },
+                                Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "failed to open favorite for path: {}, {}",
+                                path.display(),
+                                err
+                            );
+                            return self.push_dialog(
+                                DialogPage::FavoritePathError {
+                                    path: path.clone(),
+                                    entity,
+                                },
+                                Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
+                            );
+                        }
                     }
-                    Err(err) => {
-                        log::warn!(
-                            "failed to open favorite for path: {}, {}",
-                            path.display(),
-                            err
-                        );
-                        return self.push_dialog(
-                            DialogPage::FavoritePathError {
-                                path: path.clone(),
-                                entity,
-                            },
-                            Some(FAVORITE_PATH_ERROR_REMOVE_BUTTON_ID.clone()),
-                        );
-                    }
-                },
+                }
 
                 _ => true,
             };
@@ -3398,7 +3405,12 @@ impl Application for App {
                                 self.file_dialog_opt = None;
                                 let to = selected_paths[0].clone();
                                 for (_key, client) in CLIENTS.iter() {
-                                    return client.download_file(download_paths.clone(), download_uris.clone(), to.clone())
+                                    return client
+                                        .download_file(
+                                            download_paths.clone(),
+                                            download_uris.clone(),
+                                            to.clone(),
+                                        )
                                         .map(|_| cosmic::action::none());
                                 }
                             }
@@ -3836,7 +3848,9 @@ impl Application for App {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
                     let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                     let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
-                    return client.run_tb_profiler(selected_paths, selected_uris).map(|()| cosmic::action::none());
+                    return client
+                        .run_tb_profiler(selected_paths, selected_uris)
+                        .map(|()| cosmic::action::none());
                 }
             }
             Message::NewItem(entity_opt, dir) => {
@@ -4744,7 +4758,9 @@ impl Application for App {
                             }
                         }
                         tab::Command::Delete(paths) => commands.push(self.delete(paths)),
-                        tab::Command::DownloadFile(paths, uris) => commands.push(self.download_to(&paths, &uris)),
+                        tab::Command::DownloadFile(paths, uris) => {
+                            commands.push(self.download_to(&paths, &uris))
+                        }
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }
@@ -4768,7 +4784,11 @@ impl Application for App {
                             commands.push(self.open_tab(Location::Path(path), false, None));
                         }
                         tab::Command::OpenUriInNewTab(uri, name, path) => {
-                            commands.push(self.open_tab(Location::Remote(uri, name, path), false, None));
+                            commands.push(self.open_tab(
+                                Location::Remote(uri, name, path),
+                                false,
+                                None,
+                            ));
                         }
                         tab::Command::OpenInNewWindow(path) => match env::current_exe() {
                             Ok(exe) => match process::Command::new(&exe).arg(path).spawn() {
@@ -5521,7 +5541,8 @@ impl Application for App {
                 self.nav_model.activate(entity);
                 if let Some(location) = self.nav_model.data::<Location>(entity) {
                     log::info!("RemoteDriveOpenEntityAfterMount location: {:?}", location);
-                    let message = Message::TabMessage(None, tab::Message::Location(location.clone()));
+                    let message =
+                        Message::TabMessage(None, tab::Message::Location(location.clone()));
                     return self.update(message);
                 }
             }
