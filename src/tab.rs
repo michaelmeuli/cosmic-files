@@ -1893,6 +1893,7 @@ pub enum ItemMetadata {
         mtime: u64,
         size_opt: Option<u64>,
         children_opt: Option<usize>,
+        is_json: bool,
     },
 }
 

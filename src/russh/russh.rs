@@ -25,6 +25,7 @@ use crate::{
 };
 use mime_guess::MimeGuess;
 use tokio::runtime::Builder;
+use tokio::io::AsyncReadExt;
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
@@ -299,6 +300,7 @@ async fn remote_sftp_list(
                 mtime,
                 size_opt,
                 children_opt,
+                is_json,
             }
         } else {
             ItemMetadata::SimpleDir { entries: 0 }
@@ -484,6 +486,27 @@ async fn remote_sftp_parent(
         cut: false,
     };
     Ok(item)
+}
+
+async fn load_remote_json(client: Client, uri: String) -> Result<serde_json::Value, String> {
+    let remote_file = remote_file_from_uri(&uri)?;
+    let channel = client.get_channel().await.map_err(|e| e.to_string())?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| e.to_string())?;
+    let sftp = SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut file = sftp
+        .open(remote_file.path.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_str(&contents).map_err(|e| e.to_string())
 }
 
 async fn perform_download(
