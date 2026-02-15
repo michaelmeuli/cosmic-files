@@ -1954,6 +1954,14 @@ impl ItemMetadata {
             _ => None,
         }
     }
+
+    pub fn is_json(&self) -> bool {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath { is_json, .. } => *is_json,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
