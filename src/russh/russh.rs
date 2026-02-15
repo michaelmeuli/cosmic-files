@@ -276,6 +276,7 @@ async fn remote_sftp_list(
             let is_dir = info.is_dir();
             let size_opt = (!is_dir).then_some(info.size).flatten();
             let mut children_opt = None;
+            let is_json = MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             if is_dir {
                 let mut count = 0;
                 match sftp.read_dir(new_path.to_string_lossy().to_string()).await {
@@ -443,6 +444,7 @@ async fn remote_sftp_parent(
             mtime,
             size_opt,
             children_opt,
+            is_json: false,
         }
     };
     let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
