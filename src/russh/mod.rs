@@ -120,6 +120,7 @@ pub trait Connector: Send + Sync {
     fn disconnect(&self, item: ClientItem) -> Task<()>;
     fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf) -> Task<()>;
     fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()>;
+    fn load_json(&self, uri: &str) -> Option<serde_json::Value>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 

@@ -24,8 +24,8 @@ use crate::{
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 use mime_guess::MimeGuess;
-use tokio::runtime::Builder;
 use tokio::io::AsyncReadExt;
+use tokio::runtime::Builder;
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
@@ -276,7 +276,8 @@ async fn remote_sftp_list(
             let is_dir = info.is_dir();
             let size_opt = (!is_dir).then_some(info.size).flatten();
             let mut children_opt = None;
-            let is_json = MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
+            let is_json =
+                MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             if is_dir {
                 let mut count = 0;
                 match sftp.read_dir(new_path.to_string_lossy().to_string()).await {
@@ -490,7 +491,7 @@ async fn remote_sftp_parent(
     Ok(item)
 }
 
-async fn load_remote_json(client: Client, uri: String) -> Result<serde_json::Value, String> {
+async fn load_remote_json(client: &Client, uri: &str) -> Result<serde_json::Value, String> {
     let remote_file = remote_file_from_uri(&uri)?;
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     channel
@@ -742,6 +743,10 @@ enum Cmd {
         Box<[PathBuf]>,
         Vec<String>,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
+    ),
+    LoadJson(
+        String,
+        tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>,
     ),
 }
 
@@ -1220,6 +1225,20 @@ impl Russh {
                             .await;
                             let _ = result_tx.send(result);
                         }
+                        Cmd::LoadJson(uri, result_tx) => {
+                            let result: Result<serde_json::Value, String> = async {
+                                let remote_file = remote_file_from_uri(&uri)?;
+                                let host = remote_file.host.clone();
+                                let client = {
+                                    let read = clients.read().await;
+                                    read.get(&host).cloned()
+                                }
+                                .ok_or_else(|| format!("No client for host {host}"))?;
+                                load_remote_json(&client, &uri).await
+                            }
+                            .await;
+                            let _ = result_tx.send(result);
+                        }
                         Cmd::RunTbProfiler(paths, uris, result_tx) => {
                             let result: Result<String, anyhow::Error> = async {
                                 let remote_files: Vec<_> = uris
@@ -1390,6 +1409,15 @@ impl Connector for Russh {
                 }
             },
         )
+    }
+
+    fn load_json(&self, uri: &str) -> Option<serde_json::Value> {
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let command_tx = self.command_tx.clone();
+        command_tx
+            .send(Cmd::LoadJson(uri.to_string(), result_tx))
+            .unwrap();
+        result_rx.blocking_recv().ok().and_then(|res| res.ok())
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {

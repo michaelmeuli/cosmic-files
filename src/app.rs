@@ -4958,6 +4958,29 @@ impl Application for App {
                     self.set_show_context(true);
                 }
                 self.context_page = context_page;
+
+                if let ContextPage::Preview(entity_opt, _) = &self.context_page {
+                    let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
+
+                    if let Some(tab) = self.tab_model.data::<Tab>(entity)
+                        && let Some(items) = tab.items_opt()
+                    {
+                        let mut selected = items.iter().filter(|item| item.selected);
+
+                        if let (Some(item), None) = (selected.next(), selected.next()) {
+                            if item.metadata.is_json() {
+                                if let Some(data) = self.nav_model.data::<ClientData>(entity)
+                                    && let Some(client) = CLIENTS.get(&data.0)
+                                {
+                                    client.load_json(item.uri_opt().unwrap_or_default()).map(|json| {
+                                        Message::JsonPreviewLoaded((item.uri_opt().cloned(), Some(json)))
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // Preview status is preserved across restarts
                 if matches!(self.context_page, ContextPage::Preview(_, _)) {
                     return cosmic::task::message(cosmic::action::app(Message::SetShowDetails(
