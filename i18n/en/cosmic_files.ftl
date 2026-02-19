@@ -1,4 +1,6 @@
 cosmic-files = COSMIC Files
+comment = File manager for the COSMIC desktop
+keywords = Folder;Manager;
 empty-folder = Empty folder
 empty-folder-hidden = Empty folder (has hidden items)
 no-results = No results found
@@ -305,6 +307,7 @@ calculating = Calculating...
 ## Settings
 settings = Settings
 single-click = Single click to open
+show-recents = Recents folder in the sidebar
 
 ### Appearance
 appearance = Appearance
@@ -321,6 +324,7 @@ type-to-search-select = Selects the first matching file or folder
 
 # Context menu
 add-to-sidebar = Add to sidebar
+clear-recents-history = Clear Recents history
 compress = Compress
 copy-to = Copy to...
 delete-permanently = Delete permanently
@@ -359,6 +363,7 @@ quit = Quit
 edit = Edit
 cut = Cut
 copy = Copy
+copy-path = Copy path
 paste = Paste
 select-all = Select all
 
