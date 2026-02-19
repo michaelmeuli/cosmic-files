@@ -1,4 +1,6 @@
 cosmic-files = Pliki COSMIC
+comment = Menedżer plików pulpitu COSMIC
+keywords = Katalogi;Pliki;Menedżer;
 empty-folder = Pusty katalog
 empty-folder-hidden = Pusty katalog (z ukrytymi plikami)
 no-results = Brak wyników
@@ -426,3 +428,9 @@ type-to-search-select = Wybierz pierwszy pasujący plik lub katalog
 pasted-image = Wklej Obraz
 pasted-text = Wklejony Tekst
 pasted-video = Wklejone Wideo
+copy-to-title = Wybierz gdzie skopiować
+copy-to-button-label = Kopiuj
+move-to-title = Wybierz gdzie przenieść
+move-to-button-label = Przenieś
+copy-to = Skopiuj do…
+move-to = Przenieś do…

@@ -150,6 +150,7 @@ pub enum Action {
     AddToSidebar,
     Compress,
     Copy,
+    CopyPath,
     CopyTo,
     Cut,
     CosmicSettingsDesktop,
@@ -221,6 +222,7 @@ impl Action {
             Self::AddToSidebar => Message::AddToSidebar(entity_opt),
             Self::Compress => Message::Compress(entity_opt),
             Self::Copy => Message::Copy(entity_opt),
+            Self::CopyPath => Message::CopyPath(entity_opt),
             Self::CopyTo => Message::CopyTo(entity_opt),
             Self::Cut => Message::Cut(entity_opt),
             Self::CosmicSettingsDesktop => Message::CosmicSettings("desktop"),
@@ -321,13 +323,14 @@ pub enum PreviewKind {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum NavMenuAction {
+    ClearRecents,
+    EmptyTrash,
     Open(segmented_button::Entity),
     OpenWith(segmented_button::Entity),
     OpenInNewTab(segmented_button::Entity),
     OpenInNewWindow(segmented_button::Entity),
     Preview(segmented_button::Entity),
     RemoveFromSidebar(segmented_button::Entity),
-    EmptyTrash,
 }
 
 impl MenuAction for NavMenuAction {
@@ -349,6 +352,7 @@ pub enum Message {
     Compress(Option<Entity>),
     Config(Config),
     Copy(Option<Entity>),
+    CopyPath(Option<Entity>),
     CopyTo(Option<Entity>),
     CopyToResult(DialogResult),
     CosmicSettings(&'static str),
@@ -445,6 +449,7 @@ pub enum Message {
     SearchClear,
     SearchInput(String),
     SetShowDetails(bool),
+    SetShowRecents(bool),
     SetTypeToSearch(TypeToSearch),
     SystemThemeModeChange,
     Size(window::Id, Size),
@@ -885,12 +890,14 @@ impl App {
             for path in paths {
                 match open::that_detached(&path) {
                     Ok(()) => {
-                        let _ = recently_used_xbel::update_recently_used(
-                            &path,
-                            Self::APP_ID.to_string(),
-                            "cosmic-files".to_string(),
-                            None,
-                        );
+                        if self.config.show_recents {
+                            let _ = recently_used_xbel::update_recently_used(
+                                &path,
+                                Self::APP_ID.to_string(),
+                                "cosmic-files".to_string(),
+                                None,
+                            );
+                        }
                     }
                     Err(err) => {
                         log::warn!("failed to open {}: {}", path.display(), err);
@@ -908,7 +915,13 @@ impl App {
                 Ok(entry) => match entry.exec() {
                     Some(exec) => match mime_app::exec_to_command(exec, &[] as &[&str; 0]) {
                         Some(commands) => {
+                            let cwd_opt = entry.desktop_entry("Path");
+
                             for mut command in commands {
+                                if let Some(cwd) = cwd_opt {
+                                    command.current_dir(cwd);
+                                }
+
                                 if let Err(err) = spawn_detached(&mut command) {
                                     log::warn!("failed to execute {}: {}", path.display(), err);
                                 }
@@ -948,13 +961,15 @@ impl App {
             for (i, mut command) in commands.into_iter().enumerate() {
                 match spawn_detached(&mut command) {
                     Ok(()) => {
-                        for path in paths {
-                            let _ = recently_used_xbel::update_recently_used(
-                                &path.into(),
-                                Self::APP_ID.to_string(),
-                                "cosmic-files".to_string(),
-                                None,
-                            );
+                        if self.config.show_recents {
+                            for path in paths {
+                                let _ = recently_used_xbel::update_recently_used(
+                                    &path.into(),
+                                    Self::APP_ID.to_string(),
+                                    "cosmic-files".to_string(),
+                                    None,
+                                );
+                            }
                         }
 
                         return true;
@@ -1637,11 +1652,13 @@ impl App {
     fn update_nav_model(&mut self) {
         let mut nav_model = segmented_button::ModelBuilder::default();
 
-        nav_model = nav_model.insert(|b| {
-            b.text(fl!("recents"))
-                .icon(icon::from_name("document-open-recent-symbolic"))
-                .data(Location::Recents)
-        });
+        if self.config.show_recents {
+            nav_model = nav_model.insert(|b| {
+                b.text(fl!("recents"))
+                    .icon(icon::from_name("document-open-recent-symbolic"))
+                    .data(Location::Recents)
+            });
+        }
 
         for (favorite_i, favorite) in self.config.favorites.iter().enumerate() {
             if let Some(path) = favorite.path_opt() {
@@ -2249,6 +2266,10 @@ impl App {
                         },
                     )
                 })
+                .add({
+                    widget::settings::item::builder(fl!("show-recents"))
+                        .toggler(self.config.show_recents, Message::SetShowRecents)
+                })
                 .into(),
         ])
         .into()
@@ -2407,6 +2428,7 @@ impl Application for App {
             .icon(icon::from_name(Self::APP_ID))
             .version(env!("CARGO_PKG_VERSION"))
             .author("System76")
+            .comments(fl!("comment"))
             .license("GPL-3.0-only")
             .license_url("https://spdx.org/licenses/GPL-3.0-only")
             .developers([("Jeremy Soller", "jeremy@system76.com")])
@@ -2610,6 +2632,15 @@ impl Application for App {
                 NavMenuAction::RemoveFromSidebar(entity),
             ));
         }
+
+        if matches!(location_opt, Some(Location::Recents)) && tab::has_recents() {
+            items.push(cosmic::widget::menu::Item::Button(
+                fl!("clear-recents-history"),
+                None,
+                NavMenuAction::ClearRecents,
+            ));
+        }
+
         if matches!(location_opt, Some(Location::Trash))
             && !trash::os_limited::is_empty().unwrap_or(true)
         {
@@ -3006,6 +3037,13 @@ impl Application for App {
                 let contents = ClipboardCopy::new(ClipboardKind::Copy, paths);
                 return clipboard::write_data(contents);
             }
+            Message::CopyPath(entity_opt) => {
+                let paths = self.selected_paths(entity_opt);
+                let path_strings: Vec<String> =
+                    paths.into_iter().map(|p| p.display().to_string()).collect();
+                let text = path_strings.join("\n");
+                return clipboard::write(text);
+            }
             Message::CopyTo(entity_opt) => {
                 let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                 return self.copy_to(&selected_paths);
@@ -3272,12 +3310,14 @@ impl Application for App {
                                 {
                                     match spawn_detached(&mut command) {
                                         Ok(()) => {
-                                            let _ = recently_used_xbel::update_recently_used(
-                                                &path,
-                                                Self::APP_ID.to_string(),
-                                                "cosmic-files".to_string(),
-                                                None,
-                                            );
+                                            if self.config.show_recents {
+                                                let _ = recently_used_xbel::update_recently_used(
+                                                    &path,
+                                                    Self::APP_ID.to_string(),
+                                                    "cosmic-files".to_string(),
+                                                    None,
+                                                );
+                                            }
                                         }
                                         Err(err) => {
                                             log::warn!(
@@ -4527,6 +4567,10 @@ impl Application for App {
                 config_set!(show_details, show_details);
                 return self.update_config();
             }
+            Message::SetShowRecents(show_recents) => {
+                config_set!(show_recents, show_recents);
+                return self.update_config();
+            }
             Message::SetTypeToSearch(type_to_search) => {
                 config_set!(type_to_search, type_to_search);
                 return self.update_config();
@@ -4681,6 +4725,8 @@ impl Application for App {
                             self.activate_nav_model_location(&tab_path);
 
                             self.tab_model.text_set(entity, tab_title);
+                            // clear the prefix selection buffer when changing location
+                            self.type_select_prefix.clear();
                             commands.push(Task::batch([
                                 self.update_title(),
                                 self.update_watcher(),
@@ -5254,6 +5300,16 @@ impl Application for App {
                 }
             }
             Message::NavMenuAction(action) => match action {
+                NavMenuAction::ClearRecents => match recently_used_xbel::clear_recently_used() {
+                    Ok(()) => {}
+                    Err(err) => {
+                        log::warn!("failed to clear recents history: {}", err);
+                    }
+                },
+                NavMenuAction::EmptyTrash => {
+                    return self
+                        .push_dialog(DialogPage::EmptyTrash, Some(EMPTY_TRASH_BUTTON_ID.clone()));
+                }
                 NavMenuAction::Open(entity) => {
                     if let Some(path) = self
                         .nav_model
@@ -5398,14 +5454,11 @@ impl Application for App {
                         return self.update_config();
                     }
                 }
-
-                NavMenuAction::EmptyTrash => {
-                    return self
-                        .push_dialog(DialogPage::EmptyTrash, Some(EMPTY_TRASH_BUTTON_ID.clone()));
-                }
             },
             Message::Recents => {
-                return self.open_tab(Location::Recents, false, None);
+                if self.config.show_recents {
+                    return self.open_tab(Location::Recents, false, None);
+                }
             }
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             Message::OutputEvent(output_event, output) => {
@@ -7134,12 +7187,15 @@ impl Application for App {
                     std::future::pending().await
                 }),
             ),
-            #[cfg(all(
-                not(feature = "desktop-applet"),
-                not(target_os = "ios"),
-                not(target_os = "android")
-            ))]
-            Subscription::run_with_id(
+        ];
+
+        #[cfg(all(
+            not(feature = "desktop-applet"),
+            not(target_os = "ios"),
+            not(target_os = "android")
+        ))]
+        if self.config.show_recents {
+            subscriptions.push(Subscription::run_with_id(
                 TypeId::of::<RecentsWatcherSubscription>(),
                 stream::channel(1, |mut output| async move {
                     let Some(recents_path) = recently_used_xbel::dir() else {
@@ -7199,8 +7255,8 @@ impl Application for App {
 
                     std::future::pending().await
                 }),
-            ),
-        ];
+            ));
+        }
 
         if let Some(scroll_speed) = self.auto_scroll_speed {
             subscriptions.push(
