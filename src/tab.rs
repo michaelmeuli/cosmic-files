@@ -1894,6 +1894,7 @@ pub enum ItemMetadata {
         size_opt: Option<u64>,
         children_opt: Option<usize>,
         is_json: bool,
+        json_opt: Option<serde_json::Value>,
     },
 }
 
@@ -1960,6 +1961,12 @@ impl ItemMetadata {
             #[cfg(feature = "russh")]
             Self::RusshPath { is_json, .. } => *is_json,
             _ => false,
+        }
+    }
+
+    pub fn set_json(&mut self, json: Option<serde_json::Value>) {
+        if let Self::RusshPath { json_opt, .. } = self {
+            *json_opt = json;
         }
     }
 }
@@ -2673,6 +2680,102 @@ impl Item {
             let mut section = widget::settings::section();
             section = section.extend(settings);
             column = column.push(section);
+        }
+
+        column.into()
+    }
+
+    pub fn preview_json<'a>(
+        &'a self,
+        mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
+        military_time: bool,
+    ) -> Element<'a, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column().spacing(space_m);
+
+        column = column.push(
+            widget::container(self.preview())
+                .center_x(Length::Fill)
+                .max_height(THUMBNAIL_SIZE as f32),
+        );
+
+        let mut details = widget::column().spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::body(fl!(
+            "type",
+            mime = self.mime.to_string()
+        )));
+        let mut settings = Vec::new();
+        if let Some(mime_app_cache) = mime_app_cache_opt {
+            let mime_apps = mime_app_cache.get(&self.mime);
+            if !mime_apps.is_empty() {
+                settings.push(
+                    widget::settings::item::builder(fl!("open-with")).control(
+                        Element::from(
+                            widget::dropdown(
+                                mime_apps,
+                                mime_apps.iter().position(|x| x.is_default),
+                                move |index| index,
+                            )
+                            .icons(Cow::Borrowed(mime_app_cache.icons(&self.mime))),
+                        )
+                        .map(|index| {
+                            let mime_app = &mime_apps[index];
+                            Message::SetOpenWith(self.mime.clone(), mime_app.id.clone())
+                        }),
+                    ),
+                );
+            }
+        }
+
+        match self.metadata {
+            #[cfg(feature = "russh")]
+            ItemMetadata::RusshPath { .. } => {
+                column = column.push(details);
+
+                if self.metadata.is_dir() {
+                    if let Some(_path) = self.path_opt() {
+                        if self.selected {
+                            column = column.push(
+                                widget::button::standard(fl!("open")).on_press(Message::Open(None)),
+                            );
+                        }
+                    }
+                } else {
+                    if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
+                    {
+                        if self.selected && path_opt.is_some() {
+                            column =
+                                column.push(widget::button::standard(fl!("download")).on_press(
+                                    Message::Download(Some((path_opt.unwrap(), uri.clone()))),
+                                ));
+                        }
+                    }
+                }
+            }
+            _ => {
+                if let Some(path) = self.path_opt()
+                    && let Ok(img) = image::image_dimensions(path)
+                {
+                    let (width, height) = img;
+                    details = details.push(widget::text::body(format!("{width}x{height}")));
+                }
+                column = column.push(details);
+
+                if let Some(path) = self.path_opt() {
+                    if self.selected {
+                        column = column.push(
+                            widget::button::standard(fl!("open"))
+                                .on_press(Message::Open(Some(path.clone()))),
+                        );
+                    }
+                }
+            }
         }
 
         column.into()

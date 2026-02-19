@@ -371,6 +371,7 @@ pub enum Message {
     ExtractToResult(DialogResult),
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     Focused(window::Id),
+    JsonLoaded(Entity, String, Option<serde_json::Value>),
     Key(window::Id, Modifiers, Key, Option<SmolStr>),
     LaunchUrl(String),
     MaybeExit,
@@ -4968,19 +4969,38 @@ impl Application for App {
                         let mut selected = items.iter().filter(|item| item.selected);
 
                         if let (Some(item), None) = (selected.next(), selected.next()) {
-                            if item.metadata.is_json() {
-                                if let Some(data) = self.nav_model.data::<ClientData>(entity)
-                                    && let Some(client) = CLIENTS.get(&data.0)
-                                {
-                                    client.load_json(item.uri_opt().unwrap_or_default()).map(|json| {
-                                        Message::JsonPreviewLoaded((item.uri_opt().cloned(), Some(json)))
-                                    });
+                            match item.location_opt.as_ref() {
+                                Some(Location::Remote(uri, _, _)) => {
+                                    if item.metadata.is_json() {
+                                        if let Some(data) =
+                                            self.nav_model.data::<ClientData>(entity)
+                                        {
+                                            let client_key = data.0.clone();
+                                            let uri_cloned = uri.clone();
+                                            return Task::perform(
+                                                {
+                                                    let uri = uri.clone();
+                                                    async move {
+                                                        if let Some(client) = CLIENTS.get(&client_key) {
+                                                            client.load_json(uri.as_str())
+                                                        } else {
+                                                            None
+                                                        }
+                                                    }
+                                                },
+                                                move |result| {
+                                                    cosmic::Action::App(Message::JsonLoaded(entity, uri_cloned.clone(), result))
+                                                },
+                                            );
+                                        }
+                                    }
                                 }
+                                _ => {}
                             }
                         }
                     }
                 }
-                
+
                 // Preview status is preserved across restarts
                 if matches!(self.context_page, ContextPage::Preview(_, _)) {
                     return cosmic::task::message(cosmic::action::app(Message::SetShowDetails(
@@ -4988,6 +5008,21 @@ impl Application for App {
                     )));
                 }
             }
+            Message::JsonLoaded(entity, uri, json_result) => {
+                if let Some(tab) = self.tab_model.data_mut::<Tab>(entity)
+                    && let Some(items) = tab.items_opt_mut()
+                {
+                    if let Some(item) = items.iter_mut().find(|i| {
+                        matches!(
+                            &i.location_opt,
+                            Some(Location::Remote(item_uri, _, _)) if item_uri == &uri
+                        )
+                    }) {
+                        item.metadata.set_json(json_result);
+                    }
+                }
+            }
+
             Message::Undo(_id) => {
                 // TODO: undo
             }

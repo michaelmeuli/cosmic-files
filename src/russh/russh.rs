@@ -303,6 +303,7 @@ async fn remote_sftp_list(
                 size_opt,
                 children_opt,
                 is_json,
+                json_opt: None,
             }
         } else {
             ItemMetadata::SimpleDir { entries: 0 }
@@ -446,6 +447,7 @@ async fn remote_sftp_parent(
             size_opt,
             children_opt,
             is_json: false,
+            json_opt: None,
         }
     };
     let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
