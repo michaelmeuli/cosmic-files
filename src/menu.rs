@@ -174,7 +174,11 @@ pub fn context_menu<'a>(
                 children.push(divider::horizontal::light().into());
                 children.push(menu_item(fl!("rename"), Action::Rename).into());
                 children.push(menu_item(fl!("cut"), Action::Cut).into());
-                children.push(menu_item(fl!("copy"), Action::Copy).into());
+                if modifiers.shift() && !modifiers.control() {
+                    children.push(menu_item(fl!("copy-path"), Action::CopyPath).into());
+                } else {
+                    children.push(menu_item(fl!("copy"), Action::Copy).into());
+                }
                 // Should this simply bypass trash and remove the shortcut?
                 children.push(menu_item(fl!("move-to-trash"), Action::Delete).into());
             } else if selected > 0 {
@@ -204,7 +208,11 @@ pub fn context_menu<'a>(
                     children.push(menu_item(fl!("rename"), Action::Rename).into());
                     children.push(menu_item(fl!("cut"), Action::Cut).into());
                 }
-                children.push(menu_item(fl!("copy"), Action::Copy).into());
+                if modifiers.shift() && !modifiers.control() {
+                    children.push(menu_item(fl!("copy-path"), Action::CopyPath).into());
+                } else {
+                    children.push(menu_item(fl!("copy"), Action::Copy).into());
+                }
                 if selected_mount_point == 0 {
                     children.push(menu_item(fl!("move-to"), Action::MoveTo).into());
                 }
@@ -247,14 +255,19 @@ pub fn context_menu<'a>(
             } else {
                 //TODO: need better designs for menu with no selection
                 //TODO: have things like properties but they apply to the folder?
-                children.push(menu_item(fl!("new-folder"), Action::NewFolder).into());
-                children.push(menu_item(fl!("new-file"), Action::NewFile).into());
-                children.push(menu_item(fl!("open-in-terminal"), Action::OpenTerminal).into());
-                children.push(divider::horizontal::light().into());
+                if tab.location != Location::Recents {
+                    children.push(menu_item(fl!("new-folder"), Action::NewFolder).into());
+                    children.push(menu_item(fl!("new-file"), Action::NewFile).into());
+                    children.push(menu_item(fl!("open-in-terminal"), Action::OpenTerminal).into());
+                    children.push(divider::horizontal::light().into());
+                }
+
                 if tab.mode.multiple() {
                     children.push(menu_item(fl!("select-all"), Action::SelectAll).into());
                 }
-                children.push(menu_item(fl!("paste"), Action::Paste).into());
+                if tab.location != Location::Recents {
+                    children.push(menu_item(fl!("paste"), Action::Paste).into());
+                }
 
                 //TODO: only show if cosmic-settings is found?
                 if matches!(tab.mode, tab::Mode::Desktop) {
@@ -622,6 +635,8 @@ pub fn menu_bar<'a>(
                     vec![
                         menu_button_optional(fl!("cut"), Action::Cut, selected > 0),
                         menu_button_optional(fl!("copy"), Action::Copy, selected > 0),
+                        menu_button_optional(fl!("move-to"), Action::MoveTo, selected > 0),
+                        menu_button_optional(fl!("copy-to"), Action::CopyTo, selected > 0),
                         menu_button_optional(fl!("paste"), Action::Paste, selected > 0),
                         menu::Item::Button(fl!("select-all"), None, Action::SelectAll),
                         menu::Item::Divider,
