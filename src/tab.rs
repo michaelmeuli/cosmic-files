@@ -2687,8 +2687,8 @@ impl Item {
 
     pub fn preview_json<'a>(
         &'a self,
-        mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
-        military_time: bool,
+        _mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
+        _military_time: bool,
     ) -> Element<'a, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
@@ -2710,32 +2710,10 @@ impl Item {
             "type",
             mime = self.mime.to_string()
         )));
-        let mut settings = Vec::new();
-        if let Some(mime_app_cache) = mime_app_cache_opt {
-            let mime_apps = mime_app_cache.get(&self.mime);
-            if !mime_apps.is_empty() {
-                settings.push(
-                    widget::settings::item::builder(fl!("open-with")).control(
-                        Element::from(
-                            widget::dropdown(
-                                mime_apps,
-                                mime_apps.iter().position(|x| x.is_default),
-                                move |index| index,
-                            )
-                            .icons(Cow::Borrowed(mime_app_cache.icons(&self.mime))),
-                        )
-                        .map(|index| {
-                            let mime_app = &mime_apps[index];
-                            Message::SetOpenWith(self.mime.clone(), mime_app.id.clone())
-                        }),
-                    ),
-                );
-            }
-        }
 
-        match self.metadata {
+        match &self.metadata {
             #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { .. } => {
+            ItemMetadata::RusshPath { json_opt, .. } => {
                 column = column.push(details);
 
                 if self.metadata.is_dir() {
@@ -2747,6 +2725,10 @@ impl Item {
                         }
                     }
                 } else {
+                    if let Some(json) = json_opt.clone()
+                    {
+                        column = column.push(widget::text::body(format!("JSON: {json}")));
+                    }
                     if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
                     {
                         if self.selected && path_opt.is_some() {
