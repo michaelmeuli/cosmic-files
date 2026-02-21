@@ -5017,7 +5017,7 @@ impl Application for App {
                         if let (Some(item), None) = (selected.next(), selected.next()) {
                             match item.location_opt.as_ref() {
                                 Some(Location::Remote(uri, _, _)) => {
-                                    if item.metadata.is_json() {
+                                    if item.metadata.is_json() && !item.metadata.is_json_opt() {
                                         if let Some(data) =
                                             self.nav_model.data::<ClientData>(entity)
                                         {
@@ -5027,7 +5027,9 @@ impl Application for App {
                                                 {
                                                     let uri = uri.clone();
                                                     async move {
-                                                        if let Some(client) = CLIENTS.get(&client_key) {
+                                                        if let Some(client) =
+                                                            CLIENTS.get(&client_key)
+                                                        {
                                                             client.load_json(uri.as_str())
                                                         } else {
                                                             None
@@ -5035,7 +5037,11 @@ impl Application for App {
                                                     }
                                                 },
                                                 move |result| {
-                                                    cosmic::Action::App(Message::JsonLoaded(entity, uri_cloned.clone(), result))
+                                                    cosmic::Action::App(Message::JsonLoaded(
+                                                        entity,
+                                                        uri_cloned.clone(),
+                                                        result,
+                                                    ))
                                                 },
                                             );
                                         }
@@ -5055,18 +5061,21 @@ impl Application for App {
                 }
             }
             Message::JsonLoaded(entity, uri, json_result) => {
-                if let Some(tab) = self.tab_model.data_mut::<Tab>(entity)
-                    && let Some(items) = tab.items_opt_mut()
-                {
-                    if let Some(item) = items.iter_mut().find(|i| {
-                        matches!(
-                            &i.location_opt,
-                            Some(Location::Remote(item_uri, _, _)) if item_uri == &uri
-                        )
-                    }) {
-                        item.metadata.set_json(json_result);
+                if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {
+                    if let Some(items) = tab.items_opt_mut() {
+                        for item in items {
+                            if let Some(Location::Remote(item_uri, _, _)) = &item.location_opt {
+                                if item_uri == &uri {
+                                    item.metadata.set_json(json_result.clone());
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
+                return cosmic::task::message(cosmic::action::app(Message::ToggleContextPage(
+                    self.context_page.clone(),
+                )));
             }
 
             Message::Undo(_id) => {

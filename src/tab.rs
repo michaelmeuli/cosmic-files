@@ -1976,6 +1976,14 @@ impl ItemMetadata {
             *json_opt = json;
         }
     }
+
+    pub fn is_json_opt(&self) -> bool {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath { json_opt, .. } => json_opt.is_some(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -2734,6 +2742,7 @@ impl Item {
                 } else {
                     if let Some(json) = json_opt.clone()
                     {
+                        log::info!("displaying JSON metadata for {}: {json:#?}", self.name);
                         column = column.push(widget::text::body(format!("JSON: {json}")));
                     }
                     if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
