@@ -1228,18 +1228,47 @@ impl Russh {
                             let _ = result_tx.send(result);
                         }
                         Cmd::LoadJson(uri, result_tx) => {
-                            let result: Result<serde_json::Value, String> = async {
+                            let res: Result<serde_json::Value, String> = async {
                                 let remote_file = remote_file_from_uri(&uri)?;
                                 let host = remote_file.host.clone();
-                                let client = {
+                                let port = remote_file.port;
+                                let username = remote_file
+                                    .username
+                                    .clone()
+                                    .ok_or_else(|| "No username specified in URI".to_string())?;
+                                let existing_client = {
                                     let read = clients.read().await;
                                     read.get(&host).cloned()
-                                }
-                                .ok_or_else(|| format!("No client for host {host}"))?;
+                                };
+                                let client: Arc<Client> = if let Some(client) = existing_client {
+                                    client
+                                } else {
+                                    let key_path = get_key_files()
+                                        .map(|pair| pair.0)
+                                        .map_err(|e| e.to_string())?;
+                                    let auth = AuthMethod::with_key_file(key_path, None);
+
+                                    let client = Client::connect(
+                                        (host.as_str(), port),
+                                        username.as_str(),
+                                        auth,
+                                        ServerCheckMethod::NoCheck,
+                                    )
+                                    .await
+                                    .map_err(|e| format!("connect failed: {e}"))?;
+
+                                    let client = Arc::new(client);
+                                    {
+                                        let mut write = clients.write().await;
+                                        write.insert(host.clone(), Arc::clone(&client));
+                                    }
+                                    client
+                                };
+
                                 load_remote_json(&client, &uri).await
                             }
                             .await;
-                            let _ = result_tx.send(result);
+                            let _ = result_tx.send(res);
                         }
                         Cmd::RunTbProfiler(paths, uris, result_tx) => {
                             let result: Result<String, anyhow::Error> = async {
@@ -1415,11 +1444,10 @@ impl Connector for Russh {
 
     fn load_json(&self, uri: &str) -> Option<serde_json::Value> {
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let command_tx = self.command_tx.clone();
-        command_tx
+        self.command_tx
             .send(Cmd::LoadJson(uri.to_string(), result_tx))
             .unwrap();
-        result_rx.blocking_recv().ok().and_then(|res| res.ok())  //thread 'tokio-runtime-worker' (19842) panicked
+        result_rx.blocking_recv().ok().and_then(|res| res.ok())
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {

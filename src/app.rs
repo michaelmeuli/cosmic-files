@@ -5008,11 +5008,6 @@ impl Application for App {
                 self.context_page = context_page;
 
                 if let ContextPage::Preview(entity_opt, _) = &self.context_page {
-                    log::info!(
-                        "ToggleContextPage previewing JSON for entity {:?} with context page kind {:#?}",
-                        entity_opt,
-                        self.context_page
-                    );
                     let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
 
                     if let Some(tab) = self.tab_model.data::<Tab>(entity)
@@ -5023,41 +5018,27 @@ impl Application for App {
                         if let (Some(item), None) = (selected.next(), selected.next()) {
                             match item.location_opt.as_ref() {
                                 Some(Location::Remote(uri, _, _)) => {
-                                    log::info!(
-                                        "ToggleContextPage Remote previewing JSON from {}: {:#?}",
-                                        uri,
-                                        item.metadata
-                                    );
                                     if item.metadata.is_json() && !item.metadata.is_json_opt() {
-                                        log::info!(
-                                            "JSON metadata is not loaded for {}, loading...",
-                                            uri
-                                        );
-
                                         let uri_cloned = uri.clone();
-                                        log::info!(
-                                            "Spawning task to load JSON for {} with client key",
-                                            uri_cloned
-                                        );
                                         return Task::perform(
                                             {
                                                 let uri = uri.clone();
                                                 async move {
-                                                    if let Some(client) =
-                                                        CLIENTS.get(&ClientKey("russh"))
-                                                    {
-                                                        client.load_json(uri.as_str())
-                                                    } else {
-                                                        None
-                                                    }
+                                                    tokio::task::spawn_blocking(move || {
+                                                        if let Some(client) =
+                                                            CLIENTS.get(&ClientKey("russh"))
+                                                        {
+                                                            client.load_json(uri.as_str())
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .await
+                                                    .ok()
+                                                    .flatten()
                                                 }
                                             },
                                             move |result| {
-                                                log::info!(
-                                                    "JSON loaded for {}: {:#?}",
-                                                    uri_cloned,
-                                                    result
-                                                );
                                                 cosmic::Action::App(Message::JsonLoaded(
                                                     entity,
                                                     uri_cloned.clone(),
