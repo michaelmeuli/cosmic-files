@@ -1419,7 +1419,7 @@ impl Connector for Russh {
         command_tx
             .send(Cmd::LoadJson(uri.to_string(), result_tx))
             .unwrap();
-        result_rx.blocking_recv().ok().and_then(|res| res.ok())
+        result_rx.blocking_recv().ok().and_then(|res| res.ok())  //thread 'tokio-runtime-worker' (19842) panicked
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {

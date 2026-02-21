@@ -4996,6 +4996,7 @@ impl Application for App {
                 return self.update_config();
             }
             Message::ToggleContextPage(context_page) => {
+                log::info!("Toggling context page to {:#?}", context_page);
                 //TODO: ensure context menus are closed
                 if self.context_page == context_page
                     || matches!(self.context_page, ContextPage::Preview(_, _))
@@ -5007,6 +5008,11 @@ impl Application for App {
                 self.context_page = context_page;
 
                 if let ContextPage::Preview(entity_opt, _) = &self.context_page {
+                    log::info!(
+                        "ToggleContextPage previewing JSON for entity {:?} with context page kind {:#?}",
+                        entity_opt,
+                        self.context_page
+                    );
                     let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
 
                     if let Some(tab) = self.tab_model.data::<Tab>(entity)
@@ -5017,34 +5023,48 @@ impl Application for App {
                         if let (Some(item), None) = (selected.next(), selected.next()) {
                             match item.location_opt.as_ref() {
                                 Some(Location::Remote(uri, _, _)) => {
+                                    log::info!(
+                                        "ToggleContextPage Remote previewing JSON from {}: {:#?}",
+                                        uri,
+                                        item.metadata
+                                    );
                                     if item.metadata.is_json() && !item.metadata.is_json_opt() {
-                                        if let Some(data) =
-                                            self.nav_model.data::<ClientData>(entity)
-                                        {
-                                            let client_key = data.0.clone();
-                                            let uri_cloned = uri.clone();
-                                            return Task::perform(
-                                                {
-                                                    let uri = uri.clone();
-                                                    async move {
-                                                        if let Some(client) =
-                                                            CLIENTS.get(&client_key)
-                                                        {
-                                                            client.load_json(uri.as_str())
-                                                        } else {
-                                                            None
-                                                        }
+                                        log::info!(
+                                            "JSON metadata is not loaded for {}, loading...",
+                                            uri
+                                        );
+
+                                        let uri_cloned = uri.clone();
+                                        log::info!(
+                                            "Spawning task to load JSON for {} with client key",
+                                            uri_cloned
+                                        );
+                                        return Task::perform(
+                                            {
+                                                let uri = uri.clone();
+                                                async move {
+                                                    if let Some(client) =
+                                                        CLIENTS.get(&ClientKey("russh"))
+                                                    {
+                                                        client.load_json(uri.as_str())
+                                                    } else {
+                                                        None
                                                     }
-                                                },
-                                                move |result| {
-                                                    cosmic::Action::App(Message::JsonLoaded(
-                                                        entity,
-                                                        uri_cloned.clone(),
-                                                        result,
-                                                    ))
-                                                },
-                                            );
-                                        }
+                                                }
+                                            },
+                                            move |result| {
+                                                log::info!(
+                                                    "JSON loaded for {}: {:#?}",
+                                                    uri_cloned,
+                                                    result
+                                                );
+                                                cosmic::Action::App(Message::JsonLoaded(
+                                                    entity,
+                                                    uri_cloned.clone(),
+                                                    result,
+                                                ))
+                                            },
+                                        );
                                     }
                                 }
                                 _ => {}

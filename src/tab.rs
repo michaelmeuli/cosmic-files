@@ -2705,6 +2705,7 @@ impl Item {
         _mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
         _military_time: bool,
     ) -> Element<'a, Message> {
+        log::info!("displaying JSON preview for {}: {:#?}", self.name, self.metadata);
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
