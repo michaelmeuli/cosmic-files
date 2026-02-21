@@ -95,7 +95,7 @@ fn virtual_remote_root_items(sizes: IconSizes) -> Result<Vec<tab::Item>, String>
         items.push(tab::Item {
             name,
             is_mount_point: false,
-            is_client_point: true,
+            is_client_point: false,
             display_name,
             metadata: ItemMetadata::SimpleDir { entries: 0 },
             hidden: false,
@@ -339,7 +339,7 @@ async fn remote_sftp_list(
         items.push(tab::Item {
             name: name.clone(),
             is_mount_point: false,
-            is_client_point: true,
+            is_client_point: false,
             display_name: name,
             metadata,
             hidden,
@@ -464,7 +464,7 @@ async fn remote_sftp_parent(
     let item = tab::Item {
         name: name.clone(),
         is_mount_point: false,
-        is_client_point: true,
+        is_client_point: false,
         display_name: name,
         metadata: item_metadata,
         hidden,
