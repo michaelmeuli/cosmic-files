@@ -222,6 +222,7 @@ async fn remote_sftp_list(
     uri: &str,
     sizes: IconSizes,
 ) -> Result<Vec<tab::Item>, String> {
+    log::info!("Listing remote directory: {}", uri);
     let mut remote_file = remote_file_from_uri(uri)?;
     let force_dir = uri.starts_with("ssh:///");
     let path = remote_file.path.clone();
@@ -264,7 +265,7 @@ async fn remote_sftp_list(
         .unwrap();
         url.set_path(&new_path.to_string_lossy());
         let child_uri = url.to_string();
-        let location = Location::Remote(child_uri, name.clone(), Some(new_path.clone()));
+        let location = Location::Remote(child_uri.clone(), name.clone(), Some(new_path.clone()));
 
         let metadata = if !force_dir {
             let mtime = info
@@ -280,9 +281,12 @@ async fn remote_sftp_list(
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             let mut json_opt = None;
             if is_json {
-                match load_remote_json(client, uri).await {
+                log::info!("Attempting to load JSON metadata for {}: {}", new_path.display(), child_uri);
+                match load_remote_json(client, &child_uri).await {
                     Ok(json) => {
                         json_opt = Some(json);
+                        log::info!("Loaded JSON metadata for {}: {}", new_path.display(), child_uri);
+                        log::info!("JSON content for {}: {}", new_path.display(), json_opt.as_ref().unwrap());
                     },
                     Err(e) => {
                         log::info!("Failed to load JSON for {}: {}", new_path.display(), e);
@@ -757,10 +761,6 @@ enum Cmd {
         Vec<String>,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
     ),
-    LoadJson(
-        String,
-        tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>,
-    ),
 }
 
 enum Event {
@@ -1006,6 +1006,7 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteScan(uri, sizes, items_tx) => {
+                            log::info!("RemoteScan for URI: {}", uri);
                             if uri == "ssh:///" {
                                 let result =
                                     virtual_remote_root_items(sizes).map_err(|e| e.to_string());
@@ -1238,49 +1239,6 @@ impl Russh {
                             .await;
                             let _ = result_tx.send(result);
                         }
-                        Cmd::LoadJson(uri, result_tx) => {
-                            let res: Result<serde_json::Value, String> = async {
-                                let remote_file = remote_file_from_uri(&uri)?;
-                                let host = remote_file.host.clone();
-                                let port = remote_file.port;
-                                let username = remote_file
-                                    .username
-                                    .clone()
-                                    .ok_or_else(|| "No username specified in URI".to_string())?;
-                                let existing_client = {
-                                    let read = clients.read().await;
-                                    read.get(&host).cloned()
-                                };
-                                let client: Arc<Client> = if let Some(client) = existing_client {
-                                    client
-                                } else {
-                                    let key_path = get_key_files()
-                                        .map(|pair| pair.0)
-                                        .map_err(|e| e.to_string())?;
-                                    let auth = AuthMethod::with_key_file(key_path, None);
-
-                                    let client = Client::connect(
-                                        (host.as_str(), port),
-                                        username.as_str(),
-                                        auth,
-                                        ServerCheckMethod::NoCheck,
-                                    )
-                                    .await
-                                    .map_err(|e| format!("connect failed: {e}"))?;
-
-                                    let client = Arc::new(client);
-                                    {
-                                        let mut write = clients.write().await;
-                                        write.insert(host.clone(), Arc::clone(&client));
-                                    }
-                                    client
-                                };
-
-                                load_remote_json(&client, &uri).await
-                            }
-                            .await;
-                            let _ = result_tx.send(res);
-                        }
                         Cmd::RunTbProfiler(paths, uris, result_tx) => {
                             let result: Result<String, anyhow::Error> = async {
                                 let remote_files: Vec<_> = uris
@@ -1451,14 +1409,6 @@ impl Connector for Russh {
                 }
             },
         )
-    }
-
-    fn load_json(&self, uri: &str) -> Option<serde_json::Value> {
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        self.command_tx
-            .send(Cmd::LoadJson(uri.to_string(), result_tx))
-            .unwrap();
-        result_rx.blocking_recv().ok().and_then(|res| res.ok())
     }
 
     fn subscription(&self) -> Subscription<ClientMessage> {

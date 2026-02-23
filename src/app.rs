@@ -375,7 +375,6 @@ pub enum Message {
     ExtractToResult(DialogResult),
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     Focused(window::Id),
-    JsonLoaded(Entity, String, Option<serde_json::Value>),
     Key(window::Id, Modifiers, Key, Option<SmolStr>),
     LaunchUrl(String),
     MaybeExit,
@@ -4996,7 +4995,6 @@ impl Application for App {
                 return self.update_config();
             }
             Message::ToggleContextPage(context_page) => {
-                log::info!("Toggling context page to {:#?}", context_page);
                 //TODO: ensure context menus are closed
                 if self.context_page == context_page
                     || matches!(self.context_page, ContextPage::Preview(_, _))
@@ -5006,54 +5004,6 @@ impl Application for App {
                     self.set_show_context(true);
                 }
                 self.context_page = context_page;
-
-                if let ContextPage::Preview(entity_opt, _) = &self.context_page {
-                    let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
-
-                    if let Some(tab) = self.tab_model.data::<Tab>(entity)
-                        && let Some(items) = tab.items_opt()
-                    {
-                        let mut selected = items.iter().filter(|item| item.selected);
-
-                        if let (Some(item), None) = (selected.next(), selected.next()) {
-                            match item.location_opt.as_ref() {
-                                Some(Location::Remote(uri, _, _)) => {
-                                    if item.metadata.is_json() && !item.metadata.is_json_opt() {
-                                        let uri_cloned = uri.clone();
-                                        return Task::perform(
-                                            {
-                                                let uri = uri.clone();
-                                                async move {
-                                                    tokio::task::spawn_blocking(move || {
-                                                        if let Some(client) =
-                                                            CLIENTS.get(&ClientKey("russh"))
-                                                        {
-                                                            client.load_json(uri.as_str())
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .await
-                                                    .ok()
-                                                    .flatten()
-                                                }
-                                            },
-                                            move |result| {
-                                                cosmic::Action::App(Message::JsonLoaded(
-                                                    entity,
-                                                    uri_cloned.clone(),
-                                                    result,
-                                                ))
-                                            },
-                                        );
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-
                 // Preview status is preserved across restarts
                 if matches!(self.context_page, ContextPage::Preview(_, _)) {
                     return cosmic::task::message(cosmic::action::app(Message::SetShowDetails(
@@ -5061,24 +5011,6 @@ impl Application for App {
                     )));
                 }
             }
-            Message::JsonLoaded(entity, uri, json_result) => {
-                if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {
-                    if let Some(items) = tab.items_opt_mut() {
-                        for item in items {
-                            if let Some(Location::Remote(item_uri, _, _)) = &item.location_opt {
-                                if item_uri == &uri {
-                                    item.metadata.set_json(json_result.clone());
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                return cosmic::task::message(cosmic::action::app(Message::ToggleContextPage(
-                    self.context_page.clone(),
-                )));
-            }
-
             Message::Undo(_id) => {
                 // TODO: undo
             }
