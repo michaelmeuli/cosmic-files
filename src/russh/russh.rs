@@ -278,6 +278,17 @@ async fn remote_sftp_list(
             let mut children_opt = None;
             let is_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
+            let mut json_opt = None;
+            if is_json {
+                match load_remote_json(client, uri).await {
+                    Ok(json) => {
+                        json_opt = Some(json);
+                    },
+                    Err(e) => {
+                        log::info!("Failed to load JSON for {}: {}", new_path.display(), e);
+                    }
+                }
+            }
             if is_dir {
                 let mut count = 0;
                 match sftp.read_dir(new_path.to_string_lossy().to_string()).await {
@@ -303,7 +314,7 @@ async fn remote_sftp_list(
                 size_opt,
                 children_opt,
                 is_json,
-                json_opt: None,
+                json_opt,
             }
         } else {
             ItemMetadata::SimpleDir { entries: 0 }
