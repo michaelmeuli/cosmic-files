@@ -1614,6 +1614,7 @@ impl Application for App {
                 self.update_nav_model();
 
                 return Task::batch(commands);
+            }
             Message::Mouse(window_id, _button) => {
                 // Close context menu when clicking outside.
                 if self.core.main_window_id() == Some(window_id) {
