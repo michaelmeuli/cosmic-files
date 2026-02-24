@@ -28,7 +28,7 @@ use cosmic::{
         event,
         futures::{self, SinkExt},
         keyboard::{Event as KeyEvent, Key, Modifiers},
-        stream,
+        mouse, stream,
         widget::scrollable,
         window::{self, Event as WindowEvent, Id as WindowId},
     },
@@ -73,8 +73,8 @@ use wayland_client::{Proxy, protocol::wl_output::WlOutput};
 use crate::{
     FxOrderMap,
     clipboard::{
-        ClipboardCopy, ClipboardKind, ClipboardPaste, ClipboardPasteImage, ClipboardPasteText,
-        ClipboardPasteVideo,
+        ClipboardCache, ClipboardCopy, ClipboardKind, ClipboardPaste, ClipboardPasteImage,
+        ClipboardPasteText, ClipboardPasteVideo,
     },
     config::{
         AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TIME_CONFIG_ID, TabConfig,
@@ -369,6 +369,7 @@ pub enum Message {
     ModifiersChanged(window::Id, Modifiers),
     MounterItems(MounterKey, MounterItems),
     MountResult(MounterKey, MounterItem, Result<bool, String>),
+    Mouse(window::Id, mouse::Button),
     MoveTo(Option<Entity>),
     MoveToResult(DialogResult),
     NavBarClose(Entity),
@@ -406,6 +407,11 @@ pub enum Message {
     PasteTextContents(PathBuf, ClipboardPasteText),
     PasteVideo(PathBuf),
     PasteVideoContents(PathBuf, ClipboardPasteVideo),
+    CheckClipboard,
+    CheckClipboardImage,
+    CheckClipboardVideo,
+    CheckClipboardText,
+    ClipboardCached(ClipboardCache),
     PendingCancel(u64),
     PendingCancelAll,
     PendingComplete(u64, OperationSelection),
@@ -760,9 +766,15 @@ pub struct App {
     tab_drag_id: DragId,
     auto_scroll_speed: Option<i16>,
     file_dialog_opt: Option<Dialog<Message>>,
+    clipboard_cache: ClipboardCache,
 }
 
 impl App {
+    /// Returns true if the clipboard cache contains pasteable content
+    fn clipboard_has_content(&self) -> bool {
+        !matches!(self.clipboard_cache, ClipboardCache::Empty)
+    }
+
     fn push_dialog(&mut self, page: DialogPage, focus_id: Option<widget::Id>) -> Task<Message> {
         let t = self.dialog_pages.push_back(page);
         if let Some(focus_id) = focus_id {
@@ -1554,6 +1566,21 @@ impl App {
         }
     }
 
+    fn close_context_menus(&mut self) -> Task<Message> {
+        let active = self.tab_model.active();
+        if let Some(tab) = self.tab_model.data_mut::<Tab>(active) {
+            tab.location_context_menu_index = None;
+            if tab.context_menu.is_some() {
+                return self.update(Message::TabMessage(
+                    Some(active),
+                    tab::Message::ContextMenu(None, None),
+                ));
+            }
+        }
+
+        Task::none()
+    }
+
     fn update_nav_model(&mut self) {
         let mut nav_model = segmented_button::ModelBuilder::default();
 
@@ -2295,11 +2322,12 @@ impl Application for App {
             tab_drag_id: DragId::new(),
             auto_scroll_speed: None,
             file_dialog_opt: None,
+            clipboard_cache: ClipboardCache::Empty,
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             layer_sizes: FxHashMap::default(),
         };
 
-        let mut commands = vec![app.update_config()];
+        let mut commands = vec![app.update_config(), app.update(Message::CheckClipboard)];
 
         for location in flags.locations {
             if let Some(path) = location.path_opt()
@@ -2594,11 +2622,12 @@ impl Application for App {
             self.set_show_context(false);
             return cosmic::task::message(cosmic::action::app(Message::SetShowDetails(false)));
         }
-        if self.search_get().is_some() {
-            // Close search if open
-            return self.search_set_active(None);
-        }
         if let Some(tab) = self.tab_model.data_mut::<Tab>(entity) {
+            if tab.location_context_menu_index.is_some() {
+                tab.location_context_menu_index = None;
+                return Task::none();
+            }
+
             if tab.context_menu.is_some() {
                 return self.update(Message::TabMessage(
                     Some(entity),
@@ -2619,6 +2648,11 @@ impl Application for App {
                 }
                 return Task::none();
             }
+        }
+
+        if self.search_get().is_some() {
+            // Close search if open
+            return self.search_set_active(None);
         }
 
         Task::none()
@@ -3304,6 +3338,12 @@ impl Application for App {
                     );
                 }
             },
+            Message::Mouse(window_id, _button) => {
+                // Close context menu when clicking outside.
+                if self.core.main_window_id() == Some(window_id) {
+                    return self.close_context_menus();
+                }
+            }
             Message::MoveTo(entity_opt) => {
                 let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                 return self.move_to(&selected_paths);
@@ -3630,15 +3670,39 @@ impl Application for App {
                     && let Some(path) = tab.location.path_opt()
                 {
                     let to = path.clone();
-                    return clipboard::read_data::<ClipboardPaste>().map(move |contents_opt| {
-                        match contents_opt {
-                            Some(contents) => {
-                                cosmic::action::app(Message::PasteContents(to.clone(), contents))
-                            }
-                            // No file data in clipboard, try image data
-                            None => cosmic::action::app(Message::PasteImage(to.clone())),
+
+                    // Use cached clipboard data if available (needed for Wayland popups)
+                    match &self.clipboard_cache {
+                        ClipboardCache::Files(contents) => {
+                            return self
+                                .update(Message::PasteContents(to.clone(), contents.clone()));
                         }
-                    });
+                        ClipboardCache::Image(contents) => {
+                            return self
+                                .update(Message::PasteImageContents(to.clone(), contents.clone()));
+                        }
+                        ClipboardCache::Video(contents) => {
+                            return self
+                                .update(Message::PasteVideoContents(to.clone(), contents.clone()));
+                        }
+                        ClipboardCache::Text(contents) => {
+                            return self
+                                .update(Message::PasteTextContents(to.clone(), contents.clone()));
+                        }
+                        ClipboardCache::Empty => {
+                            // Cache is empty, try reading from clipboard directly
+                            // (works when triggered from main window, e.g., Ctrl+V)
+                            return clipboard::read_data::<ClipboardPaste>().map(
+                                move |contents_opt| match contents_opt {
+                                    Some(contents) => cosmic::action::app(Message::PasteContents(
+                                        to.clone(),
+                                        contents,
+                                    )),
+                                    None => cosmic::action::app(Message::PasteImage(to.clone())),
+                                },
+                            );
+                        }
+                    }
                 }
             }
             Message::PasteContents(to, mut contents) => {
@@ -3752,6 +3816,48 @@ impl Application for App {
                         log::error!("Failed to save pasted text: {}", err);
                     }
                 }
+            }
+            Message::CheckClipboard => {
+                // Check if clipboard has any paste-able content and cache it
+                return clipboard::read_data::<ClipboardPaste>().map(|contents_opt| {
+                    match contents_opt {
+                        Some(contents) => cosmic::action::app(Message::ClipboardCached(
+                            ClipboardCache::Files(contents),
+                        )),
+                        None => cosmic::action::app(Message::CheckClipboardImage),
+                    }
+                });
+            }
+            Message::CheckClipboardImage => {
+                return clipboard::read_data::<ClipboardPasteImage>().map(|contents_opt| {
+                    match contents_opt {
+                        Some(contents) => cosmic::action::app(Message::ClipboardCached(
+                            ClipboardCache::Image(contents),
+                        )),
+                        None => cosmic::action::app(Message::CheckClipboardVideo),
+                    }
+                });
+            }
+            Message::CheckClipboardVideo => {
+                return clipboard::read_data::<ClipboardPasteVideo>().map(|contents_opt| {
+                    match contents_opt {
+                        Some(contents) => cosmic::action::app(Message::ClipboardCached(
+                            ClipboardCache::Video(contents),
+                        )),
+                        None => cosmic::action::app(Message::CheckClipboardText),
+                    }
+                });
+            }
+            Message::CheckClipboardText => {
+                return clipboard::read_data::<ClipboardPasteText>().map(|contents_opt| {
+                    cosmic::action::app(Message::ClipboardCached(match contents_opt {
+                        Some(contents) => ClipboardCache::Text(contents),
+                        None => ClipboardCache::Empty,
+                    }))
+                });
+            }
+            Message::ClipboardCached(cache) => {
+                self.clipboard_cache = cache;
             }
             Message::PendingCancel(id) => {
                 if let Some((_, controller)) = self.pending_operations.get(&id) {
@@ -4046,14 +4152,18 @@ impl Application for App {
                 ));
             }
             Message::SearchActivate => {
-                return if self.search_get().is_none() {
-                    self.search_set_active(Some(String::new()))
+                let mut tasks = vec![self.close_context_menus()];
+
+                if self.search_get().is_none() {
+                    tasks.push(self.search_set_active(Some(String::new())));
                 } else {
-                    widget::text_input::focus(self.search_id.clone())
+                    tasks.push(widget::text_input::focus(self.search_id.clone()));
                 };
+
+                return Task::batch(tasks);
             }
             Message::SearchClear => {
-                return self.search_set_active(None);
+                return Task::batch([self.close_context_menus(), self.search_set_active(None)]);
             }
             Message::SearchInput(input) => {
                 return self.search_set_active(Some(input));
@@ -4074,18 +4184,7 @@ impl Application for App {
                 return self.update_config();
             }
             Message::TabActivate(entity) => {
-                let mut tasks = Vec::new();
-
-                // Close old context menu
-                let active = self.tab_model.active();
-                if let Some(tab) = self.tab_model.data_mut::<Tab>(active)
-                    && tab.context_menu.is_some()
-                {
-                    tasks.push(self.update(Message::TabMessage(
-                        Some(active),
-                        tab::Message::ContextMenu(None, None),
-                    )));
-                }
+                let mut tasks = vec![self.close_context_menus()];
 
                 // Activate new tab
                 self.tab_model.activate(entity);
@@ -4316,6 +4415,7 @@ impl Application for App {
                         }
                         tab::Command::OpenFile(paths) => commands.push(self.open_file(&paths)),
                         tab::Command::OpenInNewTab(path) => {
+                            commands.push(self.close_context_menus());
                             commands.push(self.open_tab(Location::Path(path), false, None));
                         }
                         tab::Command::OpenInNewWindow(path) => match env::current_exe() {
@@ -4772,25 +4872,21 @@ impl Application for App {
                     }
                 }
                 NavMenuAction::OpenInNewTab(entity) => {
-                    match self.nav_model.data::<Location>(entity) {
-                        Some(Location::Network(uri, display_name, path)) => {
-                            return self.open_tab(
-                                Location::Network(uri.clone(), display_name.clone(), path.clone()),
-                                false,
-                                None,
-                            );
-                        }
+                    let open_task = match self.nav_model.data::<Location>(entity) {
+                        Some(Location::Network(uri, display_name, path)) => self.open_tab(
+                            Location::Network(uri.clone(), display_name.clone(), path.clone()),
+                            false,
+                            None,
+                        ),
                         Some(Location::Path(path)) => {
-                            return self.open_tab(Location::Path(path.clone()), false, None);
+                            self.open_tab(Location::Path(path.clone()), false, None)
                         }
-                        Some(Location::Recents) => {
-                            return self.open_tab(Location::Recents, false, None);
-                        }
-                        Some(Location::Trash) => {
-                            return self.open_tab(Location::Trash, false, None);
-                        }
-                        _ => {}
-                    }
+                        Some(Location::Recents) => self.open_tab(Location::Recents, false, None),
+                        Some(Location::Trash) => self.open_tab(Location::Trash, false, None),
+                        _ => Task::none(),
+                    };
+
+                    return Task::batch([self.close_context_menus(), open_task]);
                 }
 
                 // Open the selected path in a new cosmic-files window.
@@ -5024,6 +5120,8 @@ impl Application for App {
                         _ => {}
                     };
                 }
+                // Check clipboard when window gains focus
+                return self.update(Message::CheckClipboard);
             }
             Message::Surface(action) => {
                 return cosmic::task::message(cosmic::Action::Cosmic(
@@ -5978,6 +6076,7 @@ impl Application for App {
             &self.config,
             &self.modifiers,
             &self.key_binds,
+            self.clipboard_has_content(),
         )]
     }
 
@@ -6066,7 +6165,11 @@ impl Application for App {
         let entity = self.tab_model.active();
         if let Some(tab) = self.tab_model.data::<Tab>(entity) {
             let tab_view = tab
-                .view(&self.key_binds, &self.modifiers)
+                .view(
+                    &self.key_binds,
+                    &self.modifiers,
+                    self.clipboard_has_content(),
+                )
                 .map(move |message| Message::TabMessage(Some(entity), message));
             tab_column = tab_column.push(tab_view);
         } else {
@@ -6089,8 +6192,13 @@ impl Application for App {
                 WindowKind::ContextMenu(entity, id) => match self.tab_model.data::<Tab>(*entity) {
                     Some(tab) => {
                         return widget::autosize::autosize(
-                            menu::context_menu(tab, &self.key_binds, &window.modifiers)
-                                .map(|x| Message::TabMessage(Some(*entity), x)),
+                            menu::context_menu(
+                                tab,
+                                &self.key_binds,
+                                &window.modifiers,
+                                self.clipboard_has_content(),
+                            )
+                            .map(|x| Message::TabMessage(Some(*entity), x)),
                             id.clone(),
                         )
                         .into();
@@ -6102,7 +6210,11 @@ impl Application for App {
 
                     let tab_view = match self.tab_model.data::<Tab>(*entity) {
                         Some(tab) => tab
-                            .view(&self.key_binds, &window.modifiers)
+                            .view(
+                                &self.key_binds,
+                                &window.modifiers,
+                                self.clipboard_has_content(),
+                            )
                             .map(move |message| Message::TabMessage(Some(*entity), message)),
                         None => widget::vertical_space().into(),
                     };
@@ -6185,6 +6297,10 @@ impl Application for App {
         let mut subscriptions = vec![
             //TODO: filter more events by window id
             event::listen_with(|event, status, window_id| match event {
+                Event::Mouse(mouse::Event::ButtonPressed(button)) => match status {
+                    event::Status::Ignored => Some(Message::Mouse(window_id, button)),
+                    event::Status::Captured => None,
+                },
                 Event::Keyboard(KeyEvent::KeyPressed {
                     key,
                     modifiers,
@@ -6199,6 +6315,8 @@ impl Application for App {
                 }
                 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
                 Event::Window(WindowEvent::Focused) => Some(Message::Focused(window_id)),
+                #[cfg(not(all(feature = "wayland", feature = "desktop-applet")))]
+                Event::Window(WindowEvent::Focused) => Some(Message::CheckClipboard),
                 Event::Window(WindowEvent::CloseRequested) => Some(Message::WindowClose),
                 Event::Window(WindowEvent::Opened { position: _, size }) => {
                     Some(Message::Size(window_id, size))
