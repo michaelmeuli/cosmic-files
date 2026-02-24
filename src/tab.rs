@@ -1733,6 +1733,18 @@ impl Location {
             _ => path,
         }
     }
+
+    /// Returns true if this location supports paste operations (not Trash)
+    pub fn supports_paste(&self) -> bool {
+        matches!(
+            self,
+            Self::Desktop(..)
+                | Self::Path(..)
+                | Self::Search(..)
+                | Self::Recents
+                | Self::Network(_, _, Some(_))
+        )
+    }
 }
 
 pub struct TaskWrapper(pub cosmic::Task<Message>);
@@ -2355,6 +2367,28 @@ impl Item {
     fn display_name(name: &str) -> String {
         // In order to wrap at periods and underscores, add a zero width space after each one
         name.replace('.', ".\u{200B}").replace('_', "_\u{200B}")
+    }
+
+    /// Text widget for a filename in grid/icon view: word-or-glyph wrapping, middle-ellipsized to 3 lines.
+    fn grid_display_name<'a>(
+        name: impl Into<Cow<'a, str>> + 'a,
+    ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
+        widget::text::body(name)
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .ellipsize(text::Ellipsize::Middle(
+                text::EllipsizeHeightLimit::Lines(3),
+            ))
+    }
+
+    /// Text widget for a filename in list view: word-or-glyph wrapping, middle-ellipsized to 1 line.
+    fn list_display_name<'a>(
+        name: impl Into<Cow<'a, str>> + 'a,
+    ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
+        widget::text::body(name)
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .ellipsize(text::Ellipsize::Middle(
+                text::EllipsizeHeightLimit::Lines(1),
+            ))
     }
 
     pub fn path_opt(&self) -> Option<&PathBuf> {
@@ -4948,6 +4982,7 @@ impl Tab {
                 vertical_alignment: Vertical::Top,
                 shaping: text::Shaping::default(),
                 wrapping: text::Wrapping::None,
+                ellipsize: text::Ellipsize::End(text::EllipsizeHeightLimit::Lines(1)),
             };
             graphics::text::Paragraph::with_text(text)
                 .min_bounds()
@@ -5172,7 +5207,11 @@ impl Tab {
                     let (name_width, name_text) = if children.is_empty() {
                         (
                             text_width_heading(&name),
-                            widget::text::heading(name).wrapping(text::Wrapping::None),
+                            widget::text::heading(name)
+                                .wrapping(text::Wrapping::None)
+                                .ellipsize(text::Ellipsize::End(
+                                    text::EllipsizeHeightLimit::Lines(1),
+                                )),
                         )
                     } else {
                         children.push(
@@ -5484,7 +5523,7 @@ impl Tab {
                         ))
                         .into(),
                         widget::tooltip(
-                            widget::button::custom(widget::text::body(&item.display_name))
+                            widget::button::custom(Item::grid_display_name(&item.display_name))
                                 .id(item.button_id.clone())
                                 .padding([0, space_xxxs])
                                 .class(button_style(
@@ -5649,18 +5688,20 @@ impl Tab {
                                 false,
                                 false,
                             )),
-                            widget::button::custom(widget::text::body(item.display_name.clone()))
-                                .id(item.button_id.clone())
-                                .on_press(Message::Click(Some(*i)))
-                                .padding([0, space_xxxs])
-                                .class(button_style(
-                                    item.selected,
-                                    item.highlighted,
-                                    item.cut,
-                                    true,
-                                    true,
-                                    false,
-                                )),
+                            widget::button::custom(
+                                Item::grid_display_name(item.display_name.clone()),
+                            )
+                            .id(item.button_id.clone())
+                            .on_press(Message::Click(Some(*i)))
+                            .padding([0, space_xxxs])
+                            .class(button_style(
+                                item.selected,
+                                item.highlighted,
+                                item.cut,
+                                true,
+                                true,
+                                false,
+                            )),
                         ];
 
                         let column =
@@ -5878,7 +5919,7 @@ impl Tab {
                                 .size(icon_size)
                                 .into(),
                             widget::column::with_children([
-                                widget::text::body(item.display_name.clone()).into(),
+                                Item::list_display_name(item.display_name.clone()).into(),
                                 //TODO: translate?
                                 widget::text::caption(format!("{modified_text} - {size_text}"))
                                     .into(),
@@ -5895,7 +5936,7 @@ impl Tab {
                                 .size(icon_size)
                                 .into(),
                             widget::column::with_children([
-                                widget::text::body(item.display_name.clone()).into(),
+                                Item::list_display_name(item.display_name.clone()).into(),
                                 widget::text::caption(match item.path_opt() {
                                     Some(path) => path.display().to_string(),
                                     None => String::new(),
@@ -5920,7 +5961,7 @@ impl Tab {
                                 .content_fit(ContentFit::Contain)
                                 .size(icon_size)
                                 .into(),
-                            widget::text::body(item.display_name.clone())
+                            Item::list_display_name(item.display_name.clone())
                                 .width(Length::Fill)
                                 .into(),
                             widget::text::body(modified_text.clone())
@@ -5987,7 +6028,7 @@ impl Tab {
                                     .size(icon_size)
                                     .into(),
                                 widget::column::with_children([
-                                    widget::text::body(item.display_name.clone()).into(),
+                                    Item::list_display_name(item.display_name.clone()).into(),
                                     //TODO: translate?
                                     widget::text::body(format!("{modified_text} - {size_text}"))
                                         .into(),
@@ -6004,7 +6045,7 @@ impl Tab {
                                     .size(icon_size)
                                     .into(),
                                 widget::column::with_children([
-                                    widget::text::body(item.display_name.clone()).into(),
+                                    Item::list_display_name(item.display_name.clone()).into(),
                                     widget::text::caption(match item.path_opt() {
                                         Some(path) => path.display().to_string(),
                                         None => String::new(),
@@ -6029,7 +6070,7 @@ impl Tab {
                                     .content_fit(ContentFit::Contain)
                                     .size(icon_size)
                                     .into(),
-                                widget::text::body(item.display_name.clone())
+                                Item::list_display_name(item.display_name.clone())
                                     .width(Length::Fill)
                                     .into(),
                                 widget::text(modified_text)
@@ -6111,6 +6152,7 @@ impl Tab {
         key_binds: &'a HashMap<KeyBind, Action>,
         modifiers: &'a Modifiers,
         size: Size,
+        clipboard_paste_available: bool,
     ) -> Element<'a, Message> {
         // Update cached size
         self.size_opt.set(Some(size));
@@ -6198,7 +6240,8 @@ impl Tab {
         if let Some(point) = self.context_menu
             && (!cfg!(feature = "wayland") || !crate::is_wayland())
         {
-            let context_menu = menu::context_menu(self, key_binds, modifiers);
+            let context_menu =
+                menu::context_menu(self, key_binds, modifiers, clipboard_paste_available);
             popover = popover
                 .popup(context_menu)
                 .position(widget::popover::Position::Point(point));
@@ -6436,8 +6479,12 @@ impl Tab {
         &'a self,
         key_binds: &'a HashMap<KeyBind, Action>,
         modifiers: &'a Modifiers,
+        clipboard_paste_available: bool,
     ) -> Element<'a, Message> {
-        widget::responsive(|size| self.view_responsive(key_binds, modifiers, size)).into()
+        widget::responsive(move |size| {
+            self.view_responsive(key_binds, modifiers, size, clipboard_paste_available)
+        })
+        .into()
     }
 
     pub fn subscription(&self, preview: bool) -> Subscription<Message> {
