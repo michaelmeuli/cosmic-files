@@ -1,0 +1,38 @@
+Genetische Resistenzprüfung ab Kultur/Direktmaterial per line probe assay (AID Teststreifen):
+
+Isoniazid: katG-Gen: 		Codon S315T Mutation vorhanden
+
+Isoniazid/Ethionamid: inhA-Promotor (Positionen -16,-15,-8): Mutation vorhanden
+
+Rifampicin: rpoB-Gen: 	Codon D516V/Y Mutation vorhanden (E. coli Nummerierung)		p.Asp435Val, p.Asp435Tyr    
+				Codon H526Y/D/R Mutation vorhanden (E. coli Nummerierung)			p.His445Tyr, p.His445Asp, p.His445Arg
+				Codon S531L/W Mutation vorhanden (E. coli Nummerierung)				p.Ser450Leu, p.Ser450Trp
+
+Streptomycin: rpsL-Gen:	Codon K43R Mutation vorhanden
+				Codon K88R Mutation vorhanden 
+				Codon K88Q Mutation vorhanden
+
+Streptomycin: rrs-Gen: 	Position C522T Mutation vorhanden (E. coli Nummerierung) 
+				Position A523C Mutation vorhanden (E. coli Nummerierung) 
+				Position G524C Mutation vorhanden (E. coli Nummerierung) 
+				Position C526T Mutation vorhanden (E. coli Nummerierung)
+
+Amikacin / Kanamycin: rrs-Gen: 	Position A1408G Mutation vorhanden (E. coli Nummerierung)
+					Position C1409T Mutation vorhanden (E. coli Nummerierung)
+
+Amikacin / Kanamycin/ Capreomycin: rrs-Gen: 	Position G1491C/T Mutation vorhanden (E. coli Nummerierung) 
+
+Fluorochinolone: gyrA-Gen: 	Codon A90V Mutation vorhanden  
+				Codon S91P Mutation vorhanden 
+				Codon D94A Mutation vorhanden 
+				Codon D94N Mutation vorhanden 
+				Codon D94Y Mutation vorhanden 
+				Codon D94G Mutation vorhanden
+
+Ethambutol: embB-Gen:	Codon M306V Mutation vorhanden 
+				Codon M306I Mutation vorhanden
+
+
+
+
+Assoc w R   (Assoc w R - Interim)
