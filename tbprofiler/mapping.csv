@@ -1,4 +1,4 @@
-ecoli, hgvs, gene, drug, confidence, report
+ecoli, Mutation, Gene, drug, confidence, report
 D516V, p.Asp435Val, rpoB, rifampicin, Assoc w R, yes
 D516Y, p.Asp435Tyr, rpoB, rifampicin, Assoc w R, yes
 D516F, p.Asp435Phe, rpoB, rifampicin, Assoc w R, no
