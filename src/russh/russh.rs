@@ -18,22 +18,16 @@ use std::{
 use tokio::sync::{Mutex, RwLock, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
-use super::{ TbProfilerJson, Pipeline, DbVersion, DrVariant };
 
 use crate::{
     config::IconSizes,
     fl,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
+    russh::jsondata::TbProfilerJson,
 };
 use mime_guess::MimeGuess;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Builder;
-
-
-
-
-
-
 
 
 
