@@ -92,7 +92,9 @@ use crate::{
     mounter::MOUNTERS,
     mouse_area,
     operation::{Controller, OperationError},
-    russh::CLIENTS,
+    russh::{
+        CLIENTS, TbProfilerJson,
+    },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
 };
@@ -1913,7 +1915,7 @@ pub enum ItemMetadata {
         size_opt: Option<u64>,
         children_opt: Option<usize>,
         is_json: bool,
-        json_opt: Option<serde_json::Value>,
+        json_opt: Option<TbProfilerJson>,
     },
 }
 
@@ -1983,7 +1985,7 @@ impl ItemMetadata {
         }
     }
 
-    pub fn set_json(&mut self, json: Option<serde_json::Value>) {
+    pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
         if let Self::RusshPath { json_opt, .. } = self {
             *json_opt = json;
         }
@@ -2399,9 +2401,9 @@ impl Item {
     ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
         widget::text::body(name)
             .wrapping(text::Wrapping::WordOrGlyph)
-            .ellipsize(text::Ellipsize::Middle(
-                text::EllipsizeHeightLimit::Lines(3),
-            ))
+            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
+                3,
+            )))
     }
 
     /// Text widget for a filename in list view: word-or-glyph wrapping, middle-ellipsized to 1 line.
@@ -2410,9 +2412,9 @@ impl Item {
     ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
         widget::text::body(name)
             .wrapping(text::Wrapping::WordOrGlyph)
-            .ellipsize(text::Ellipsize::Middle(
-                text::EllipsizeHeightLimit::Lines(1),
-            ))
+            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
+                1,
+            )))
     }
 
     pub fn path_opt(&self) -> Option<&PathBuf> {
@@ -2739,7 +2741,11 @@ impl Item {
         _mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
         _military_time: bool,
     ) -> Element<'a, Message> {
-        log::info!("displaying JSON preview for {}: {:#?}", self.name, self.metadata);
+        log::info!(
+            "displaying JSON preview for {}: {:#?}",
+            self.name,
+            self.metadata
+        );
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -2775,10 +2781,32 @@ impl Item {
                         }
                     }
                 } else {
-                    if let Some(json) = json_opt.clone()
-                    {
-                        log::info!("displaying JSON metadata for {}: {json:#?}", self.name);
-                        column = column.push(widget::text::body(format!("JSON: {json}")));
+                    if let Some(json) = json_opt.clone() {
+                        //log::info!("displaying JSON metadata for {}: {json:#?}", self.name);
+                        //column = column.push(widget::text::body(format!("JSON: {json}")));
+                        column = column.push(widget::text::heading(format!(
+                            "DB: {} ({})",
+                            json.pipeline.db_version.name, json.pipeline.db_version.commit
+                        )));
+                        for v in &json.dr_variants {
+                            column = column.push(widget::container(
+                                widget::column()
+                                    .push(widget::text::body(format!(
+                                        "{} ({}) — {}",
+                                        v.gene_name, v.gene_id, v.change
+                                    )))
+                                    .push({
+                                        let mut ann_col = widget::column();
+                                        for ann in &v.annotation {
+                                            ann_col = ann_col.push(widget::text::body(format!(
+                                                "• {} — {}",
+                                                ann.drug, ann.confidence
+                                            )));
+                                        }
+                                        ann_col
+                                    }),
+                            ));
+                        }
                     }
                     if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
                     {
@@ -5792,9 +5820,9 @@ impl Tab {
                                 false,
                                 false,
                             )),
-                            widget::button::custom(
-                                Item::grid_display_name(item.display_name.clone()),
-                            )
+                            widget::button::custom(Item::grid_display_name(
+                                item.display_name.clone(),
+                            ))
                             .id(item.button_id.clone())
                             .on_press(Message::Click(Some(*i)))
                             .padding([0, space_xxxs])

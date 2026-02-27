@@ -18,6 +18,8 @@ use std::{
 use tokio::sync::{Mutex, RwLock, mpsc};
 
 use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
+use super::{ TbProfilerJson, Pipeline, DbVersion, DrVariant };
+
 use crate::{
     config::IconSizes,
     fl,
@@ -26,6 +28,14 @@ use crate::{
 use mime_guess::MimeGuess;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Builder;
+
+
+
+
+
+
+
+
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
@@ -508,7 +518,7 @@ async fn remote_sftp_parent(
     Ok(item)
 }
 
-async fn load_remote_json(client: &Client, uri: &str) -> Result<serde_json::Value, String> {
+async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, String> {
     let remote_file = remote_file_from_uri(&uri)?;
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     channel
@@ -526,7 +536,9 @@ async fn load_remote_json(client: &Client, uri: &str) -> Result<serde_json::Valu
     file.read_to_string(&mut contents)
         .await
         .map_err(|e| e.to_string())?;
-    serde_json::from_str(&contents).map_err(|e| e.to_string())
+    
+    let parsed: TbProfilerJson = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+    Ok(parsed)
 }
 
 async fn perform_download(
