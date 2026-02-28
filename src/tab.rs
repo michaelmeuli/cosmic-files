@@ -2769,7 +2769,9 @@ impl Item {
                             "DB: {} ({})",
                             json.pipeline.db_version.name, json.pipeline.db_version.commit
                         )));
-                        for v in &json.dr_variants {
+                        let mut dr_variants = json.dr_variants.clone();
+                        dr_variants.sort_by_key(|v| v.highest_confidence_rank());
+                        for v in &dr_variants {
                             column = column.push(widget::container(
                                 widget::column()
                                     .push({

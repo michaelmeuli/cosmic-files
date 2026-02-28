@@ -2,8 +2,16 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-const TB_ECOLI_MAPPING_CSV: &str = include_str!("../../res/tb_ecoli_mapping.csv");
-
+fn confidence_rank(conf: &str) -> u8 {
+    match conf {
+        "Assoc w R" => 0,
+        "Assoc w R - Interim" => 1,
+        "Uncertain significance" => 2,
+        "Not assoc w R - Interim" => 3,
+        "Not assoc w R" => 4,
+        _ => 5, // unknown / fallback
+    }
+}
 #[derive(Debug, Deserialize, Clone)]
 pub struct TbProfilerJson {
     pub pipeline: Pipeline,
@@ -40,6 +48,16 @@ pub struct DrVariant {
     pub change: String,
     #[serde(default)]
     pub drugs: Vec<Drugs>,
+}
+
+impl DrVariant {
+    pub fn highest_confidence_rank(&self) -> u8 {
+        self.drugs
+            .iter()
+            .map(|d| confidence_rank(d.confidence.as_str()))
+            .min() // strongest (lowest number)
+            .unwrap_or(5)
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
