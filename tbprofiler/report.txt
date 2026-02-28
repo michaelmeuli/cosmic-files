@@ -1,6 +1,6 @@
 Genetische Resistenzprüfung ab Kultur/Direktmaterial per line probe assay (AID Teststreifen):
 
-Isoniazid: katG-Gen: 		Codon S315T Mutation vorhanden
+Isoniazid: katG-Gen: 		Codon S315T Mutation vorhanden							p.Ser315Thr
 
 Isoniazid/Ethionamid: inhA-Promotor (Positionen -16,-15,-8): Mutation vorhanden
 
