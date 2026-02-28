@@ -93,6 +93,7 @@ use crate::{
     mouse_area,
     operation::{Controller, OperationError},
     russh::CLIENTS,
+    russh::jsondata::TB_ECOLI_MAPPING,
     russh::jsondata::TbProfilerJson,
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
@@ -2774,7 +2775,10 @@ impl Item {
                                     .push({
                                         let mut drug_col = widget::column();
                                         for drug in &v.drugs {
-                                            drug_col = drug_col.push(widget::text::body(format!("{}: {}", drug.drug, drug.confidence)));
+                                            drug_col = drug_col.push(widget::text::body(format!(
+                                                "{}: {}",
+                                                drug.drug, drug.confidence
+                                            )));
                                         }
                                         drug_col
                                     })
@@ -2782,6 +2786,15 @@ impl Item {
                                         "{} ({}): {}",
                                         v.gene_name, v.gene_id, v.change
                                     )))
+                                    .push({
+                                        let mut ecoli_col = widget::column();
+                                        if let Some(ecoli_value) = TB_ECOLI_MAPPING.get(&(v.gene_name.clone(), v.change.clone())) {
+                                            ecoli_col = ecoli_col.push(widget::text::body(
+                                                format!("E. coli: {}", ecoli_value),
+                                            ));
+                                        }
+                                        ecoli_col
+                                    }),
                             ));
                         }
                     }

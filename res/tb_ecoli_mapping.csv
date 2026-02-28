@@ -1,0 +1,27 @@
+ecoli,Mutation,Gene,drug,confidence,report
+S315T,p.Ser315Thr,katG,isoniazid,Assoc w R,yes
+inhA-Promotor (Positionen -16),inhA,c.-778A>G,isoniazid,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -16),inhA,c.-778A>G,ethionamide,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -15),inhA,c.-777C>T,isoniazid,Assoc w R,yes
+inhA-Promotor (Positionen -15),inhA,c.-777C>T,ethionamide,Assoc w R,yes
+inhA-Promotor (Positionen -8),inhA,c.-770T>A,isoniazid,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -8),inhA,c.-770T>C,isoniazid,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -8),inhA,c.-770T>G,isoniazid,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -8),inhA,c.-770T>A,ethionamide,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -8),inhA,c.-770T>C,ethionamide,Assoc w R - Interim,yes
+inhA-Promotor (Positionen -8),inhA,c.-770T>G,ethionamide,Assoc w R - Interim,yes
+D516V,p.Asp435Val,rpoB,rifampicin,Assoc w R,yes
+D516Y,p.Asp435Tyr,rpoB,rifampicin,Assoc w R,yes
+D516F,p.Asp435Phe,rpoB,rifampicin,Assoc w R,no
+H526Y,p.His445Tyr,rpoB,rifampicin,Assoc w R,yes
+H526D,p.His445Asp,rpoB,rifampicin,Assoc w R,yes
+H526R,p.His445Arg,rpoB,rifampicin,Assoc w R,yes
+H526N,p.His445Asn,rpoB,rifampicin,Assoc w R,no
+H526C,p.His445Cys,rpoB,rifampicin,Assoc w R,no
+H526L,p.His445Leu,rpoB,rifampicin,Assoc w R,no
+H526S,p.His445Ser,rpoB,rifampicin,Assoc w R,no
+S531L,p.Ser450Leu,rpoB,rifampicin,Assoc w R,yes
+S531W,p.Ser450Trp,rpoB,rifampicin,Assoc w R,yes
+S531F,p.Ser450Phe,rpoB,rifampicin,Assoc w R,no
+S531Y,p.Ser450Tyr,rpoB,rifampicin,Assoc w R,no
+

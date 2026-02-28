@@ -1,4 +1,8 @@
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+const TB_ECOLI_MAPPING_CSV: &str = include_str!("../../res/tb_ecoli_mapping.csv");
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TbProfilerJson {
@@ -36,7 +40,6 @@ pub struct DrVariant {
     pub change: String,
     #[serde(default)]
     pub drugs: Vec<Drugs>,
-
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -44,3 +47,27 @@ pub struct Drugs {
     pub drug: String,
     pub confidence: String,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+struct TBMappingRow {
+    ecoli: String,
+
+    #[serde(rename = "Mutation")]
+    mutation: String,
+    #[serde(rename = "Gene")]
+    gene: String,
+}
+
+pub static TB_ECOLI_MAPPING: LazyLock<HashMap<(String, String), String>> = LazyLock::new(|| {
+    let mut rdr =
+        csv::Reader::from_reader(include_str!("../../res/tb_ecoli_mapping.csv").as_bytes());
+    let mut map = HashMap::new();
+    for row in rdr.deserialize::<TBMappingRow>() {
+        let row = row.unwrap();
+        map.insert(
+            (row.gene.trim().to_string(), row.mutation.trim().to_string()),
+            row.ecoli.trim().to_string(),
+        );
+    }
+    map
+});
