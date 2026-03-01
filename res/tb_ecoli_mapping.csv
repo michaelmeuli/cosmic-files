@@ -24,4 +24,18 @@ S531L,p.Ser450Leu,rpoB,rifampicin,Assoc w R,yes
 S531W,p.Ser450Trp,rpoB,rifampicin,Assoc w R,yes
 S531F,p.Ser450Phe,rpoB,rifampicin,Assoc w R,no
 S531Y,p.Ser450Tyr,rpoB,rifampicin,Assoc w R,no
-
+K43R,p.Lys43Arg,rpsL,streptomycin,Assoc w R,yes
+K88R,p.Lys88Arg,rpsL,streptomycin,Assoc w R,yes
+K88Q,p.Lys88Gln,rpsL,streptomycin,Assoc w R,yes
+C522T,n.513C>T,rrs,streptomycin,Uncertain significance,yes
+A523C,n.514A>C,rrs,streptomycin,Assoc w R,yes
+C526T,n.517C>T,rrs,streptomycin,Assoc w R,yes
+A1408G,n.1401A>G,rrs,amikacin,Assoc w R,yes
+A1408G,n.1401A>G,rrs,kanamycin,Assoc w R,yes
+A1408G,n.1401A>G,rrs,capreomycin,Assoc w R,no
+C1409T,n.1402C>T,rrs,amikacin,Assoc w R - Interim,yes
+C1409T,n.1402C>T,rrs,kanamycin,Assoc w R - Interim,yes
+C1409T,n.1402C>T,rrs,capreomycin,Assoc w R,no
+G1491T,n.1484G>T,rrs,amikacin,Assoc w R,yes
+G1491T,n.1484G>T,rrs,kanamycin,Assoc w R,yes
+G1491T,n.1484G>T,rrs,capreomycin,Assoc w R,yes
