@@ -198,6 +198,7 @@ pub enum Action {
     SelectAll,
     SetSort(HeadingOptions, bool),
     Settings,
+    TBSettings,
     TabClose,
     TabNew,
     TabNext,
@@ -274,6 +275,7 @@ impl Action {
                 Message::TabMessage(entity_opt, tab::Message::SetSort(*sort, *dir))
             }
             Self::Settings => Message::ToggleContextPage(ContextPage::Settings),
+            Self::TBSettings => Message::ToggleContextPage(ContextPage::TBSettings),
             Self::TabClose => Message::TabClose(entity_opt),
             Self::TabNew => Message::TabNew,
             Self::TabNext => Message::TabNext,
@@ -502,6 +504,10 @@ pub enum Message {
     None,
     Surface(surface::Action),
     CutPaths(Vec<PathBuf>),
+    SetTbScriptPath(String),
+    SetTbRawSequenceDirPaired(String),
+    SetTbOutDir(String),
+    SetTbDocxTemplatePath(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -512,6 +518,7 @@ pub enum ContextPage {
     RemoteDrive,
     Preview(Option<Entity>, PreviewKind),
     Settings,
+    TBSettings,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -2302,6 +2309,35 @@ impl App {
         .into()
     }
 
+    fn tb_settings(&self) -> Element<'_, Message> {
+        widget::settings::view_column(vec![
+            widget::settings::section()
+                .title("TB Profiler")
+                .add(
+                    widget::settings::item::builder("TB Profiler script path").control(
+                        widget::text_input("", &self.config.tb_config.script_path)
+                            .on_input(Message::SetTbScriptPath),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("TB raw sequence dir paired").control(
+                        widget::text_input("", &self.config.tb_config.raw_sequence_dir_paired)
+                            .on_input(Message::SetTbRawSequenceDirPaired),
+                    ),
+                )
+                .add(widget::settings::item::builder("TB Profiler output directory").control(
+                    widget::text_input("", &self.config.tb_config.out_dir)
+                            .on_input(Message::SetTbOutDir),
+                ))
+                .add(widget::settings::item::builder("TB DOCX Template Path").control(
+                    widget::text_input("", &self.config.tb_config.docx_template_path).
+                            on_input(Message::SetTbDocxTemplatePath),
+                ))
+                .into(),
+        ])
+        .into()
+    }
+
     fn get_apps_for_mime(&self, mime_type: &Mime) -> Vec<(&MimeApp, MimeAppMatch)> {
         let mut results = Vec::new();
 
@@ -3930,7 +3966,7 @@ impl Application for App {
                     let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                     let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
                     return client
-                        .run_tb_profiler(selected_paths, selected_uris)
+                        .run_tb_profiler(selected_paths, selected_uris, self.config.tb_config.clone())
                         .map(|()| cosmic::action::none());
                 }
             }
@@ -5708,6 +5744,30 @@ impl Application for App {
             }) => {
                 _ = self.tab_model.reorder(dragged, target, position);
             }
+            Message::SetTbScriptPath(script_path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.script_path = script_path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbRawSequenceDirPaired(raw_sequence_dir_paired) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.raw_sequence_dir_paired = raw_sequence_dir_paired;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbOutDir(out_dir) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.out_dir = out_dir;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbDocxTemplatePath(docx_template_path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.docx_template_path = docx_template_path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
         }
 
         Task::none()
@@ -5804,6 +5864,11 @@ impl Application for App {
                 Message::ToggleContextPage(ContextPage::Settings),
             )
             .title(fl!("settings")),
+            ContextPage::TBSettings => context_drawer::context_drawer(
+                self.tb_settings(),
+                Message::ToggleContextPage(ContextPage::TBSettings),
+            )
+            .title("TB Profiler Settings"),
         })
     }
 
@@ -6619,21 +6684,19 @@ impl Application for App {
                     dialog
                         .control(
                             widget::checkbox(
-                                format!("{} ({})" ,fl!("apply-to-all"), *conflict_count),
+                                format!("{} ({})", fl!("apply-to-all"), *conflict_count),
                                 *apply_to_all,
                             )
-                                .on_toggle(
-                                |apply_to_all| {
-                                    Message::DialogUpdate(DialogPage::Replace {
-                                        from: from.clone(),
-                                        to: to.clone(),
-                                        multiple: *multiple,
-                                        apply_to_all,
-                                        conflict_count: *conflict_count,
-                                        tx: tx.clone(),
-                                    })
-                                },
-                            ),
+                            .on_toggle(|apply_to_all| {
+                                Message::DialogUpdate(DialogPage::Replace {
+                                    from: from.clone(),
+                                    to: to.clone(),
+                                    multiple: *multiple,
+                                    apply_to_all,
+                                    conflict_count: *conflict_count,
+                                    tx: tx.clone(),
+                                })
+                            }),
                         )
                         .secondary_action(
                             widget::button::standard(fl!("skip")).on_press(Message::ReplaceResult(

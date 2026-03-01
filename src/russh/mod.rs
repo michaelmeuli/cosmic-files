@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{config::IconSizes, tab};
+use crate::{config::IconSizes, tab, config::TBConfig};
 
 #[cfg(feature = "russh")]
 mod russh;
@@ -120,7 +120,7 @@ pub trait Connector: Send + Sync {
     fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)>;
     fn disconnect(&self, item: ClientItem) -> Task<()>;
     fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf) -> Task<()>;
-    fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()>;
+    fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>, tb_config: TBConfig) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 

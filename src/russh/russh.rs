@@ -29,6 +29,8 @@ use mime_guess::MimeGuess;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Builder;
 
+use crate::config::TBConfig;
+
 
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
@@ -631,6 +633,7 @@ pub fn download_unique_path(from: &Path, to: &Path, reserved: &mut HashSet<PathB
 pub async fn run_tbprofiler(
     client: &Client,
     paths: Box<[PathBuf]>,
+    tb_config: TBConfig,
 ) -> Result<String, anyhow::Error> {
     let mut sample_map: BTreeMap<String, BTreeSet<u8>> = BTreeMap::new();
     for path in paths.iter() {
@@ -671,11 +674,11 @@ pub async fn run_tbprofiler(
     let command_run_tbprofiler = format!(
         "sbatch --array 0-{} {} \"{}\" {} {} {}",
         array_end,
-        "/shares/sander.imm.uzh/MM/PRJEB57919/scripts/tbprofiler.sh",
+        tb_config.script_path,
         sample_ids_string,
-        "/shares/sander.imm.uzh/MM/PRJEB57919/raw",
-        "/shares/sander.imm.uzh/MM/PRJEB57919/out",
-        "/shares/sander.imm.uzh/MM/PRJEB57919/template/user_template.docx",
+        tb_config.raw_sequence_dir_paired,
+        tb_config.out_dir,
+        tb_config.docx_template_path,
     );
     let res = client.execute(&command_run_tbprofiler).await?;
     if res.exit_status != 0 {
@@ -765,7 +768,9 @@ enum Cmd {
     RunTbProfiler(
         Box<[PathBuf]>,
         Vec<String>,
+        TBConfig,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
+        
     ),
 }
 
@@ -1245,7 +1250,7 @@ impl Russh {
                             .await;
                             let _ = result_tx.send(result);
                         }
-                        Cmd::RunTbProfiler(paths, uris, result_tx) => {
+                        Cmd::RunTbProfiler(paths, uris, tb_config, result_tx) => {
                             let result: Result<String, anyhow::Error> = async {
                                 let remote_files: Vec<_> = uris
                                     .iter()
@@ -1268,7 +1273,7 @@ impl Russh {
                                     read.get(&host).cloned()
                                 }
                                 .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
-                                run_tbprofiler(&client, paths.clone()).await
+                                run_tbprofiler(&client, paths.clone(), tb_config).await
                             }
                             .await;
                             let _ = result_tx.send(result);
@@ -1398,14 +1403,14 @@ impl Connector for Russh {
         )
     }
 
-    fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()> {
+    fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>, tb_config: TBConfig) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
             async move {
                 let (res_tx, res_rx) = tokio::sync::oneshot::channel();
 
                 command_tx
-                    .send(Cmd::RunTbProfiler(paths, uris, res_tx))
+                    .send(Cmd::RunTbProfiler(paths, uris, tb_config, res_tx))
                     .unwrap();
                 res_rx.await
             },
