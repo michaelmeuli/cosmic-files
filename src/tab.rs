@@ -922,6 +922,7 @@ pub fn item_from_trash_entry(
         name,
         display_name,
         is_mount_point: false,
+        is_client_point: false,
         metadata: ItemMetadata::Trash { metadata, entry },
         hidden: false,
         location_opt: None,

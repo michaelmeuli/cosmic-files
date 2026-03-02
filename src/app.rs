@@ -5165,6 +5165,9 @@ impl Application for App {
                         Some(Location::Trash | Location::Search(SearchLocation::Trash, ..)) => {
                             command.arg("--trash");
                         }
+                        Some(Location::Remote(uri, ..)) => {
+                            command.arg(uri);
+                        }
                         None => {}
                     };
 
