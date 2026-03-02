@@ -94,7 +94,8 @@ use crate::{
     },
     spawn_detached::spawn_detached,
     tab::{
-        self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK, Tab,
+        self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
+        SearchLocation, Tab,
     },
     zoom::{zoom_in_view, zoom_out_view, zoom_to_default},
 };
@@ -1384,7 +1385,9 @@ impl App {
             .iter()
             .filter_map(|entity| {
                 let tab = self.tab_model.data::<Tab>(entity)?;
-                (tab.location == Location::Trash).then_some((entity, Location::Trash))
+                tab.location
+                    .is_trash()
+                    .then_some((entity, tab.location.clone()))
             })
             .collect();
 
@@ -1395,31 +1398,15 @@ impl App {
         Task::batch(commands)
     }
 
-    /// Refresh all tabs that are opened in [`Location::Recents`].
-    fn refresh_recents_tabs(&mut self) -> Task<Message> {
-        let commands: Box<[_]> = self
-            .tab_model
-            .iter()
-            .filter_map(|entity| {
-                let tab = self.tab_model.data::<Tab>(entity)?;
-                (tab.location == Location::Recents).then_some(entity)
-            })
-            .collect();
-
-        let commands = commands
-            .into_iter()
-            .map(|entity| self.update_tab(entity, Location::Recents, None));
-
-        Task::batch(commands)
-    }
-
     fn rescan_recents(&mut self) -> Task<Message> {
         let needs_reload: Box<[_]> = self
             .tab_model
             .iter()
             .filter_map(|entity| {
                 let tab = self.tab_model.data::<Tab>(entity)?;
-                (tab.location == Location::Recents).then_some((entity, Location::Recents))
+                tab.location
+                    .is_recents()
+                    .then_some((entity, tab.location.clone()))
             })
             .collect();
 
@@ -1453,19 +1440,35 @@ impl App {
         let mut title_location_opt = None;
         if let Some(tab) = self.tab_model.data_mut::<Tab>(tab) {
             let location_opt = match term_opt {
-                Some(term) => tab.location.path_opt().map(|path| {
-                    (
-                        Location::Search(
-                            path.clone(),
-                            term,
-                            tab.config.show_hidden,
-                            Instant::now(),
-                        ),
-                        true,
-                    )
-                }),
+                Some(term) => {
+                    let search_location = if let Some(path) = tab.location.path_opt() {
+                        Some(SearchLocation::Path(path.clone()))
+                    } else if tab.location.is_recents() {
+                        Some(SearchLocation::Recents)
+                    } else if tab.location.is_trash() {
+                        Some(SearchLocation::Trash)
+                    } else {
+                        None
+                    };
+
+                    search_location.map(|search_location| {
+                        return (
+                            Location::Search(
+                                search_location,
+                                term,
+                                tab.config.show_hidden,
+                                Instant::now(),
+                            ),
+                            true,
+                        );
+                    })
+                }
                 None => match &tab.location {
-                    Location::Search(path, ..) => Some((Location::Path(path.clone()), false)),
+                    Location::Search(search_location, ..) => match search_location {
+                        SearchLocation::Path(path) => Some((Location::Path(path.clone()), false)),
+                        SearchLocation::Recents => Some((Location::Recents, false)),
+                        SearchLocation::Trash => Some((Location::Trash, false)),
+                    },
                     _ => None,
                 },
             };
@@ -1625,7 +1628,7 @@ impl App {
 
         nav_model = nav_model.insert(|b| {
             b.text(fl!("trash"))
-                .icon(icon::icon(tab::trash_icon_symbolic(16)))
+                .icon(icon::icon(tab::trash_helpers::trash_icon_symbolic(16)))
                 .data(Location::Trash)
                 .divider_above()
         });
@@ -2840,7 +2843,7 @@ impl Application for App {
             Message::Delete(entity_opt) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
                 if let Some(tab) = self.tab_model.data::<Tab>(entity) {
-                    if tab.location == Location::Trash {
+                    if tab.location.is_trash() {
                         if let Some(items) = tab.items_opt() {
                             let mut trash_items = Vec::new();
                             for item in items {
@@ -4056,7 +4059,7 @@ impl Application for App {
                 return self.operation(Operation::RemoveFromRecents { paths });
             }
             Message::RescanRecents => {
-                return self.refresh_recents_tabs();
+                return self.rescan_recents();
             }
             Message::RescanTrash => {
                 // Update trash icon if empty/full
@@ -4066,8 +4069,10 @@ impl Application for App {
                         .is_some_and(|loc| matches!(loc, Location::Trash))
                 });
                 if let Some(entity) = maybe_entity {
-                    self.nav_model
-                        .icon_set(entity, icon::icon(tab::trash_icon_symbolic(16)));
+                    self.nav_model.icon_set(
+                        entity,
+                        icon::icon(tab::trash_helpers::trash_icon_symbolic(16)),
+                    );
                 }
 
                 return Task::batch([self.rescan_trash(), self.update_desktop()]);
@@ -4646,12 +4651,43 @@ impl Application for App {
                 return window::maximize(id, maximized);
             }
             Message::WindowNew => match env::current_exe() {
-                Ok(exe) => match process::Command::new(&exe).spawn() {
-                    Ok(_child) => {}
-                    Err(err) => {
-                        log::error!("failed to execute {}: {}", exe.display(), err);
+                Ok(exe) => {
+                    // initialize command to spawn another instance of this application
+                    let mut command = process::Command::new(&exe);
+
+                    // make the new window open at the same location as the currently active tab by
+                    // passing respective command line arguments
+                    let entity = self.tab_model.active();
+                    let active_tab_location =
+                        self.tab_model.data::<Tab>(entity).map(|tab| &tab.location);
+                    match active_tab_location {
+                        Some(
+                            Location::Desktop(path, ..)
+                            | Location::Path(path)
+                            | Location::Search(SearchLocation::Path(path), ..),
+                        ) => {
+                            command.arg(path);
+                        }
+                        Some(Location::Network(uri, ..)) => {
+                            command.arg(uri);
+                        }
+                        Some(Location::Recents | Location::Search(SearchLocation::Recents, ..)) => {
+                            command.arg("--recents");
+                        }
+                        Some(Location::Trash | Location::Search(SearchLocation::Trash, ..)) => {
+                            command.arg("--trash");
+                        }
+                        None => {}
+                    };
+
+                    // spawn the new window
+                    match command.spawn() {
+                        Ok(_child) => {}
+                        Err(err) => {
+                            log::error!("failed to execute {}: {}", exe.display(), err);
+                        }
                     }
-                },
+                }
                 Err(err) => {
                     log::error!("failed to get current executable path: {err}");
                 }
@@ -5884,21 +5920,19 @@ impl Application for App {
                     dialog
                         .control(
                             widget::checkbox(
-                                format!("{} ({})" ,fl!("apply-to-all"), *conflict_count),
+                                format!("{} ({})", fl!("apply-to-all"), *conflict_count),
                                 *apply_to_all,
                             )
-                                .on_toggle(
-                                |apply_to_all| {
-                                    Message::DialogUpdate(DialogPage::Replace {
-                                        from: from.clone(),
-                                        to: to.clone(),
-                                        multiple: *multiple,
-                                        apply_to_all,
-                                        conflict_count: *conflict_count,
-                                        tx: tx.clone(),
-                                    })
-                                },
-                            ),
+                            .on_toggle(|apply_to_all| {
+                                Message::DialogUpdate(DialogPage::Replace {
+                                    from: from.clone(),
+                                    to: to.clone(),
+                                    multiple: *multiple,
+                                    apply_to_all,
+                                    conflict_count: *conflict_count,
+                                    tx: tx.clone(),
+                                })
+                            }),
                         )
                         .secondary_action(
                             widget::button::standard(fl!("skip")).on_press(Message::ReplaceResult(
