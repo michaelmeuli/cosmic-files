@@ -22,7 +22,7 @@ use crate::{
     app::{Action, Message},
     config::Config,
     fl,
-    tab::{self, HeadingOptions, Location, LocationMenuAction, Tab},
+    tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab},
 };
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
@@ -140,7 +140,9 @@ pub fn context_menu<'a>(
                     selected_dir += 1;
                 }
                 match &item.location_opt {
-                    Some(Location::Trash) => selected_trash_only = true,
+                    Some(Location::Trash) | Some(Location::Search(SearchLocation::Trash, ..)) => {
+                        selected_trash_only = true
+                    }
                     Some(Location::Path(path)) => {
                         if selected == 1
                             && path.extension().and_then(|s| s.to_str()) == Some("desktop")
@@ -176,7 +178,8 @@ pub fn context_menu<'a>(
             tab::Mode::App | tab::Mode::Desktop,
             Location::Desktop(..)
             | Location::Path(..)
-            | Location::Search(..)
+            | Location::Search(SearchLocation::Path(..), ..)
+            | Location::Search(SearchLocation::Recents, ..)
             | Location::Recents
             | Location::Network(_, _, Some(_)),
         ) => {
@@ -214,7 +217,7 @@ pub fn context_menu<'a>(
                             .push(menu_item(fl!("open-in-terminal"), Action::OpenTerminal).into());
                     }
                 }
-                if matches!(tab.location, Location::Search(..) | Location::Recents) {
+                if tab.location.is_recents() {
                     children.push(
                         menu_item(fl!("open-item-location"), Action::OpenItemLocation).into(),
                     );
@@ -257,7 +260,7 @@ pub fn context_menu<'a>(
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
                 }
                 children.push(divider::horizontal::light().into());
-                if matches!(tab.location, Location::Recents) {
+                if tab.location.is_recents() {
                     children.push(
                         menu_item(fl!("remove-from-recents"), Action::RemoveFromRecents).into(),
                     );
@@ -324,7 +327,8 @@ pub fn context_menu<'a>(
             tab::Mode::Dialog(dialog_kind),
             Location::Desktop(..)
             | Location::Path(..)
-            | Location::Search(..)
+            | Location::Search(SearchLocation::Path(..), ..)
+            | Location::Search(SearchLocation::Recents, ..)
             | Location::Recents
             | Location::Network(_, _, Some(_)),
         ) => {
@@ -332,7 +336,7 @@ pub fn context_menu<'a>(
                 if selected_dir == 1 && selected == 1 || selected_dir == 0 {
                     children.push(menu_item(fl!("open"), Action::Open).into());
                 }
-                if matches!(tab.location, Location::Search(..) | Location::Recents) {
+                if matches!(tab.location, Location::Search(..)) || tab.location.is_recents() {
                     children.push(
                         menu_item(fl!("open-item-location"), Action::OpenItemLocation).into(),
                     );
@@ -389,7 +393,7 @@ pub fn context_menu<'a>(
                 children.push(sort_item(fl!("sort-by-size"), HeadingOptions::Size));
             }
         }
-        (_, Location::Trash) => {
+        (_, Location::Trash | Location::Search(SearchLocation::Trash, ..)) => {
             if tab.mode.multiple() {
                 children.push(menu_item(fl!("select-all"), Action::SelectAll).into());
             }
@@ -448,7 +452,7 @@ pub fn dialog_menu(
             Action::SetSort(sort, dir),
         )
     };
-    let in_trash = tab.location == Location::Trash;
+    let in_trash = tab.location.is_trash();
 
     let mut selected_gallery = 0;
     if let Some(items) = tab.items_opt() {
@@ -598,7 +602,7 @@ pub fn menu_bar<'a>(
             Action::SetSort(sort, dir),
         )
     };
-    let in_trash = tab_opt.is_some_and(|tab| tab.location == Location::Trash);
+    let in_trash = tab_opt.is_some_and(|tab| tab.location.is_trash());
 
     let mut selected_dir = 0;
     let mut selected = 0;
