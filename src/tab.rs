@@ -1403,9 +1403,9 @@ pub fn scan_network(uri: &str, sizes: IconSizes) -> Vec<Item> {
     Vec::new()
 }
 
-pub fn scan_remote(uri: &str, sizes: IconSizes) -> Vec<Item> {
+pub fn scan_remote(uri: &str, sizes: IconSizes, show_as_samples: bool) -> Vec<Item> {
     for (_key, client) in CLIENTS.iter() {
-        match client.remote_scan(uri, sizes) {
+        match client.remote_scan(uri, sizes, show_as_samples) {
             Some(Ok(items)) => return items,
             Some(Err(err)) => {
                 log::warn!("failed to scan remote {:?}: {}", uri, err);
@@ -1786,7 +1786,7 @@ impl Location {
         }
     }
 
-    pub fn scan(&self, sizes: IconSizes) -> (Option<Item>, Vec<Item>) {
+    pub fn scan(&self, sizes: IconSizes, show_as_samples: bool) -> (Option<Item>, Vec<Item>) {
         let items = match self {
             Self::Desktop(path, display, desktop_config) => {
                 scan_desktop(path, display, *desktop_config, sizes)
@@ -1799,7 +1799,7 @@ impl Location {
             Self::Trash => trash_helpers::scan_trash(sizes),
             Self::Recents => scan_recents(sizes),
             Self::Network(uri, _, _) => scan_network(uri, sizes),
-            Self::Remote(uri, _, _) => scan_remote(uri, sizes),
+            Self::Remote(uri, _, _) => scan_remote(uri, sizes, show_as_samples),
         };
         let parent_item_opt = match self {
             Self::Remote(uri, _, path_opt) => {
@@ -2073,6 +2073,10 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         is_json: bool,
         json_opt: Option<TbProfilerJson>,
+        is_tb_result: bool,
+        sample_json_path_opt: Option<PathBuf>,
+        sample_csv_path_opt: Option<PathBuf>,
+        sample_docx_path_opt: Option<PathBuf>,
     },
 }
 
@@ -2153,6 +2157,47 @@ impl ItemMetadata {
             #[cfg(feature = "russh")]
             Self::RusshPath { json_opt, .. } => json_opt.is_some(),
             _ => false,
+        }
+    }
+
+    pub fn is_tb_result(&self) -> bool {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath { is_tb_result, .. } => *is_tb_result,
+            _ => false,
+        }
+    }
+
+    pub fn json_path(&self) -> Option<&PathBuf> {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath {
+                sample_json_path_opt,
+                ..
+            } => sample_json_path_opt.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn csv_path(&self) -> Option<&PathBuf> {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath {
+                sample_csv_path_opt,
+                ..
+            } => sample_csv_path_opt.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn docx_path(&self) -> Option<&PathBuf> {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath {
+                sample_docx_path_opt,
+                ..
+            } => sample_docx_path_opt.as_ref(),
+            _ => None,
         }
     }
 }
@@ -2947,7 +2992,9 @@ impl Item {
                                     )))
                                     .push({
                                         let mut ecoli_col = widget::column();
-                                        if let Some(ecoli_value) = TB_ECOLI_MAPPING.get(&(v.gene_name.clone(), v.change.clone())) {
+                                        if let Some(ecoli_value) = TB_ECOLI_MAPPING
+                                            .get(&(v.gene_name.clone(), v.change.clone()))
+                                        {
                                             ecoli_col = ecoli_col.push(widget::text::body(
                                                 format!("E. coli: {}", ecoli_value),
                                             ));
@@ -2957,13 +3004,45 @@ impl Item {
                             ));
                         }
                     }
-                    if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
-                    {
-                        if self.selected && path_opt.is_some() {
-                            column =
-                                column.push(widget::button::standard(fl!("download")).on_press(
-                                    Message::Download(Some((path_opt.unwrap(), uri.clone()))),
-                                ));
+                    if let Some(Location::Remote(uri, _user, path_opt)) = &self.location_opt {
+                        if self.selected {
+                            if let Some(path) = path_opt {
+                                if !self.metadata.is_tb_result() {
+                                    column = column.push(
+                                        widget::button::standard(fl!("download")).on_press(
+                                            Message::Download(Some((path.clone(), uri.clone()))),
+                                        ),
+                                    );
+                                } else {
+                                    if let Some(csv) = self.metadata.csv_path() {
+                                        column = column.push(
+                                            widget::button::standard("Download .results.csv")
+                                                .on_press(Message::Download(Some((
+                                                    csv.to_path_buf(),
+                                                    uri.clone(),
+                                                )))),
+                                        );
+                                    }
+                                    if let Some(json) = self.metadata.json_path() {
+                                        column = column.push(
+                                            widget::button::standard("Download .results.json")
+                                                .on_press(Message::Download(Some((
+                                                    json.to_path_buf(),
+                                                    uri.clone(),
+                                                )))),
+                                        );
+                                    }
+                                    if let Some(docx) = self.metadata.docx_path() {
+                                        column = column.push(
+                                            widget::button::standard("Download .results.docx")
+                                                .on_press(Message::Download(Some((
+                                                    docx.to_path_buf(),
+                                                    uri.clone(),
+                                                )))),
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }

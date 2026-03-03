@@ -209,6 +209,7 @@ pub enum Action {
     ToggleFoldersFirst,
     ToggleShowHidden,
     ToggleSort(HeadingOptions),
+    ToggleShowAsSamples,
     WindowClose,
     WindowNew,
     ZoomDefault,
@@ -288,6 +289,7 @@ impl Action {
             Self::ToggleSort(sort) => {
                 Message::TabMessage(entity_opt, tab::Message::ToggleSort(*sort))
             }
+            Self::ToggleShowAsSamples => Message::ToggleShowAsSamples,
             Self::WindowClose => Message::WindowClose,
             Self::WindowNew => Message::WindowNew,
             Self::ZoomDefault => Message::ZoomDefault(entity_opt),
@@ -480,6 +482,7 @@ pub enum Message {
     ToggleContextPage(ContextPage),
     ToggleFoldersFirst,
     ToggleShowHidden,
+    ToggleShowAsSamples,
     Undo(usize),
     UndoTrash(widget::ToastId, Arc<[PathBuf]>),
     UndoTrashStart(Vec<TrashItem>),
@@ -1418,10 +1421,11 @@ impl App {
         let icon_sizes = self.config.tab.icon_sizes;
         let mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
+        let show_as_samples = self.config.tab.show_as_samples;
 
         Task::future(async move {
             let location2 = location.clone();
-            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes)).await {
+            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples)).await {
                 Ok((parent_item_opt, mut items)) => {
                     #[cfg(feature = "gvfs")]
                     {
@@ -3092,7 +3096,7 @@ impl Application for App {
             }
             Message::Config(config) => {
                 if config != self.config {
-                    log::info!("update config");
+                    log::info!("uppub fn menu_bar<'a>(date config");
                     // Show details is preserved for existing instances
                     let show_details = self.config.show_details;
                     self.config = config;
@@ -4821,6 +4825,11 @@ impl Application for App {
                 config.show_hidden = !config.show_hidden;
                 return self.update(Message::TabConfig(config));
             }
+            Message::ToggleShowAsSamples => {
+                let mut config = self.config.tab;
+                config.show_as_samples = !config.show_as_samples;
+                return self.update(Message::TabConfig(config));
+            }
             Message::TabMessage(entity_opt, tab_message) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
 
@@ -5161,9 +5170,10 @@ impl Application for App {
 
                 let mut paths = Vec::with_capacity(recently_trashed.len());
                 let icon_sizes = self.config.tab.icon_sizes;
+                let show_as_samples = self.config.tab.show_as_samples;
 
                 return cosmic::task::future(async move {
-                    match tokio::task::spawn_blocking(move || Location::Trash.scan(icon_sizes))
+                    match tokio::task::spawn_blocking(move || Location::Trash.scan(icon_sizes, show_as_samples))
                         .await
                     {
                         Ok((_parent_item_opt, items)) => {
@@ -7750,7 +7760,7 @@ pub(crate) mod test_utils {
 
         // New tab with items
         let location = Location::Path(path.to_owned());
-        let (parent_item_opt, items) = location.scan(IconSizes::default());
+        let (parent_item_opt, items) = location.scan(IconSizes::default(), false);
         let mut tab = Tab::new(
             location,
             TabConfig::default(),

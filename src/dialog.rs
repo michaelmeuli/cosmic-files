@@ -743,9 +743,10 @@ impl App {
         let icon_sizes = self.tab.config.icon_sizes;
         let mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
+        let show_as_samples = self.tab.config.show_as_samples;
         Task::future(async move {
             let location2 = location.clone();
-            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes)).await {
+            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples)).await {
                 Ok((parent_item_opt, mut items)) => {
                     #[cfg(feature = "gvfs")]
                     {

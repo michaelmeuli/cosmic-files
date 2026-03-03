@@ -1,5 +1,6 @@
 use async_ssh2_tokio::client::{AuthMethod, Client, ServerCheckMethod};
 use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::FileType;
 use url::Url;
 
 use cosmic::{
@@ -22,8 +23,8 @@ use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
     config::IconSizes,
     fl,
-    tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
     russh::jsondata::TbProfilerJson,
+    tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 use mime_guess::MimeGuess;
 use tokio::io::AsyncReadExt;
@@ -31,7 +32,13 @@ use tokio::runtime::Builder;
 
 use crate::config::TBConfig;
 
-
+struct SampleFiles {
+    json: Option<PathBuf>,
+    csv: Option<PathBuf>,
+    docx: Option<PathBuf>,
+    mtime: u64,
+    size: Option<u64>,
+}
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
@@ -223,10 +230,19 @@ pub async fn resolve_symlink(
     }
 }
 
+fn sample_key(name: &str) -> &str {
+    if let Some((sample, _)) = name.split_once(".results.") {
+        sample
+    } else {
+        name
+    }
+}
+
 async fn remote_sftp_list(
     client: &Client,
     uri: &str,
     sizes: IconSizes,
+    show_as_samples: bool,
 ) -> Result<Vec<tab::Item>, String> {
     log::info!("Listing remote directory: {}", uri);
     let mut remote_file = remote_file_from_uri(uri)?;
@@ -246,8 +262,14 @@ async fn remote_sftp_list(
         .map_err(|e| format!("read_dir {path}: {e:?}"))?;
 
     let mut items = Vec::new();
+    let mut samples: HashMap<String, SampleFiles> = HashMap::new();
+
+    // ------------------------------------------------------------
+    // First pass — collect samples & normal files
+    // ------------------------------------------------------------
     for entry in entries {
         let child_path = PathBuf::from(entry.file_name());
+        let file_type = entry.file_type();
         let info = entry.metadata();
         if info.is_symlink() {
             remote_file = resolve_symlink(client, &remote_file).await?;
@@ -273,6 +295,32 @@ async fn remote_sftp_list(
         let child_uri = url.to_string();
         let location = Location::Remote(child_uri.clone(), name.clone(), Some(new_path.clone()));
 
+        let mut sample: Option<String> = None;
+        let mut sample_json_path_opt: Option<PathBuf> = None;
+        let mut sample_csv_path_opt: Option<PathBuf> = None;
+        let mut sample_docx_path_opt: Option<PathBuf> = None;
+        if file_type == FileType::File && show_as_samples {
+            if let Some(orig_name) = new_path.file_name().and_then(|n| n.to_str()) {
+                if let Some((sample_id, suffix)) = orig_name.split_once(".results.") {
+                    match suffix {
+                        "json" => {
+                            sample = Some(sample_id.to_string());
+                            sample_json_path_opt = Some(new_path.clone());
+                        }
+                        "csv" => {
+                            sample_csv_path_opt = Some(new_path.clone());
+                            continue;
+                        }
+                        "docx" => {
+                            sample_docx_path_opt = Some(new_path.clone());
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         let metadata = if !force_dir {
             let mtime = info
                 .modified()
@@ -286,14 +334,27 @@ async fn remote_sftp_list(
             let is_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             let mut json_opt = None;
+            let is_tb_result = sample.is_some();
             if is_json {
-                log::info!("Attempting to load JSON metadata for {}: {}", new_path.display(), child_uri);
+                log::info!(
+                    "Attempting to load JSON metadata for {}: {}",
+                    new_path.display(),
+                    child_uri
+                );
                 match load_remote_json(client, &child_uri).await {
                     Ok(json) => {
                         json_opt = Some(json);
-                        log::info!("Loaded JSON metadata for {}: {}", new_path.display(), child_uri);
-                        log::info!("JSON content for {}: {}", new_path.display(), json_opt.as_ref().unwrap());
-                    },
+                        log::info!(
+                            "Loaded JSON metadata for {}: {}",
+                            new_path.display(),
+                            child_uri
+                        );
+                        log::info!(
+                            "JSON content for {}: {}",
+                            new_path.display(),
+                            json_opt.as_ref().unwrap()
+                        );
+                    }
                     Err(e) => {
                         log::info!("Failed to load JSON for {}: {}", new_path.display(), e);
                     }
@@ -325,6 +386,10 @@ async fn remote_sftp_list(
                 children_opt,
                 is_json,
                 json_opt,
+                is_tb_result,
+                sample_json_path_opt,
+                sample_csv_path_opt,
+                sample_docx_path_opt,
             }
         } else {
             ItemMetadata::SimpleDir { entries: 0 }
@@ -366,7 +431,7 @@ async fn remote_sftp_list(
             name: name.clone(),
             is_mount_point: false,
             is_client_point: false,
-            display_name: name,
+            display_name: sample.unwrap_or(name.clone()),
             metadata,
             hidden,
             location_opt: Some(location),
@@ -469,6 +534,10 @@ async fn remote_sftp_parent(
             children_opt,
             is_json: false,
             json_opt: None,
+            is_tb_result: false,
+            sample_json_path_opt: None,
+            sample_csv_path_opt: None,
+            sample_docx_path_opt: None,
         }
     };
     let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
@@ -532,7 +601,7 @@ async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, 
     file.read_to_string(&mut contents)
         .await
         .map_err(|e| e.to_string())?;
-    
+
     let parsed: TbProfilerJson = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
     Ok(parsed)
 }
@@ -751,6 +820,7 @@ enum Cmd {
     RemoteScan(
         String,
         IconSizes,
+        bool,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
     RemoteParent(String, IconSizes, mpsc::Sender<Result<tab::Item, String>>),
@@ -770,7 +840,6 @@ enum Cmd {
         Vec<String>,
         TBConfig,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
-        
     ),
 }
 
@@ -1016,7 +1085,7 @@ impl Russh {
                                 }
                             }
                         }
-                        Cmd::RemoteScan(uri, sizes, items_tx) => {
+                        Cmd::RemoteScan(uri, sizes, show_as_samples, items_tx) => {
                             log::info!("RemoteScan for URI: {}", uri);
                             if uri == "ssh:///" {
                                 let result =
@@ -1053,7 +1122,9 @@ impl Russh {
                                 read.get(host).cloned()
                             };
                             if let Some(client) = existing_client {
-                                let result = remote_sftp_list(&client, &norm_uri, sizes).await;
+                                let result =
+                                    remote_sftp_list(&client, &norm_uri, sizes, show_as_samples)
+                                        .await;
                                 let _ = items_tx.send(result).await;
                             } else {
                                 let key_path = match get_key_files() {
@@ -1083,8 +1154,13 @@ impl Russh {
                                             let read = clients.read().await;
                                             Arc::clone(read.get(host).unwrap())
                                         };
-                                        let result =
-                                            remote_sftp_list(&client, &norm_uri, sizes).await;
+                                        let result = remote_sftp_list(
+                                            &client,
+                                            &norm_uri,
+                                            sizes,
+                                            show_as_samples,
+                                        )
+                                        .await;
                                         let _ = items_tx.send(result).await;
                                         event_tx
                                             .send(Event::RemoteResult(norm_uri, Ok(true)))
@@ -1349,13 +1425,20 @@ impl Connector for Russh {
         )
     }
 
-    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+    fn remote_scan(
+        &self,
+        uri: &str,
+        sizes: IconSizes,
+        show_as_samples: bool,
+    ) -> Option<Result<Vec<tab::Item>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
 
-        if let Err(e) = self
-            .command_tx
-            .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
-        {
+        if let Err(e) = self.command_tx.send(Cmd::RemoteScan(
+            uri.to_string(),
+            sizes,
+            show_as_samples,
+            items_tx,
+        )) {
             log::error!(
                 "remote_scan: failed to send Cmd::RemoteScan for uri {}: {}",
                 uri,
@@ -1403,7 +1486,12 @@ impl Connector for Russh {
         )
     }
 
-    fn run_tb_profiler(&self, paths: Box<[PathBuf]>, uris: Vec<String>, tb_config: TBConfig) -> Task<()> {
+    fn run_tb_profiler(
+        &self,
+        paths: Box<[PathBuf]>,
+        uris: Vec<String>,
+        tb_config: TBConfig,
+    ) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
             async move {

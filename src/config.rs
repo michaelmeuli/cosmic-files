@@ -236,6 +236,7 @@ impl Config {
             show_hidden: self.dialog.show_hidden,
             single_click: false,
             view: self.dialog.view,
+            show_as_samples: false,
         }
     }
 }
@@ -360,6 +361,8 @@ pub struct TabConfig {
     pub single_click: bool,
     /// Selected view, grid or list
     pub view: View,
+    /// Show samples instead of files
+    pub show_as_samples: bool,
 }
 
 impl Default for TabConfig {
@@ -371,6 +374,7 @@ impl Default for TabConfig {
             show_hidden: false,
             single_click: false,
             view: View::List,
+            show_as_samples: false,
         }
     }
 }
