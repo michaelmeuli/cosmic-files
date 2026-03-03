@@ -295,29 +295,29 @@ async fn remote_sftp_list(
         let child_uri = url.to_string();
         let location = Location::Remote(child_uri.clone(), name.clone(), Some(new_path.clone()));
 
-        let mut sample: Option<String> = None;
-        let mut sample_json_path_opt: Option<PathBuf> = None;
-        let mut sample_csv_path_opt: Option<PathBuf> = None;
-        let mut sample_docx_path_opt: Option<PathBuf> = None;
-        if file_type == FileType::File && show_as_samples {
-            if let Some(orig_name) = new_path.file_name().and_then(|n| n.to_str()) {
-                if let Some((sample_id, suffix)) = orig_name.split_once(".results.") {
-                    match suffix {
-                        "json" => {
-                            sample = Some(sample_id.to_string());
-                            sample_json_path_opt = Some(new_path.clone());
-                        }
-                        "csv" => {
-                            sample_csv_path_opt = Some(new_path.clone());
-                            continue;
-                        }
-                        "docx" => {
-                            sample_docx_path_opt = Some(new_path.clone());
-                            continue;
-                        }
-                        _ => {}
-                    }
+        if show_as_samples && file_type == FileType::File {
+            if let Some((sample_id, suffix)) = name.split_once(".results.") {
+                let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
+                    json: None,
+                    csv: None,
+                    docx: None,
+                    mtime: info
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                    size: None,
+                });
+
+                match suffix {
+                    "json" => entry.json = Some(new_path.clone()),
+                    "csv" => entry.csv = Some(new_path.clone()),
+                    "docx" => entry.docx = Some(new_path.clone()),
+                    _ => {}
                 }
+
+                continue;
             }
         }
 
@@ -334,13 +334,7 @@ async fn remote_sftp_list(
             let is_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             let mut json_opt = None;
-            let is_tb_result = sample.is_some();
             if is_json {
-                log::info!(
-                    "Attempting to load JSON metadata for {}: {}",
-                    new_path.display(),
-                    child_uri
-                );
                 match load_remote_json(client, &child_uri).await {
                     Ok(json) => {
                         json_opt = Some(json);
@@ -386,10 +380,10 @@ async fn remote_sftp_list(
                 children_opt,
                 is_json,
                 json_opt,
-                is_tb_result,
-                sample_json_path_opt,
-                sample_csv_path_opt,
-                sample_docx_path_opt,
+                is_tb_result: false,
+                sample_json_path_opt: None,
+                sample_csv_path_opt: None,
+                sample_docx_path_opt: None,
             }
         } else {
             ItemMetadata::SimpleDir { entries: 0 }
@@ -431,7 +425,7 @@ async fn remote_sftp_list(
             name: name.clone(),
             is_mount_point: false,
             is_client_point: false,
-            display_name: sample.unwrap_or(name.clone()),
+            display_name: name.clone(),
             metadata,
             hidden,
             location_opt: Some(location),
@@ -439,6 +433,77 @@ async fn remote_sftp_list(
             icon_handle_grid,
             icon_handle_list,
             icon_handle_list_condensed,
+            thumbnail_opt: Some(ItemThumbnail::NotImage),
+            button_id: widget::Id::unique(),
+            pos_opt: Cell::new(None),
+            rect_opt: Cell::new(None),
+            selected: false,
+            highlighted: false,
+            overlaps_drag_rect: false,
+            dir_size: DirSize::NotDirectory,
+            cut: false,
+        });
+    }
+
+    // ------------------------------------------------------------
+    // Second pass — build grouped sample items
+    // ------------------------------------------------------------
+    for (sample_id, files) in samples {
+        let mut json_opt = None;
+
+        if let Some(json_path) = &files.json {
+            let mut url = Url::parse(&format!(
+                "ssh://{}{}:{}",
+                remote_file
+                    .username
+                    .clone()
+                    .map(|u| u + "@")
+                    .unwrap_or_default(),
+                remote_file.host,
+                remote_file.port,
+            ))
+            .unwrap();
+
+            url.set_path(&json_path.to_string_lossy());
+
+            match load_remote_json(client, url.as_str()).await {
+                Ok(json) => json_opt = Some(json),
+                Err(e) => log::warn!("Failed to load sample JSON: {}", e),
+            }
+        }
+
+        let location = Location::Remote(uri.clone().to_string(), sample_id.clone(), None);
+
+        let metadata = ItemMetadata::RusshPath {
+            mtime: files.mtime,
+            size_opt: None,
+            children_opt: None,
+            is_json: true,
+            json_opt,
+            is_tb_result: true,
+            sample_json_path_opt: files.json.clone(),
+            sample_csv_path_opt: files.csv.clone(),
+            sample_docx_path_opt: files.docx.clone(),
+        };
+
+        items.push(tab::Item {
+            name: sample_id.clone(),
+            display_name: sample_id.clone(),
+            metadata,
+            hidden: false,
+            location_opt: Some(location),
+            mime: "application/json".parse().unwrap(),
+            icon_handle_grid: widget::icon::from_name("text-x-generic")
+                .size(sizes.grid())
+                .handle(),
+            icon_handle_list: widget::icon::from_name("text-x-generic")
+                .size(sizes.list())
+                .handle(),
+            icon_handle_list_condensed: widget::icon::from_name("text-x-generic")
+                .size(sizes.list_condensed())
+                .handle(),
+            is_mount_point: false,
+            is_client_point: false,
             thumbnail_opt: Some(ItemThumbnail::NotImage),
             button_id: widget::Id::unique(),
             pos_opt: Cell::new(None),

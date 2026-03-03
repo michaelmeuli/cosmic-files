@@ -3004,43 +3004,29 @@ impl Item {
                             ));
                         }
                     }
-                    if let Some(Location::Remote(uri, _user, path_opt)) = &self.location_opt {
-                        if self.selected {
-                            if let Some(path) = path_opt {
-                                if !self.metadata.is_tb_result() {
-                                    column = column.push(
-                                        widget::button::standard(fl!("download")).on_press(
-                                            Message::Download(Some((path.clone(), uri.clone()))),
-                                        ),
-                                    );
-                                } else {
-                                    if let Some(csv) = self.metadata.csv_path() {
-                                        column = column.push(
-                                            widget::button::standard("Download .results.csv")
-                                                .on_press(Message::Download(Some((
-                                                    csv.to_path_buf(),
-                                                    uri.clone(),
-                                                )))),
-                                        );
-                                    }
-                                    if let Some(json) = self.metadata.json_path() {
-                                        column = column.push(
-                                            widget::button::standard("Download .results.json")
-                                                .on_press(Message::Download(Some((
-                                                    json.to_path_buf(),
-                                                    uri.clone(),
-                                                )))),
-                                        );
-                                    }
-                                    if let Some(docx) = self.metadata.docx_path() {
-                                        column = column.push(
-                                            widget::button::standard("Download .results.docx")
-                                                .on_press(Message::Download(Some((
-                                                    docx.to_path_buf(),
-                                                    uri.clone(),
-                                                )))),
-                                        );
-                                    }
+                    if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
+                        log::info!(
+                            "item is remote, showing download button: {}",
+                            path.display()
+                        );
+                        if !self.metadata.is_tb_result() {
+                            column = column
+                                .push(widget::button::standard(fl!("download")).on_press(
+                                    Message::Download(Some((path.clone(), uri.clone()))),
+                                ));
+                        }
+                    }
+                    if let Some(Location::Remote(uri, _, _)) = &self.location_opt {
+                        if self.metadata.is_tb_result() {
+                            for (label, opt_path) in [
+                                ("Download .results.csv", self.metadata.csv_path()),
+                                ("Download .results.json", self.metadata.json_path()),
+                                ("Download .results.docx", self.metadata.docx_path()),
+                            ] {
+                                if let Some(p) = opt_path {
+                                    column = column.push(widget::button::standard(label).on_press(
+                                        Message::Download(Some((p.to_path_buf(), uri.clone()))),
+                                    ));
                                 }
                             }
                         }
