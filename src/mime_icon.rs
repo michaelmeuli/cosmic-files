@@ -2,8 +2,8 @@
 
 use cosmic::widget::icon;
 use mime_guess::Mime;
+use rustc_hash::FxHashMap;
 use std::{
-    collections::HashMap,
     fs,
     path::Path,
     sync::{LazyLock, Mutex},
@@ -18,7 +18,7 @@ struct MimeIconKey {
 }
 
 struct MimeIconCache {
-    cache: HashMap<MimeIconKey, Option<icon::Handle>>,
+    cache: FxHashMap<MimeIconKey, Option<icon::Handle>>,
     #[cfg(unix)]
     shared_mime_info: xdg_mime::SharedMimeInfo,
 }
@@ -26,7 +26,7 @@ struct MimeIconCache {
 impl MimeIconCache {
     pub fn new() -> Self {
         Self {
-            cache: HashMap::new(),
+            cache: FxHashMap::default(),
             #[cfg(unix)]
             shared_mime_info: xdg_mime::SharedMimeInfo::new(),
         }
@@ -49,10 +49,8 @@ impl MimeIconCache {
                 let icon_name = icon_names.remove(0);
                 let mut named = icon::from_name(icon_name).size(key.size);
                 if !icon_names.is_empty() {
-                    let mut fallback_names = Vec::with_capacity(icon_names.len());
-                    for fallback_name in icon_names {
-                        fallback_names.push(fallback_name.into());
-                    }
+                    let fallback_names =
+                        icon_names.into_iter().map(std::borrow::Cow::from).collect();
                     named = named.fallback(Some(icon::IconFallback::Names(fallback_names)));
                 }
                 Some(named.handle())
@@ -63,60 +61,42 @@ impl MimeIconCache {
 static MIME_ICON_CACHE: LazyLock<Mutex<MimeIconCache>> =
     LazyLock::new(|| Mutex::new(MimeIconCache::new()));
 
-pub fn mime_for_path<P: AsRef<Path>>(
-    path: P,
+pub fn mime_for_path(
+    path: impl AsRef<Path>,
     metadata_opt: Option<&fs::Metadata>,
     remote: bool,
 ) -> Mime {
     let path = path.as_ref();
-
-    #[cfg(unix)]
-    {
-        let mime_icon_cache = MIME_ICON_CACHE.lock().unwrap();
-        // Try the shared mime info cache first
-        let mut gb = mime_icon_cache.shared_mime_info.guess_mime_type();
-        if remote {
-            if let Some(file_name) = path.file_name().and_then(|x| x.to_str()) {
-                gb.file_name(file_name);
-            }
-        } else {
-            gb.path(path);
+    let mime_icon_cache = MIME_ICON_CACHE.lock().unwrap();
+    // Try the shared mime info cache first
+    let mut gb = mime_icon_cache.shared_mime_info.guess_mime_type();
+    if remote {
+        if let Some(file_name) = path.file_name().and_then(std::ffi::OsStr::to_str) {
+            gb.file_name(file_name);
         }
-        if let Some(metadata) = metadata_opt {
-            gb.metadata(metadata.clone());
-        }
-        let guess = gb.guess();
-        if guess.uncertain() {
-            // If uncertain, try mime_guess. This could happen on platforms without shared-mime-info
-            mime_guess::from_path(path).first_or_octet_stream()
-        } else {
-            guess.mime_type().clone()
-        }
+    } else {
+        gb.path(path);
     }
-    #[cfg(not(unix))]
-    {
-        mime_guess::from_path(&path).first_or_octet_stream()
+    if let Some(metadata) = metadata_opt {
+        gb.metadata(metadata.clone());
     }
-}
+    let guess = gb.guess();
+    let guessed_mime = guess.mime_type();
 
-fn guess_generic_icon_name(mime: &Mime) -> Option<&'static str> {
-    let ty = mime.type_().as_str();
-    let sub = mime.subtype().as_str();
+    /// Checks if the `Mime` is a special variant returned by `xdg-mime`.
+    /// This includes directories, symlinks and zerosize files, which are returned as uncertain.
+    fn is_special_mime(mime: &Mime) -> bool {
+        *mime == "inode/directory" || *mime == "inode/symlink" || *mime == "application/x-zerosize"
+    }
 
-    match ty {
-        "text" => Some("text-x-generic"),
-        "image" => Some("image-x-generic"),
-        "audio" => Some("audio-x-generic"),
-        "video" => Some("video-x-generic"),
-        "application" => match sub {
-            "pdf" => Some("application-pdf"),
-            "zip" | "x-7z-compressed" | "x-rar-compressed" | "x-xz" | "x-bzip2" => {
-                Some("package-x-generic")
-            }
-            "json" | "xml" | "x-yaml" => Some("text-x-generic"),
-            _ => Some("application-x-executable"), // or "application-x-generic"
-        },
-        _ => None,
+    // `xdg-mime-rs` sets the guess to uncertain if it returns special mime types.
+    // The guess could also be uncertain on platforms without shared-mime-info.
+    // Try mime_guess, but only if it is not one of the special mime types.
+    if guess.uncertain() && (remote || !is_special_mime(guessed_mime)) {
+        // If uncertain, try mime_guess. This could happen on platforms without shared-mime-info
+        mime_guess::from_path(path).first_or_octet_stream()
+    } else {
+        guessed_mime.clone()
     }
 }
 

@@ -1,4 +1,6 @@
 cosmic-files = Soubory COSMIC
+comment = Správce souborů pro prostředí COSMIC
+keywords = Složky;Správce;Manažer;Prohlížeč;
 empty-folder = Složka je prázdná
 empty-folder-hidden = Složka je prázdná (obsahuje skryté položky)
 filesystem = Souborový systém
@@ -16,7 +18,7 @@ size = Velikost
 ## Empty Trash Dialog
 
 empty-trash = Vysypat koš
-empty-trash-warning = Opravdu chcete smazat všechny položky z koše?
+empty-trash-warning = Položky v koši budou trvale smazány
 
 ## New File/Folder Dialog
 
@@ -24,11 +26,11 @@ create-new-file = Vytvořit nový soubor
 create-new-folder = Vytvořit novou složku
 file-name = Název souboru
 folder-name = Název složky
-file-already-exists = Soubor s daným názvem již existuje.
-folder-already-exists = Složka s daným názvem již existuje.
-name-hidden = Položky s názvem začínajícím na "." budou skryty.
-name-invalid = Název nemůže být "{ $filename }".
-name-no-slashes = Název nesmí obsahovat lomítka.
+file-already-exists = Soubor s daným názvem již existuje
+folder-already-exists = Složka s daným názvem již existuje
+name-hidden = Položky s názvem začínajícím tečkou budou skryty
+name-invalid = Název nemůže být „{ $filename }“
+name-no-slashes = Název nesmí obsahovat lomítka
 
 ## Open/Save Dialog
 
@@ -51,7 +53,7 @@ rename-folder = Přejmenovat složku
 ## Replace Dialog
 
 replace = Nahradit
-replace-title = "{ $filename }" již na daném místě existuje.
+replace-title = Soubor „{ $filename }“ již na daném místě existuje
 replace-warning = Chcete nahradit soubor tím, který ukládáte? Nahrazení přepíše veškerý jeho obsah.
 
 # Context Pages
@@ -82,10 +84,10 @@ settings = Nastavení
 ### Appearance
 
 appearance = Vzhled
-theme = Téma
+theme = Motiv
 match-desktop = Podle systému
-dark = Tmavé
-light = Světlé
+dark = Tmavý
+light = Světlý
 # Context menu
 add-to-sidebar = Přidat do postranního panelu
 new-file = Nový soubor...
@@ -134,7 +136,7 @@ no-results = Nenalezeny žádné výsledky
 repository = Repozitář
 support = Podpora
 networks = Sítě
-notification-in-progress = Probíhají operace se soubory.
+notification-in-progress = Probíhají operace se soubory
 undo = Vrátit
 connect = Připojit
 today = Dnes
@@ -157,21 +159,21 @@ extract-to-title = Rozbalit do složky
 mount-error = Nelze přistoupit k disku
 create = Tvorba
 open-item-location = Otevřít umístění položky
-open-with-title = Jak chcete otevřít "{ $name }"?
+open-with-title = Jak chcete otevřít „{ $name }“?
 browse-store = Procházet { $store }
 other-apps = Ostatní aplikace
 related-apps = Související aplikace
-permanently-delete-question = Trvale smazat
+permanently-delete-question = Trvale smazat?
 delete = Smazat
-permanently-delete-warning = Opravdu chcete trvale smazat { $target }? Tuto operaci nelze vrátit.
+permanently-delete-warning = Dojde k trvalému smazání { $target }. Tuto akci nelze vrátit.
 replace-warning-operation = Chcete soubor nahradit? Nahrazení přepíše veškerý jeho obsah.
 original-file = Původní soubor
 replace-with = Nahradit za
 keep-both = Ponechat oba
 skip = Přeskočit
-set-executable-and-launch = Umožnit spouštění a spustit
-set-executable-and-launch-description = Chcete umožnit spouštění pro "{ $name }" a následně ho spustit?
-set-and-launch = Nastavit a spustit
+set-executable-and-launch = Povolit spouštění a spustit
+set-executable-and-launch-description = Chcete povolit spouštění souboru „{ $name }“ a následně ho spustit?
+set-and-launch = Povolit a spustit
 open-with = Otevřít pomocí
 other = Ostatní
 none = Žádný
@@ -181,35 +183,44 @@ deleting =
     Mazání { $items } { $items ->
         [one] položky
        *[other] položek
-    } z { trash } ({ $progress })...
+    } z koše ({ $progress })...
 sort-by-trashed = Seřadit podle času smazání
 deleted =
-    { $items } { $items ->
-        [one] položka smazána
-        [few] položky smazány
-        [many] položek smazáno
-       *[other] položek smazáno
-    } z { trash }
-emptying-trash = Vysypávám { trash } ({ $progress })...
-emptied-trash = { trash } byl vysypán
+    { $items ->
+        [one] Smazána
+        [few] Smazány
+       *[other] Smazáno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
+    } z koše
+emptying-trash = Vysypávání koše ({ $progress })...
+emptied-trash = Koš vysypán
 restoring =
     Obnovování { $items } { $items ->
         [one] položky
        *[other] položek
-    } z { trash } ({ $progress })...
+    } z koše ({ $progress })...
 restored =
-    { $items } { $items ->
-        [one] položka obnovena
-        [few] položky obnoveny
-        [many] položek obnoveno
-       *[other] položek obnoveno
-    } z { trash }
+    { $items ->
+        [one] Obnovena
+        [few] Obnoveny
+       *[other] Obnoveno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
+    } z koše
 permanently-deleted =
-    { $items } { $items ->
-        [one] položka trvale smazána
-        [few] položky trvale smazány
-        [many] položek trvale smazáno
-       *[other] položek trvale smazáno
+    Trvale { $items ->
+        [one] smazána
+        [few] smazány
+       *[other] smazáno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
     }
 delete-permanently = Smazat trvale
 trashed-on = Smazáno
@@ -218,19 +229,16 @@ operations-running =
     Běží { $running } { $running ->
         [one] operace
         [few] operace
-        [many] operací
        *[other] operací
     } ({ $percent }%)...
 operations-running-finished =
     Běží { $running } { $running ->
         [one] operace
         [few] operace
-        [many] operací
        *[other] operací
     } ({ $percent }%), { $finished } { $finished ->
         [one] dokončena...
         [few] dokončeny...
-        [many] dokončeno...
        *[other] dokončeno...
     }
 apply-to-all = Použít na vše
@@ -258,7 +266,7 @@ network-drive-schemes =
     WebDAV,dav:// nebo davs://
 network-drive-error = Nelze přistoupit k síťovému disku
 remember-password = Zapamatovat heslo
-try-again = Zkuste to znovu
+try-again = Zkusit znovu
 cancelled = Zrušené
 edit-history = Historie úprav
 history = Historie
@@ -272,66 +280,78 @@ compressing =
     Komprimování { $items } { $items ->
         [one] položky
        *[other] položek
-    } z "{ $from }" do "{ $to }" ({ $progress })...
+    } z „{ $from }“ do „{ $to }“ ({ $progress })...
 compressed =
-    { $items } { $items ->
-        [one] položka zkomprimována
-        [few] položky zkomprimovány
-        [many] položek zkomprimováno
-       *[other] položek zkomprimováno
-    } z "{ $from }" do "{ $to }"
-creating = Vytváření "{ $name }" v "{ $parent }"
-created = Vytvořen "{ $name }" v "{ $parent }"
+    { $items ->
+        [one] Zkomprimována
+        [few] Zkomprimovány
+       *[other] Zkomprimováno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
+    } z „{ $from }“ do „{ $to }“
+creating = Vytváření položky „{ $name }“ v „{ $parent }“
+created = Vytvořena položka „{ $name }“ v „{ $parent }“
 copying =
     Kopírování { $items } { $items ->
         [one] položky
        *[other] položek
-    } z "{ $from }" do "{ $to }" ({ $progress })...
+    } z „{ $from }“ do „{ $to }“ ({ $progress })...
 copied =
-    { $items } { $items ->
-        [one] položka zkopírována
-        [few] položky zkopírovány
-        [many] položek zkopírováno
-       *[other] položek zkopírováno
-    } z "{ $from }" do "{ $to }"
+    { $items ->
+        [one] Zkopírována
+        [few] Zkopírovány
+       *[other] Zkopírováno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
+    } z „{ $from }“ do „{ $to }“
 extracting =
     Extrahování { $items } { $items ->
         [one] položky
        *[other] položek
-    } z "{ $from }" do "{ $to }" ({ $progress })...
+    } z „{ $from }“ do „{ $to }“ ({ $progress })...
 favorite-path-error-description =
-    Nelze otevřít "{ $path }".
-    Cesta buď neexistuje nebo nemáte dostatečná práva pro otevření.
+    Nelze otevřít „{ $path }“
+    „{ $path }“ buď neexistuje nebo nemáte dostatečná práva pro otevření
 
-    Chcete položku odstranit z bočního panelu?
+    Chcete položku odstranit z postranního panelu?
 selected-items = { $items } vybraných položek
 read-execute = Čtení a spouštění
 read-write-execute = Čtení, zápis a spouštění
 read-write = Čtení a zápis
 favorite-path-error = Chyba otevírání složky
 extracted =
-    { $items } { $items ->
-        [one] položka extrahována
-        [few] položky extrahovány
-        [many] položek extrahováno
-       *[other] položek extrahováno
-    } z "{ $from }" do "{ $to }"
-setting-executable-and-launching = Nastavování "{ $name }" jako spustitelného souboru a spouštění
-set-executable-and-launched = "{ $name }" nastaven jako spustitelný soubor a spuštěn
-setting-permissions = Nastavování práv pro "{ $name }" na { $mode }
-set-permissions = Práva pro "{ $name }" nastavena na { $mode }
+    { $items ->
+        [one] Extrahována
+        [few] Extrahovány
+       *[other] Extrahováno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
+    } z „{ $from }“ do „{ $to }“
+setting-executable-and-launching = Nastavování souboru „{ $name }“ jako spustitelného a spouštění
+set-executable-and-launched = Soubor „{ $name }“ nastaven jako spustitelný a spuštěn
+setting-permissions = Nastavování práv položky „{ $name }“ na { $mode }
+set-permissions = Práva položky „{ $name }“ nastavena na { $mode }
 moving =
     Přesouvání { $items } { $items ->
         [one] položky
        *[other] položek
-    } z "{ $from }" do "{ $to }" ({ $progress })...
+    } z „{ $from }“ do „{ $to }“ ({ $progress })...
 moved =
-    { $items } { $items ->
-        [one] položka přesunuta
-        [few] položky přesunuty
-        [many] položek přesunuto
-       *[other] položek přesunuto
-    } z "{ $from }" do "{ $to }"
+    { $items ->
+        [one] Přesunuta
+        [few] Přesunuty
+       *[other] Přesunuto
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
+    } z „{ $from }“ do „{ $to }“
 permanently-deleting =
     Trvalé mazání { $items } { $items ->
         [one] položky
@@ -343,15 +363,18 @@ removing-from-recents =
        *[other] položek
     } z { recents }
 removed-from-recents =
-    { $items } { $items ->
-        [one] položka odstraněna
-        [few] položky odstraněny
-        [many] položek odstraněno
-       *[other] položek odstraněno
+    { $items ->
+        [one] Odstraněna
+        [few] Odstraněny
+       *[other] Odstraněno
+    } { $items } { $items ->
+        [one] položka
+        [few] položky
+       *[other] položek
     } z { recents }
 remove-from-recents = Odstranit z nedávných
-renaming = Přejmenování "{ $from }" na "{ $to }"
-renamed = Přejmenováno "{ $from }" na "{ $to }"
+renaming = Přejmenování „{ $from }“ na „{ $to }“
+renamed = Přejmenováno „{ $from }“ na „{ $to }“
 unknown-folder = neznámá složka
 show-details = Zobrazit detaily
 type = Typ: { $mime }
@@ -363,14 +386,14 @@ item-accessed = Poslední přístup: { $accessed }
 calculating = Vypočítávání...
 single-click = Otevřít jedním kliknutím
 type-to-search = Vyhledávání psaním
-type-to-search-recursive = Prohledává současnou složku a její podsložky
+type-to-search-recursive = Prohledává aktuální složku a její podsložky
 type-to-search-enter-path = Zadává cestu ke složce nebo souboru
 compress = Komprimovat
 eject = Vysunout
 extract-here = Extrahovat
-change-wallpaper = Změnit pozadí...
+change-wallpaper = Změnit tapetu...
 desktop-appearance = Vzhled plochy...
-display-settings = Nastavení displeje...
+display-settings = Nastavení obrazovky...
 reload-folder = Znovu načíst složku
 sort-z-a = Z-A
 sort-newest-first = Nejnovější první
@@ -380,3 +403,14 @@ sort-largest-to-smallest = Od největšího po nejmenší
 gallery-preview = Náhled galerie
 sort = Řazení
 sort-a-z = A-Z
+empty-trash-title = Vysypat koš?
+type-to-search-select = Vybere první shodující se soubor nebo složku
+pasted-image = Vložen obrázek
+pasted-text = Vložen text
+pasted-video = Vloženo video
+copy-to-button-label = Kopírovat
+move-to-button-label = Přesunout
+copy-to = Kopírovat do...
+move-to = Přesunout do...
+copy-to-title = Vyberte cíl kopírování
+move-to-title = Vyberte cíl přesunutí

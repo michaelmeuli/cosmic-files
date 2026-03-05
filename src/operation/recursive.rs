@@ -7,7 +7,7 @@ use std::time::Instant;
 use std::{cell::Cell, error::Error, fs, ops::ControlFlow, path::PathBuf, rc::Rc};
 use walkdir::WalkDir;
 
-use crate::operation::OperationError;
+use crate::operation::{OperationError, sync_to_disk};
 
 use super::{Controller, OperationSelection, ReplaceResult, copy_unique_path};
 
@@ -23,17 +23,18 @@ pub struct Context {
     on_replace: Pin<Box<dyn OnReplace>>,
     pub(crate) op_sel: OperationSelection,
     replace_result_opt: Option<ReplaceResult>,
+    remaining_conflicts: usize,
 }
 
 pub trait OnProgress: Fn(&Op, &Progress) + 'static {}
 impl<F> OnProgress for F where F: Fn(&Op, &Progress) + 'static {}
 
 pub trait OnReplace:
-    for<'a> Fn(&'a Op) -> Pin<Box<dyn Future<Output = ReplaceResult> + 'a>> + 'static
+    for<'a> Fn(&'a Op, usize) -> Pin<Box<dyn Future<Output = ReplaceResult> + 'a>> + 'static
 {
 }
 impl<F> OnReplace for F where
-    F: for<'a> Fn(&'a Op) -> Pin<Box<dyn Future<Output = ReplaceResult> + 'a>> + 'static
+    F: for<'a> Fn(&'a Op, usize) -> Pin<Box<dyn Future<Output = ReplaceResult> + 'a>> + 'static
 {
 }
 
@@ -44,19 +45,22 @@ impl Context {
             buf: vec![0u8; 128 * 1024],
             controller,
             on_progress: Box::new(|_op, _progress| {}),
-            on_replace: Box::pin(|_op| Box::pin(async { ReplaceResult::Cancel })),
+            on_replace: Box::pin(|_op, _count| Box::pin(async { ReplaceResult::Cancel })),
             op_sel: OperationSelection::default(),
             replace_result_opt: None,
+            remaining_conflicts: 0,
         }
     }
 
     pub async fn recursive_copy_or_move(
         &mut self,
-        from_to_pairs: Vec<(PathBuf, PathBuf)>,
+        from_to_pairs: impl IntoIterator<Item = (PathBuf, PathBuf)>,
         method: Method,
     ) -> Result<bool, OperationError> {
         let mut ops = Vec::new();
         let mut cleanup_ops = Vec::new();
+        let mut written_files = Vec::new();
+        let mut target_dirs = std::collections::HashSet::new();
         for (from_parent, to_parent) in from_to_pairs {
             self.controller
                 .check()
@@ -68,7 +72,7 @@ impl Context {
                 continue;
             }
 
-            for entry in WalkDir::new(&from_parent).into_iter() {
+            for entry in WalkDir::new(&from_parent) {
                 self.controller
                     .check()
                     .await
@@ -76,7 +80,11 @@ impl Context {
 
                 let entry = entry.map_err(|err| {
                     OperationError::from_err(
-                        format!("failed to walk directory {:?}: {}", from_parent, err),
+                        format!(
+                            "failed to walk directory {}: {}",
+                            from_parent.display(),
+                            err
+                        ),
                         &self.controller,
                     )
                 })?;
@@ -92,7 +100,7 @@ impl Context {
                 } else if file_type.is_symlink() {
                     let target = fs::read_link(&from).map_err(|err| {
                         OperationError::from_err(
-                            format!("failed to read link {:?}: {}", from, err),
+                            format!("failed to read link {}: {}", from_parent.display(), err),
                             &self.controller,
                         )
                     })?;
@@ -111,8 +119,10 @@ impl Context {
                     let relative = from.strip_prefix(&from_parent).map_err(|err| {
                         OperationError::from_err(
                             format!(
-                                "failed to remove prefix {:?} from {:?}: {}",
-                                from_parent, from, err
+                                "failed to remove prefix {} from {}: {}",
+                                from_parent.display(),
+                                from.display(),
+                                err
                             ),
                             &self.controller,
                         )
@@ -130,10 +140,13 @@ impl Context {
                     }),
                     is_cleanup: false,
                 };
-                if matches!(method, Method::Move { .. }) {
-                    if let Some(cleanup_op) = op.move_cleanup_op() {
-                        cleanup_ops.push(cleanup_op);
-                    }
+                if matches!(method, Method::Move { .. })
+                    && let Some(cleanup_op) = op.move_cleanup_op()
+                {
+                    cleanup_ops.push(cleanup_op);
+                }
+                if let Some(parent) = op.to.parent() {
+                    target_dirs.insert(parent.to_path_buf());
                 }
                 ops.push(op);
             }
@@ -142,9 +155,19 @@ impl Context {
         }
 
         // Add cleanup ops after standard ops, in reverse
-        for cleanup_op in cleanup_ops.into_iter().rev() {
-            ops.push(cleanup_op);
-        }
+        cleanup_ops.reverse();
+        ops.append(&mut cleanup_ops);
+
+        // Count potential conflicts (files that would need replacement)
+        self.remaining_conflicts = ops
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op.kind,
+                    OpKind::Copy | OpKind::Move { .. } | OpKind::Symlink { .. }
+                ) && op.to.is_file()
+            })
+            .count();
 
         let total_ops = ops.len();
         for (current_ops, mut op) in ops.into_iter().enumerate() {
@@ -163,22 +186,37 @@ impl Context {
             if op.run(self, progress).await.map_err(|err| {
                 OperationError::from_err(
                     format!(
-                        "failed to {:?} {:?} to {:?}: {}",
-                        op.kind, op.from, op.to, err
+                        "failed to {:?} {} to {}: {}",
+                        op.kind,
+                        op.from.display(),
+                        op.to.display(),
+                        err
                     ),
                     &self.controller,
                 )
             })? {
+                if matches!(
+                    op.kind,
+                    OpKind::Copy
+                        | OpKind::Move {
+                            cross_device_copy: true
+                        }
+                ) {
+                    written_files.push(op.to.clone());
+                }
                 // The from path is ignored in the operation selection if it is a top level item
                 if self.op_sel.ignored.contains(&op.from) {
                     // So add the to path to the selection
-                    self.op_sel.selected.push(op.to.clone());
+                    self.op_sel.selected.push(op.to);
                 }
             } else {
                 // Cancelled
                 return Ok(false);
             }
         }
+
+        // Flush files to disk
+        sync_to_disk(written_files, target_dirs).await;
 
         Ok(true)
     }
@@ -196,7 +234,7 @@ impl Context {
     async fn replace(&mut self, op: &Op) -> Result<ControlFlow<bool, PathBuf>, Box<dyn Error>> {
         let replace_result = match self.replace_result_opt {
             Some(result) => result,
-            None => (self.on_replace)(op).await,
+            None => (self.on_replace)(op, self.remaining_conflicts).await,
         };
 
         match replace_result {
@@ -209,7 +247,7 @@ impl Context {
             }
             ReplaceResult::KeepBoth => match op.to.parent() {
                 Some(to_parent) => Ok(ControlFlow::Continue(copy_unique_path(&op.from, to_parent))),
-                None => Err(format!("failed to get parent of {:?}", op.to).into()),
+                None => Err(format!("failed to get parent of {}", op.to.display()).into()),
             },
             ReplaceResult::Skip(apply_to_all) => {
                 if apply_to_all {
@@ -297,7 +335,7 @@ impl Op {
                     }
                 }
 
-                let (from_file, metadata, mut to_file) = futures::try_join!(
+                let (from_file, metadata, mut to_file) = cosmic::iced::futures::try_join!(
                     async {
                         compio::fs::OpenOptions::new()
                             .read(true)
@@ -319,7 +357,11 @@ impl Op {
                 (ctx.on_progress)(self, &progress);
                 if let Err(err) = to_file.set_permissions(metadata.permissions()).await {
                     // This error is not propagated upwards as some filesystems do not support setting permissions
-                    log::warn!("failed to set permissions for {:?}: {}", self.to, err);
+                    log::warn!(
+                        "failed to set permissions for {}: {}",
+                        self.to.display(),
+                        err
+                    );
                 }
 
                 // Prevent spamming the progress callbacks.
@@ -372,7 +414,33 @@ impl Op {
                     buf_in = buf_out;
                 }
 
-                to_file.sync_all().await?;
+                let mut times = fs::FileTimes::new();
+                {
+                    use std::os::unix::prelude::MetadataExt;
+                    log::info!("{}", metadata.mtime());
+                }
+                if let Ok(time) = dbg!(metadata.modified()) {
+                    times = times.set_modified(time);
+                }
+                if let Ok(time) = dbg!(metadata.accessed()) {
+                    times = times.set_accessed(time);
+                }
+                //TODO: upstream set_times implementation to compio?
+                {
+                    use compio::driver::{ToSharedFd, op::AsyncifyFd};
+                    let op =
+                        AsyncifyFd::new(to_file.to_shared_fd(), move |file: &std::fs::File| {
+                            BufResult(file.set_times(times).map(|_| 0), ())
+                        });
+                    match compio::runtime::submit(op).await.0.map(|_| ()) {
+                        Ok(()) => {
+                            log::info!("set times for {} to {:?}", self.to.display(), times);
+                        }
+                        Err(err) => {
+                            log::warn!("failed to set times for {}: {}", self.to.display(), err);
+                        }
+                    }
+                }
             }
             OpKind::Move { cross_device_copy } => {
                 // Remove `to` if overwriting and it is an existing file
@@ -402,7 +470,7 @@ impl Op {
                                 self.skipped.cleanup.set(true);
                             }
                             // Try standard copy if hard link fails with cross device error
-                            let mut copy_op = Op {
+                            let mut copy_op = Self {
                                 kind: OpKind::Copy,
                                 from: self.from.clone(),
                                 to: self.to.clone(),
@@ -410,9 +478,8 @@ impl Op {
                                 is_cleanup: self.is_cleanup,
                             };
                             return Box::pin(copy_op.run(ctx, progress)).await;
-                        } else {
-                            return Err(err.into());
                         }
+                        return Err(err.into());
                     }
                 }
             }

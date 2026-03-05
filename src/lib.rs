@@ -12,6 +12,7 @@ use config::Config;
 pub mod config;
 pub mod dialog;
 mod key_bind;
+pub(crate) mod large_image;
 mod localize;
 mod menu;
 mod mime_app;
@@ -21,35 +22,42 @@ mod mouse_area;
 pub mod operation;
 mod spawn_detached;
 use tab::Location;
+mod zoom;
 
 use crate::config::State;
 pub mod tab;
 mod thumbnail_cacher;
 mod thumbnailer;
 
+pub(crate) type FxOrderMap<K, V> = ordermap::OrderMap<K, V, rustc_hash::FxBuildHasher>;
+
 pub(crate) fn err_str<T: ToString>(err: T) -> String {
     err.to_string()
 }
 
 pub fn desktop_dir() -> PathBuf {
-    match dirs::desktop_dir() {
-        Some(path) => path,
-        None => {
-            let path = home_dir().join("Desktop");
-            log::warn!("failed to locate desktop directory, falling back to {path:?}");
-            path
-        }
+    if let Some(path) = dirs::desktop_dir() {
+        path
+    } else {
+        let path = home_dir().join("Desktop");
+        log::warn!(
+            "failed to locate desktop directory, falling back to {}",
+            path.display()
+        );
+        path
     }
 }
 
 pub fn home_dir() -> PathBuf {
-    match dirs::home_dir() {
-        Some(home) => home,
-        None => {
-            let path = PathBuf::from("/");
-            log::warn!("failed to locate home directory, falling back to {path:?}");
-            path
-        }
+    if let Some(home) = dirs::home_dir() {
+        home
+    } else {
+        let path = PathBuf::from("/");
+        log::warn!(
+            "failed to locate home directory, falling back to {}",
+            path.display()
+        );
+        path
     }
 }
 
@@ -115,18 +123,20 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if &arg == "--trash" {
             Location::Trash
         } else if &arg == "--recents" {
-            Location::Recents
+            if config.show_recents {
+                Location::Recents
+            } else {
+                log::warn!("recents feature is disabled in config");
+                continue;
+            }
         } else if &arg == "--network" {
             Location::Network("network:///".to_string(), fl!("networks"), None)
         } else {
             //TODO: support more URLs
             let path = match url::Url::parse(&arg) {
-                Ok(url) if url.scheme() == "file" => match url.to_file_path() {
-                    Ok(path) => path,
-                    Err(()) => {
-                        log::warn!("invalid argument {:?}", arg);
-                        continue;
-                    }
+                Ok(url) if url.scheme() == "file" => if let Ok(path) = url.to_file_path() { path } else {
+                    log::warn!("invalid argument {arg:?}");
+                    continue;
                 },
                 Ok(url) => {
                     uris.push(url);
@@ -137,7 +147,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             match fs::canonicalize(&path) {
                 Ok(absolute) => Location::Path(absolute),
                 Err(err) => {
-                    log::warn!("failed to canonicalize {:?}: {}", path, err);
+                    log::warn!("failed to canonicalize {}: {}", path.display(), err);
                     continue;
                 }
             }
@@ -151,7 +161,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(fork::Fork::Child) => (),
             Ok(fork::Fork::Parent(_child_pid)) => process::exit(0),
             Err(err) => {
-                eprintln!("failed to daemonize: {:?}", err);
+                eprintln!("failed to daemonize: {err:?}");
                 process::exit(1);
             }
         }

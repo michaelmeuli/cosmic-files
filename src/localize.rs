@@ -62,10 +62,10 @@ pub static LOCALE: LazyLock<Locale> = LazyLock::new(|| {
             }
 
             // Try language-only fallback (e.g., "en" from "en-US")
-            if let Some(lang) = cleaned_locale.split('-').next() {
-                if let Ok(locale) = Locale::try_from_str(lang) {
-                    return locale;
-                }
+            if let Some(lang) = cleaned_locale.split('-').next()
+                && let Ok(locale) = Locale::try_from_str(lang)
+            {
+                return locale;
             }
         }
     }
@@ -94,6 +94,6 @@ pub fn localize() {
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
 
     if let Err(error) = localizer.select(&requested_languages) {
-        eprintln!("Error while loading language for COSMIC Files {}", error);
+        eprintln!("Error while loading language for COSMIC Files {error}");
     }
 }

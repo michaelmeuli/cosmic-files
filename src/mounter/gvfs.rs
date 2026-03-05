@@ -16,6 +16,23 @@ use crate::{
 
 const TARGET_URI_ATTRIBUTE: &str = "standard::target-uri";
 
+fn resolve_uri(uri: &str) -> (String, gio::File) {
+    let file = gio::File::for_uri(uri);
+    // Resolve the target-uri if it exists
+    if let Ok(file_info) = file.query_info(
+        TARGET_URI_ATTRIBUTE,
+        gio::FileQueryInfoFlags::NONE,
+        gio::Cancellable::NONE,
+    ) && let Some(resolved_uri) = file_info.attribute_as_string(TARGET_URI_ATTRIBUTE)
+    {
+        let resolved_uri = String::from(resolved_uri);
+        let file = gio::File::for_uri(&resolved_uri);
+        return (resolved_uri, file);
+    }
+
+    (uri.to_string(), file)
+}
+
 fn gio_icon_to_path(icon: &gio::Icon, size: u16) -> Option<PathBuf> {
     if let Some(themed_icon) = icon.downcast_ref::<gio::ThemedIcon>() {
         for name in themed_icon.names() {
@@ -30,58 +47,75 @@ fn gio_icon_to_path(icon: &gio::Icon, size: u16) -> Option<PathBuf> {
 }
 
 fn items(monitor: &gio::VolumeMonitor, sizes: IconSizes) -> MounterItems {
-    let mut items = MounterItems::new();
-    for (i, mount) in monitor.mounts().into_iter().enumerate() {
-        items.push(MounterItem::Gvfs(Item {
-            uri: MountExt::root(&mount).uri().to_string(),
-            kind: ItemKind::Mount,
-            index: i,
-            name: MountExt::name(&mount).to_string(),
-            is_mounted: true,
-            icon_opt: gio_icon_to_path(&MountExt::icon(&mount), sizes.grid()),
-            icon_symbolic_opt: gio_icon_to_path(&MountExt::symbolic_icon(&mount), 16),
-            path_opt: MountExt::root(&mount).path(),
-        }));
-    }
-    for (i, volume) in monitor.volumes().into_iter().enumerate() {
-        if volume.get_mount().is_some() {
+    let mut items: MounterItems = (monitor.mounts().into_iter())
+        .enumerate()
+        // Hide shadowed mounts
+        .filter(|(_, mount)| !mount.is_shadowed())
+        .map(|(i, mount)| {
+            let root = MountExt::root(&mount);
+            let is_remote = root
+                .query_filesystem_info(
+                    gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE,
+                    gio::Cancellable::NONE,
+                )
+                .ok()
+                .map(|info| info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE))
+                .unwrap_or(true); // Default to remote if query fails
+
+            MounterItem::Gvfs(Item {
+                uri: mount.root().uri().into(),
+                kind: ItemKind::Mount,
+                index: i,
+                name: mount.name().into(),
+                is_mounted: true,
+                is_remote,
+                icon_opt: gio_icon_to_path(&MountExt::icon(&mount), sizes.grid()),
+                icon_symbolic_opt: gio_icon_to_path(&MountExt::symbolic_icon(&mount), 16),
+                path_opt: root.path(),
+            })
+        })
+        .collect();
+    items.extend(
+        (monitor.volumes().into_iter())
+            .enumerate()
             // Volumes with mounts are already listed by mount
-            continue;
-        }
-        let uri = VolumeExt::activation_root(&volume)
-            .map(|f| f.uri().to_string())
-            .unwrap_or_default();
-        items.push(MounterItem::Gvfs(Item {
-            // TODO can we get URI for volumes with no mount?
-            uri,
-            kind: ItemKind::Volume,
-            index: i,
-            name: VolumeExt::name(&volume).to_string(),
-            is_mounted: false,
-            icon_opt: gio_icon_to_path(&VolumeExt::icon(&volume), sizes.grid()),
-            icon_symbolic_opt: gio_icon_to_path(&VolumeExt::symbolic_icon(&volume), 16),
-            path_opt: None,
-        }));
-    }
+            .filter(|(_, volume)| volume.get_mount().is_none())
+            .map(|(i, volume)| {
+                let uri = VolumeExt::activation_root(&volume)
+                    .map(|f| f.uri().into())
+                    .unwrap_or_default();
+                MounterItem::Gvfs(Item {
+                    // TODO can we get URI for volumes with no mount?
+                    uri,
+                    kind: ItemKind::Volume,
+                    index: i,
+                    name: volume.name().into(),
+                    is_mounted: false,
+                    is_remote: false,
+                    icon_opt: gio_icon_to_path(&VolumeExt::icon(&volume), sizes.grid()),
+                    icon_symbolic_opt: gio_icon_to_path(&VolumeExt::symbolic_icon(&volume), 16),
+                    path_opt: None,
+                })
+            }),
+    );
     items
 }
 
 fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
-    let mut uri = uri.to_string();
-    let mut file = gio::File::for_uri(&uri);
     let force_dir = uri.starts_with("network:///");
+    let (_, file) = resolve_uri(uri);
 
-    // Resolve the target-uri if it exists
-    if let Ok(file_info) = file.query_info(
-        TARGET_URI_ATTRIBUTE,
-        gio::FileQueryInfoFlags::NONE,
-        gio::Cancellable::NONE,
-    ) {
-        if let Some(resolved_uri) = file_info.attribute_as_string(TARGET_URI_ATTRIBUTE) {
-            uri = resolved_uri.to_string();
-            file = gio::File::for_uri(&uri);
+    // Read .hidden file if present
+    let hidden_files: Box<[String]> = if let Some(path) = file.path() {
+        let hidden_file_path = path.join(".hidden");
+        if hidden_file_path.is_file() {
+            tab::parse_hidden_file(&hidden_file_path)
+        } else {
+            Box::from([])
         }
-    }
+    } else {
+        Box::from([])
+    };
 
     let mut items = Vec::new();
     for info_res in file
@@ -89,10 +123,10 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
         .map_err(err_str)?
     {
         let info = info_res.map_err(err_str)?;
-        let name = info.name().to_string_lossy().to_string();
-        let display_name = info.display_name().to_string();
+        let name = info.name().to_string_lossy().into_owned();
+        let display_name = String::from(info.display_name());
 
-        let uri = file.child(info.name()).uri().to_string();
+        let uri = String::from(file.child(info.name()).uri());
 
         //TODO: what is the best way to resolve shortcuts?
         let location = Location::Network(uri, display_name.clone(), file.child(&name).path());
@@ -100,10 +134,7 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
         let metadata = if !force_dir && !info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE) {
             let mtime = info.attribute_uint64(gio::FILE_ATTRIBUTE_TIME_MODIFIED);
             let is_dir = matches!(info.file_type(), gio::FileType::Directory);
-            let size_opt = match is_dir {
-                true => None,
-                false => Some(info.size() as u64),
-            };
+            let size_opt = (!is_dir).then_some(info.size() as u64);
             let mut children_opt = None;
 
             if is_dir {
@@ -114,7 +145,7 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
                             children_opt = Some(entries.count());
                         }
                         Err(err) => {
-                            log::warn!("failed to read directory {:?}: {}", path, err);
+                            log::warn!("failed to read directory {}: {}", path.display(), err);
                             children_opt = Some(0);
                         }
                     }
@@ -156,12 +187,17 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
             )
         };
 
+        // Check if item is hidden
+        let hidden = name.starts_with('.')
+            || info.boolean(gio::FILE_ATTRIBUTE_STANDARD_IS_HIDDEN)
+            || hidden_files.contains(&name);
+
         items.push(tab::Item {
             name,
             is_mount_point: false,
             display_name,
             metadata,
-            hidden: false,
+            hidden,
             location_opt: Some(location),
             mime,
             icon_handle_grid,
@@ -182,37 +218,38 @@ fn network_scan(uri: &str, sizes: IconSizes) -> Result<Vec<tab::Item>, String> {
     Ok(items)
 }
 
+fn dir_info(uri: &str) -> Result<(String, String, Option<PathBuf>), glib::Error> {
+    let (resolved_uri, file) = resolve_uri(uri);
+    let info = file.query_info(
+        gio::FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
+        gio::FileQueryInfoFlags::NONE,
+        gio::Cancellable::NONE,
+    )?;
+
+    Ok((resolved_uri, info.display_name().into(), file.path()))
+}
+
 fn mount_op(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> gio::MountOperation {
     let mount_op = gio::MountOperation::new();
     mount_op.connect_ask_password(
         move |mount_op, message, default_user, default_domain, flags| {
             let auth = MounterAuth {
                 message: message.to_string(),
-                username_opt: if flags.contains(gio::AskPasswordFlags::NEED_USERNAME) {
-                    Some(default_user.to_string())
-                } else {
-                    None
-                },
-                domain_opt: if flags.contains(gio::AskPasswordFlags::NEED_DOMAIN) {
-                    Some(default_domain.to_string())
-                } else {
-                    None
-                },
-                password_opt: if flags.contains(gio::AskPasswordFlags::NEED_PASSWORD) {
-                    Some(String::new())
-                } else {
-                    None
-                },
-                remember_opt: if flags.contains(gio::AskPasswordFlags::SAVING_SUPPORTED) {
-                    Some(false)
-                } else {
-                    None
-                },
-                anonymous_opt: if flags.contains(gio::AskPasswordFlags::ANONYMOUS_SUPPORTED) {
-                    Some(false)
-                } else {
-                    None
-                },
+                username_opt: flags
+                    .contains(gio::AskPasswordFlags::NEED_USERNAME)
+                    .then(|| default_user.to_string()),
+                domain_opt: flags
+                    .contains(gio::AskPasswordFlags::NEED_DOMAIN)
+                    .then(|| default_domain.to_string()),
+                password_opt: flags
+                    .contains(gio::AskPasswordFlags::NEED_PASSWORD)
+                    .then(String::new),
+                remember_opt: flags
+                    .contains(gio::AskPasswordFlags::SAVING_SUPPORTED)
+                    .then_some(false),
+                anonymous_opt: flags
+                    .contains(gio::AskPasswordFlags::ANONYMOUS_SUPPORTED)
+                    .then_some(false),
             };
             let (auth_tx, mut auth_rx) = mpsc::channel(1);
             event_tx
@@ -252,6 +289,10 @@ enum Cmd {
         IconSizes,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
+    DirInfo(
+        String,
+        mpsc::Sender<Result<(String, String, Option<PathBuf>), glib::Error>>,
+    ),
     Unmount(MounterItem),
 }
 
@@ -277,6 +318,7 @@ pub struct Item {
     index: usize,
     name: String,
     is_mounted: bool,
+    is_remote: bool,
     icon_opt: Option<PathBuf>,
     icon_symbolic_opt: Option<PathBuf>,
     path_opt: Option<PathBuf>,
@@ -287,8 +329,12 @@ impl Item {
         self.name.clone()
     }
 
-    pub fn is_mounted(&self) -> bool {
+    pub const fn is_mounted(&self) -> bool {
         self.is_mounted
+    }
+
+    pub const fn is_remote(&self) -> bool {
+        self.is_remote
     }
 
     pub fn uri(&self) -> String {
@@ -395,19 +441,37 @@ impl Gvfs {
                                     continue;
                                 }
 
-                                log::info!("mount {}", name);
+                                log::info!("mount {name}");
                                 //TODO: do not use name as a URI for mount_op
                                 let mount_op = mount_op(name.to_string(), event_tx.clone());
                                 let event_tx = event_tx.clone();
                                 let mounter_item = mounter_item.clone();
+                                let volume_for_callback = volume.clone();
                                 VolumeExt::mount(
                                     &volume,
                                     gio::MountMountFlags::NONE,
                                     Some(&mount_op),
                                     gio::Cancellable::NONE,
                                     move |res| {
-                                        log::info!("mount {}: result {:?}", name, res);
-                                        event_tx.send(Event::MountResult(mounter_item, match res {
+                                        log::info!("mount {name}: result {res:?}");
+                                        // Update the mounter_item with mount information after successful mount
+                                        let mut updated_item = mounter_item.clone();
+                                        if res.is_ok()
+                                            && let MounterItem::Gvfs(ref mut item) = updated_item
+                                                && let Some(mount) = volume_for_callback.get_mount() {
+                                                    let root = MountExt::root(&mount);
+                                                    item.path_opt = root.path();
+                                                    item.is_mounted = true;
+                                                    // Query if remote
+                                                    item.is_remote = root
+                                                        .query_filesystem_info(
+                                                            gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE,
+                                                            gio::Cancellable::NONE,
+                                                        )
+                                                        .ok().map(|info| info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE))
+                                                        .unwrap_or(true);
+                                                }
+                                        event_tx.send(Event::MountResult(updated_item, match res {
                                             Ok(()) => {
                                                 _ = complete_tx.send(Ok(()));
                                                 Ok(true)
@@ -416,7 +480,7 @@ impl Gvfs {
                                                 _ = complete_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                                 match err.kind::<gio::IOErrorEnum>() {
                                                 Some(gio::IOErrorEnum::FailedHandled) => Ok(false),
-                                                _ => Err(format!("{}", err))
+                                                _ => Err(format!("{err}"))
                                             }}
                                         })).unwrap();
                                     },
@@ -433,7 +497,7 @@ impl Gvfs {
                                 Some(&mount_op),
                                 gio::Cancellable::NONE,
                                 move |res| {
-                                    log::info!("network drive {}: result {:?}", uri, res);
+                                    log::info!("network drive {uri}: result {res:?}");
                                     event_tx.send(Event::NetworkResult(uri, match res {
                                         Ok(()) => {
                                             _ = result_tx.send(Ok(()));
@@ -442,57 +506,49 @@ impl Gvfs {
                                             _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
                                             match err.kind::<gio::IOErrorEnum>() {
                                             Some(gio::IOErrorEnum::FailedHandled) => Ok(false),
-                                            _ => Err(format!("{}", err))
+                                            _ => Err(format!("{err}"))
                                         }}
                                     })).unwrap();
                                 }
                             );
                         }
-                        Cmd::NetworkScan(mut uri, sizes, items_tx) => {
-                            let original_uri = uri.clone();
-                            let mut file = gio::File::for_uri(&uri);
-                            if let Ok(file_info) = file.query_info(
-                                TARGET_URI_ATTRIBUTE,
-                                gio::FileQueryInfoFlags::NONE,
-                                gio::Cancellable::NONE,
-                            ) {
-                                if let Some(resolved_uri) = file_info.attribute_as_string(TARGET_URI_ATTRIBUTE) {
-                                    uri = resolved_uri.to_string();
-                                    file = gio::File::for_uri(&uri);
-                                }
-                            }
+                        Cmd::NetworkScan(uri, sizes, items_tx) => {
+                            let (resolved_uri, file) = resolve_uri(&uri);
 
-                            let needs_mount = uri != "network:///" && match file.find_enclosing_mount(gio::Cancellable::NONE) {
+                            let needs_mount = resolved_uri != "network:///" && match file.find_enclosing_mount(gio::Cancellable::NONE) {
                                 Ok(_) => false,
                                 Err(err) => matches!(err.kind::<gio::IOErrorEnum>(), Some(gio::IOErrorEnum::NotMounted))
                             };
 
                             if needs_mount {
-                                let mount_op = mount_op(uri.clone(), event_tx.clone());
+                                let mount_op = mount_op(resolved_uri.clone(), event_tx.clone());
                                 let event_tx = event_tx.clone();
                                 file.mount_enclosing_volume(
                                     gio::MountMountFlags::empty(),
                                     Some(&mount_op),
                                     gio::Cancellable::NONE,
                                     move |res| {
-                                        log::info!("network scan mounted {}: result {:?}", uri, res);
+                                        log::info!("network scan mounted {resolved_uri}: result {res:?}");
                                         // FIXME sometimes a uri can be mounted and then not recognized as mounted...
                                         // seems to be related to uri with a path
-                                        items_tx.blocking_send(network_scan(&original_uri, sizes)).unwrap();
-                                        event_tx.send(Event::NetworkResult(uri, match res {
+                                        items_tx.blocking_send(network_scan(&uri, sizes)).unwrap();
+                                        event_tx.send(Event::NetworkResult(resolved_uri, match res {
                                             Ok(()) => {
                                                 Ok(true)
                                             },
                                             Err(err) => match err.kind::<gio::IOErrorEnum>() {
                                                 Some(gio::IOErrorEnum::FailedHandled) => Ok(false),
-                                                _ => Err(format!("{}", err))
+                                                _ => Err(format!("{err}"))
                                             }
                                         })).unwrap();
                                     }
                                 );
                             } else {
-                                items_tx.send(network_scan(&original_uri, sizes)).await.unwrap();
+                                items_tx.send(network_scan(&uri, sizes)).await.unwrap();
                             }
+                        }
+                        Cmd::DirInfo(uri, result_tx) => {
+                            result_tx.send(dir_info(&uri)).await.unwrap();
                         }
                         Cmd::Unmount(mounter_item) => {
                             let MounterItem::Gvfs(item) = mounter_item else { continue };
@@ -509,25 +565,25 @@ impl Gvfs {
                                 }
 
                                 if MountExt::can_eject(&mount) {
-                                    log::info!("eject {}", name);
+                                    log::info!("eject {name}");
                                     MountExt::eject_with_operation(
                                         &mount,
                                         gio::MountUnmountFlags::NONE,
                                         gio::MountOperation::NONE,
                                         gio::Cancellable::NONE,
                                         move |result| {
-                                            log::info!("eject {}: result {:?}", name, result);
+                                            log::info!("eject {name}: result {result:?}");
                                         },
                                     );
                                 } else {
-                                    log::info!("unmount {}", name);
+                                    log::info!("unmount {name}");
                                     MountExt::unmount_with_operation(
                                         &mount,
                                         gio::MountUnmountFlags::NONE,
                                         gio::MountOperation::NONE,
                                         gio::Cancellable::NONE,
                                         move |result| {
-                                            log::info!("unmount {}: result {:?}", name, result);
+                                            log::info!("unmount {name}: result {result:?}");
                                         },
                                     );
                                 }
@@ -536,7 +592,7 @@ impl Gvfs {
                     }
                 }
             });
-            main_loop.run()
+            main_loop.run();
         });
         Self {
             command_tx,
@@ -594,14 +650,19 @@ impl Mounter for Gvfs {
         items_rx.blocking_recv()
     }
 
+    fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)> {
+        let (result_tx, mut result_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(Cmd::DirInfo(uri.to_string(), result_tx))
+            .unwrap();
+        result_rx.blocking_recv().and_then(|res| res.ok())
+    }
+
     fn unmount(&self, item: MounterItem) -> Task<()> {
         let command_tx = self.command_tx.clone();
-        Task::perform(
-            async move {
-                command_tx.send(Cmd::Unmount(item)).unwrap();
-            },
-            |x| x,
-        )
+        Task::future(async move {
+            command_tx.send(Cmd::Unmount(item)).unwrap();
+        })
     }
 
     fn subscription(&self) -> Subscription<MounterMessage> {
@@ -615,7 +676,7 @@ impl Mounter for Gvfs {
                     match event {
                         Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
                         Event::Items(items) => {
-                            output.send(MounterMessage::Items(items)).await.unwrap()
+                            output.send(MounterMessage::Items(items)).await.unwrap();
                         }
                         Event::MountResult(item, res) => output
                             .send(MounterMessage::MountResult(item, res))

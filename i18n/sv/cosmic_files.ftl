@@ -1,11 +1,13 @@
 cosmic-files = COSMIC Filer
+comment = Filhanterare för skrivbordsmiljön COSMIC
+keywords = Folder;Katalog;Mapp;Manager;
 empty-folder = Mappen är tom
 empty-folder-hidden = Mappen är tom (har dolda objekt)
 no-results = Inga resultat hittades
 filesystem = Filsystem
 home = Hem
 networks = Nätverk
-notification-in-progress = Filoperationer pågår.
+notification-in-progress = Filåtgärder pågår
 trash = Papperskorg
 recents = Senaste
 undo = Ångra
@@ -32,7 +34,7 @@ create-archive = Skapa arkiv
 ## Töm papperskorgen dialogruta
 
 empty-trash = Töm papperskorgen
-empty-trash-warning = Är du säker på att du vill ta bort alla objekt i papperskorgen permanent?
+empty-trash-warning = Objekt i papperskorgen kommer att tas bort permanent
 
 ## Monteringsfel dialogruta
 
@@ -44,11 +46,11 @@ create-new-file = Skapa ny fil
 create-new-folder = Skapa ny mapp
 file-name = Filnamn
 folder-name = Mappnamn
-file-already-exists = En fil med det namnet finns redan.
-folder-already-exists = En mapp med det namnet finns redan.
-name-hidden = Namn som börjar med "." kommer att vara dolda.
-name-invalid = Namnet kan inte vara "{ $filename }".
-name-no-slashes = Namnet får inte innehålla snedstreck.
+file-already-exists = En fil med det namnet finns redan
+folder-already-exists = En mapp med det namnet finns redan
+name-hidden = Namn som börjar med "." kommer att vara dolda
+name-invalid = Namnet får inte vara "{ $filename }"
+name-no-slashes = Namnet får inte innehålla snedstreck
 
 ## Öppna/Spara dialogruta
 
@@ -77,9 +79,9 @@ rename-folder = Byt namn på mapp
 
 ## Ersätt dialogruta
 
-replace = Ersätt
-replace-title = "{ $filename }" existerar redan på den här platsen.
-replace-warning = Vill du ersätta den med den du sparar? Om du ersätter den kommer dess innehåll att skrivas över.
+replace = Byt ut
+replace-title = "{ $filename }" finns redan på den här platsen
+replace-warning = Vill du ersätta filen med den du sparar? Om du ersätter den kommer dess innehåll att skrivas över.
 replace-warning-operation = Vill du ersätta den? Om du ersätter den kommer dess innehåll att skrivas över.
 original-file = Originalfil
 replace-with = Ersätt med
@@ -109,15 +111,15 @@ details = Detaljer
 dismiss = Avfärda meddelande
 operations-running =
     { $running } { $running ->
-        [one] operation
-       *[other] operationer
+        [one] åtgärd
+       *[other] åtgärder
     } kör ({ $percent }%)...
 operations-running-finished =
     { $running } { $running ->
-        [one] operation
-       *[other] operationer
+        [one] åtgärd
+       *[other] åtgärder
     } kör ({ $percent }%), { $finished } slutförda...
-pause = Paus
+pause = Pausa
 resume = Återuppta
 
 # Kontextsidor
@@ -168,15 +170,15 @@ failed = Misslyckad
 complete = Färdig
 compressing =
     Komprimerar { $items } { $items ->
-        [one] item
-       *[other] items
-    } from "{ $from }" to "{ $to }" ({ $progress })...
+        [one] objekt
+       *[other] objekt
+    } från "{ $from }" till "{ $to }" ({ $progress })...
 compressed =
     Komprimerade { $items } { $items ->
-        [one] item
-       *[other] items
-    } from "{ $from }" to "{ $to }"
-copy_noun = Koperia
+        [one] objekt
+       *[other] objekt
+    } från "{ $from }" till "{ $to }"
+copy_noun = Kopiera
 creating = Skapar "{ $name }" i "{ $parent }"
 created = Skapade "{ $name }" i "{ $parent }"
 copying =
@@ -202,7 +204,7 @@ extracted =
        *[other] flera objekt
     } från "{ $from }" till "{ $to }"
 setting-executable-and-launching = Gör "{ $name }" körbar och startar
-set-executable-and-launched = Gör "{ $name }" körbar och startar
+set-executable-and-launched = Gjorde "{ $name }" körbar och startade
 moving =
     Flyttar { $items } { $items ->
         [one] objekt
@@ -213,8 +215,8 @@ moved =
         [one] objekt
        *[other] flera objekt
     } från "{ $from }" till "{ $to }"
-renaming = Byter namn "{ $from }" till "{ $to }"
-renamed = Bytt namn "{ $from }" till "{ $to }"
+renaming = Byter namn på "{ $from }" till "{ $to }"
+renamed = Bytt namn på "{ $from }" till "{ $to }"
 restoring =
     Återställer { $items } { $items ->
         [one] objekt
@@ -256,8 +258,8 @@ single-click = Ett enkelklick för att öppna
 appearance = Utseende
 theme = Tema
 match-desktop = Matcha skrivbordet
-dark = Mörk
-light = Ljus
+dark = Mörkt
+light = Ljust
 
 ### Skriv för att söka
 
@@ -316,14 +318,14 @@ list-view = Listvy
 show-hidden-files = Visa dolda filer
 list-directories-first = Lista mappar först
 gallery-preview = Galleri förhandsvisning
-menu-settings = Inställningar...
+menu-settings = Inställningar…
 menu-about = Om COSMIC Filer...
 
 ## Sortera
 
 sort = Sortera
-sort-a-z = A-Z
-sort-z-a = Z-A
+sort-a-z = A-Ö
+sort-z-a = Ö-A
 sort-newest-first = Nyaste först
 sort-oldest-first = Äldst först
 sort-smallest-to-largest = Minsta till största
@@ -337,9 +339,9 @@ extract-to = Packa upp till...
 extract-to-title = Packa upp till mapp
 other-apps = Andra program
 related-apps = Relaterade program
-permanently-delete-question = Ta bort permanent
+permanently-delete-question = Ta bort permanent?
 delete = Ta bort
-permanently-delete-warning = Är du säker att du vill ta bort { $target } permanent? Detta kan inte göras ogjort.
+permanently-delete-warning = { $target } kommer att tas bort permanent. Detta kan inte göras ogjort.
 none = Ingen
 execute-only = Endast exekvera
 write-only = Endast skriva
@@ -350,8 +352,8 @@ read-write = Läsa och skriva
 read-write-execute = Läsa, skriva och exekvera
 favorite-path-error = Fel vid öppning av mapp
 favorite-path-error-description =
-    Kunde inte öppna "{ $path }".
-    Den finns inte eller så har du inte behörighet att öppna den.
+    Kunde inte öppna "{ $path }"
+    "{ $path }" finns kanske inte eller så har du inte behörighet att öppna den
 
     Vill du ta bort den från sidolisten?
 keep = Behåll
@@ -362,7 +364,7 @@ deleting =
        *[other] objekt
     } från { trash } ({ $progress })...
 deleted =
-    Raderade { $items } { $items ->
+    Borttagna { $items } { $items ->
         [one] objekt
        *[other] objekt
     } från { trash }
@@ -374,10 +376,10 @@ permanently-deleting =
        *[other] objekt
     } permanent
 permanently-deleted =
-    Raderade { $items } { $items ->
+    Permanent borttagna { $items } { $items ->
         [one] objekt
        *[other] objekt
-    } permanent
+    }
 removing-from-recents =
     Tar bort { $items } { $items ->
         [one] objekt
@@ -388,8 +390,19 @@ removed-from-recents =
         [one] objekt
        *[other] objekt
     } från { recents }
-delete-permanently = Radera permanent
+delete-permanently = Ta bort permanent
 eject = Mata ut
 remove-from-recents = Ta bort från senaste
 reload-folder = Ladda om mapp
-selected-items = de { $items } valda objekten
+selected-items = De { $items } valda objekten
+empty-trash-title = Töm papperskorgen?
+type-to-search-select = Markerar den första matchande filen eller mappen
+pasted-image = Inklistrad bild
+pasted-text = Inklistrad text
+pasted-video = Inklistrad video
+copy-to-title = Välj mål för kopiering
+copy-to-button-label = Kopiera
+move-to-title = Välj mål för flytt
+move-to-button-label = Flytta
+copy-to = Kopiera till...
+move-to = Flytta till...

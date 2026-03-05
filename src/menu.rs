@@ -22,7 +22,7 @@ use crate::{
     app::{Action, Message},
     config::Config,
     fl,
-    tab::{self, HeadingOptions, Location, LocationMenuAction, Tab},
+    tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab},
 };
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
@@ -32,7 +32,7 @@ macro_rules! menu_button {
     ($($x:expr),+ $(,)?) => (
         button::custom(
             Row::with_children(
-                vec![$(Element::from($x)),+]
+                [$(Element::from($x)),+]
             )
             .height(Length::Fixed(24.0))
             .align_y(Alignment::Center)
@@ -43,7 +43,7 @@ macro_rules! menu_button {
     );
 }
 
-fn menu_button_optional(
+const fn menu_button_optional(
     label: String,
     action: Action,
     enabled: bool,
@@ -59,9 +59,10 @@ pub fn context_menu<'a>(
     tab: &Tab,
     key_binds: &HashMap<KeyBind, Action>,
     modifiers: &Modifiers,
+    clipboard_paste_available: bool,
 ) -> Element<'a, tab::Message> {
     let find_key = |action: &Action| -> String {
-        for (key_bind, key_action) in key_binds.iter() {
+        for (key_bind, key_action) in key_binds {
             if action == key_action {
                 return key_bind.to_string();
             }
@@ -71,6 +72,13 @@ pub fn context_menu<'a>(
     fn key_style(theme: &cosmic::Theme) -> TextStyle {
         let mut color = theme.cosmic().background.component.on;
         color.alpha *= 0.75;
+        TextStyle {
+            color: Some(color.into()),
+        }
+    }
+    fn disabled_style(theme: &cosmic::Theme) -> TextStyle {
+        let mut color = theme.cosmic().background.component.on;
+        color.alpha *= 0.5;
         TextStyle {
             color: Some(color.into()),
         }
@@ -85,6 +93,18 @@ pub fn context_menu<'a>(
         )
         .on_press(tab::Message::ContextAction(action))
     };
+
+    let menu_item_disabled = |label, action: Action| {
+        let key = find_key(&action);
+        menu_button!(
+            text::body(label).class(theme::Text::Custom(disabled_style)),
+            horizontal_space(),
+            text::body(key).class(theme::Text::Custom(disabled_style))
+        )
+    };
+
+    // Allow paste when clipboard has data and we're in a location that supports it
+    let can_paste = clipboard_paste_available && tab.location.supports_paste();
 
     let (sort_name, sort_direction, _) = tab.sort_options();
     let sort_item = |label, variant| {
@@ -110,15 +130,17 @@ pub fn context_menu<'a>(
     let mut selected_types: Vec<Mime> = vec![];
     let mut selected_mount_point = 0;
     if let Some(items) = tab.items_opt() {
-        for item in items.iter() {
+        for item in items {
             if item.selected {
                 selected += 1;
                 if item.metadata.is_dir() {
-                    selected_mount_point += item.is_mount_point as i32;
+                    selected_mount_point += i32::from(item.is_mount_point);
                     selected_dir += 1;
                 }
                 match &item.location_opt {
-                    Some(Location::Trash) => selected_trash_only = true,
+                    Some(Location::Trash) | Some(Location::Search(SearchLocation::Trash, ..)) => {
+                        selected_trash_only = true
+                    }
                     Some(Location::Path(path)) => {
                         if selected == 1
                             && path.extension().and_then(|s| s.to_str()) == Some("desktop")
@@ -131,7 +153,7 @@ pub fn context_menu<'a>(
                 selected_types.push(item.mime.clone());
             }
         }
-    };
+    }
     selected_types.sort_unstable();
     selected_types.dedup();
     selected_trash_only = selected_trash_only && selected == 1;
@@ -154,7 +176,8 @@ pub fn context_menu<'a>(
             tab::Mode::App | tab::Mode::Desktop,
             Location::Desktop(..)
             | Location::Path(..)
-            | Location::Search(..)
+            | Location::Search(SearchLocation::Path(..), ..)
+            | Location::Search(SearchLocation::Recents, ..)
             | Location::Recents
             | Location::Network(_, _, Some(_)),
         ) => {
@@ -167,14 +190,18 @@ pub fn context_menu<'a>(
                 children.push(menu_item(fl!("open"), Action::Open).into());
                 #[cfg(feature = "desktop")]
                 {
-                    for (i, action) in entry.desktop_actions.into_iter().enumerate() {
-                        children.push(menu_item(action.name, Action::ExecEntryAction(i)).into())
-                    }
+                    children.extend(entry.desktop_actions.into_iter().enumerate().map(
+                        |(i, action)| menu_item(action.name, Action::ExecEntryAction(i)).into(),
+                    ));
                 }
                 children.push(divider::horizontal::light().into());
                 children.push(menu_item(fl!("rename"), Action::Rename).into());
                 children.push(menu_item(fl!("cut"), Action::Cut).into());
-                children.push(menu_item(fl!("copy"), Action::Copy).into());
+                if modifiers.shift() && !modifiers.control() {
+                    children.push(menu_item(fl!("copy-path"), Action::CopyPath).into());
+                } else {
+                    children.push(menu_item(fl!("copy"), Action::Copy).into());
+                }
                 // Should this simply bypass trash and remove the shortcut?
                 children.push(menu_item(fl!("move-to-trash"), Action::Delete).into());
             } else if selected > 0 {
@@ -188,7 +215,7 @@ pub fn context_menu<'a>(
                             .push(menu_item(fl!("open-in-terminal"), Action::OpenTerminal).into());
                     }
                 }
-                if matches!(tab.location, Location::Search(..) | Location::Recents) {
+                if tab.location.is_recents() {
                     children.push(
                         menu_item(fl!("open-item-location"), Action::OpenItemLocation).into(),
                     );
@@ -204,14 +231,19 @@ pub fn context_menu<'a>(
                     children.push(menu_item(fl!("rename"), Action::Rename).into());
                     children.push(menu_item(fl!("cut"), Action::Cut).into());
                 }
-                children.push(menu_item(fl!("copy"), Action::Copy).into());
+                if modifiers.shift() && !modifiers.control() {
+                    children.push(menu_item(fl!("copy-path"), Action::CopyPath).into());
+                } else {
+                    children.push(menu_item(fl!("copy"), Action::Copy).into());
+                }
+                if selected_mount_point == 0 {
+                    children.push(menu_item(fl!("move-to"), Action::MoveTo).into());
+                }
+                children.push(menu_item(fl!("copy-to"), Action::CopyTo).into());
 
                 children.push(divider::horizontal::light().into());
-                let supported_archive_types = crate::archive::SUPPORTED_ARCHIVE_TYPES
-                    .iter()
-                    .filter_map(|mime_type| mime_type.parse::<Mime>().ok())
-                    .collect::<Vec<_>>();
-                selected_types.retain(|t| !supported_archive_types.contains(t));
+                let supported_archive_types = crate::archive::SUPPORTED_ARCHIVE_TYPES;
+                selected_types.retain(|t| supported_archive_types.iter().copied().all(|m| *t != m));
                 if selected_types.is_empty() {
                     children.push(menu_item(fl!("extract-here"), Action::ExtractHere).into());
                     children.push(menu_item(fl!("extract-to"), Action::ExtractTo).into());
@@ -226,7 +258,7 @@ pub fn context_menu<'a>(
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
                 }
                 children.push(divider::horizontal::light().into());
-                if matches!(tab.location, Location::Recents) {
+                if tab.location.is_recents() {
                     children.push(
                         menu_item(fl!("remove-from-recents"), Action::RemoveFromRecents).into(),
                     );
@@ -246,14 +278,21 @@ pub fn context_menu<'a>(
             } else {
                 //TODO: need better designs for menu with no selection
                 //TODO: have things like properties but they apply to the folder?
-                children.push(menu_item(fl!("new-folder"), Action::NewFolder).into());
-                children.push(menu_item(fl!("new-file"), Action::NewFile).into());
-                children.push(menu_item(fl!("open-in-terminal"), Action::OpenTerminal).into());
-                children.push(divider::horizontal::light().into());
+                if tab.location != Location::Recents {
+                    children.push(menu_item(fl!("new-folder"), Action::NewFolder).into());
+                    children.push(menu_item(fl!("new-file"), Action::NewFile).into());
+                    children.push(menu_item(fl!("open-in-terminal"), Action::OpenTerminal).into());
+                    children.push(divider::horizontal::light().into());
+                }
+
                 if tab.mode.multiple() {
                     children.push(menu_item(fl!("select-all"), Action::SelectAll).into());
                 }
-                children.push(menu_item(fl!("paste"), Action::Paste).into());
+                if can_paste {
+                    children.push(menu_item(fl!("paste"), Action::Paste).into());
+                } else {
+                    children.push(menu_item_disabled(fl!("paste"), Action::Paste).into());
+                }
 
                 //TODO: only show if cosmic-settings is found?
                 if matches!(tab.mode, tab::Mode::Desktop) {
@@ -286,7 +325,8 @@ pub fn context_menu<'a>(
             tab::Mode::Dialog(dialog_kind),
             Location::Desktop(..)
             | Location::Path(..)
-            | Location::Search(..)
+            | Location::Search(SearchLocation::Path(..), ..)
+            | Location::Search(SearchLocation::Recents, ..)
             | Location::Recents
             | Location::Network(_, _, Some(_)),
         ) => {
@@ -294,7 +334,7 @@ pub fn context_menu<'a>(
                 if selected_dir == 1 && selected == 1 || selected_dir == 0 {
                     children.push(menu_item(fl!("open"), Action::Open).into());
                 }
-                if matches!(tab.location, Location::Search(..) | Location::Recents) {
+                if matches!(tab.location, Location::Search(..)) || tab.location.is_recents() {
                     children.push(
                         menu_item(fl!("open-item-location"), Action::OpenItemLocation).into(),
                     );
@@ -333,7 +373,7 @@ pub fn context_menu<'a>(
                 children.push(sort_item(fl!("sort-by-size"), HeadingOptions::Size));
             }
         }
-        (_, Location::Trash) => {
+        (_, Location::Trash | Location::Search(SearchLocation::Trash, ..)) => {
             if tab.mode.multiple() {
                 children.push(menu_item(fl!("select-all"), Action::SelectAll).into());
             }
@@ -392,16 +432,16 @@ pub fn dialog_menu(
             Action::SetSort(sort, dir),
         )
     };
-    let in_trash = tab.location == Location::Trash;
+    let in_trash = tab.location.is_trash();
 
     let mut selected_gallery = 0;
     if let Some(items) = tab.items_opt() {
-        for item in items.iter() {
+        for item in items {
             if item.selected && item.can_gallery() {
                 selected_gallery += 1;
             }
         }
-    };
+    }
 
     MenuBar::new(vec![
         menu::Tree::with_children(
@@ -529,8 +569,9 @@ pub fn menu_bar<'a>(
     config: &Config,
     modifiers: &Modifiers,
     key_binds: &HashMap<KeyBind, Action>,
+    clipboard_paste_available: bool,
 ) -> Element<'a, Message> {
-    let sort_options = tab_opt.map(|tab| tab.sort_options());
+    let sort_options = tab_opt.map(Tab::sort_options);
     let sort_item = |label, sort, dir| {
         menu::Item::CheckBox(
             label,
@@ -541,13 +582,13 @@ pub fn menu_bar<'a>(
             Action::SetSort(sort, dir),
         )
     };
-    let in_trash = tab_opt.is_some_and(|tab| tab.location == Location::Trash);
+    let in_trash = tab_opt.is_some_and(|tab| tab.location.is_trash());
 
     let mut selected_dir = 0;
     let mut selected = 0;
     let mut selected_gallery = 0;
     if let Some(items) = tab_opt.and_then(|tab| tab.items_opt()) {
-        for item in items.iter() {
+        for item in items {
             if item.selected {
                 selected += 1;
                 if item.metadata.is_dir() {
@@ -558,7 +599,11 @@ pub fn menu_bar<'a>(
                 }
             }
         }
-    };
+    }
+
+    // Allow paste when clipboard has data and we're in a location that supports it
+    let can_paste =
+        clipboard_paste_available && tab_opt.is_some_and(|tab| tab.location.supports_paste());
 
     let (delete_item, delete_item_action) = if in_trash || modifiers.shift() {
         (fl!("delete-permanently"), Action::Delete)
@@ -621,7 +666,9 @@ pub fn menu_bar<'a>(
                     vec![
                         menu_button_optional(fl!("cut"), Action::Cut, selected > 0),
                         menu_button_optional(fl!("copy"), Action::Copy, selected > 0),
-                        menu_button_optional(fl!("paste"), Action::Paste, selected > 0),
+                        menu_button_optional(fl!("move-to"), Action::MoveTo, selected > 0),
+                        menu_button_optional(fl!("copy-to"), Action::CopyTo, selected > 0),
+                        menu_button_optional(fl!("paste"), Action::Paste, can_paste),
                         menu::Item::Button(fl!("select-all"), None, Action::SelectAll),
                         menu::Item::Divider,
                         menu::Item::Button(fl!("history"), None, Action::EditHistory),
@@ -719,7 +766,7 @@ pub fn menu_bar<'a>(
 
 pub fn location_context_menu<'a>(ancestor_index: usize) -> Element<'a, tab::Message> {
     //TODO: only add some of these when in App mode
-    let children = vec![
+    let children = [
         menu_button!(text::body(fl!("open-in-new-tab")))
             .on_press(tab::Message::LocationMenuAction(
                 LocationMenuAction::OpenInNewTab(ancestor_index),

@@ -8,10 +8,10 @@ use cosmic::{
     iced::Subscription,
     theme,
 };
-use ordermap::OrderMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    FxOrderMap,
     app::App,
     tab::{HeadingOptions, Location, View},
 };
@@ -75,21 +75,17 @@ pub enum Favorite {
 impl Favorite {
     pub fn from_path(path: PathBuf) -> Self {
         // Ensure that special folders are handled properly
-        for favorite in &[
+        [
             Self::Home,
             Self::Documents,
             Self::Downloads,
             Self::Music,
             Self::Pictures,
             Self::Videos,
-        ] {
-            if let Some(favorite_path) = favorite.path_opt() {
-                if favorite_path == path {
-                    return favorite.clone();
-                }
-            }
-        }
-        Self::Path(path)
+        ]
+        .into_iter()
+        .find(|fav| fav.path_opt().as_ref() == Some(&path))
+        .unwrap_or(Self::Path(path))
     }
 
     pub fn path_opt(&self) -> Option<PathBuf> {
@@ -110,18 +106,19 @@ impl Favorite {
 pub enum TypeToSearch {
     Recursive,
     EnterPath,
+    SelectByPrefix,
 }
 
 #[derive(Clone, CosmicConfigEntry, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct State {
-    pub sort_names: ordermap::OrderMap<String, (HeadingOptions, bool)>,
+    pub sort_names: FxOrderMap<String, (HeadingOptions, bool)>,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
-            sort_names: OrderMap::from_iter(dirs::download_dir().into_iter().map(|dir| {
+            sort_names: FxOrderMap::from_iter(dirs::download_dir().into_iter().map(|dir| {
                 (
                     Location::Path(dir).normalize().to_string(),
                     (HeadingOptions::Modified, false),
@@ -135,18 +132,18 @@ impl State {
     pub fn load() -> (Option<cosmic_config::Config>, Self) {
         match cosmic_config::Config::new_state(App::APP_ID, CONFIG_VERSION) {
             Ok(config_handler) => {
-                let config = match State::get_entry(&config_handler) {
+                let config = match Self::get_entry(&config_handler) {
                     Ok(ok) => ok,
                     Err((errs, config)) => {
-                        log::info!("errors loading config: {:?}", errs);
+                        log::info!("errors loading config: {errs:?}");
                         config
                     }
                 };
                 (Some(config_handler), config)
             }
             Err(err) => {
-                log::error!("failed to create config handler: {}", err);
-                (None, State::default())
+                log::error!("failed to create config handler: {err}");
+                (None, Self::default())
             }
         }
     }
@@ -170,6 +167,7 @@ pub struct Config {
     pub thumb_cfg: ThumbCfg,
     pub favorites: Vec<Favorite>,
     pub show_details: bool,
+    pub show_recents: bool,
     pub tab: TabConfig,
     pub type_to_search: TypeToSearch,
 }
@@ -178,18 +176,18 @@ impl Config {
     pub fn load() -> (Option<cosmic_config::Config>, Self) {
         match cosmic_config::Config::new(App::APP_ID, CONFIG_VERSION) {
             Ok(config_handler) => {
-                let config = match Config::get_entry(&config_handler) {
+                let config = match Self::get_entry(&config_handler) {
                     Ok(ok) => ok,
                     Err((errs, config)) => {
-                        log::info!("errors loading config: {:?}", errs);
+                        log::info!("errors loading config: {errs:?}");
                         config
                     }
                 };
                 (Some(config_handler), config)
             }
             Err(err) => {
-                log::error!("failed to create config handler: {}", err);
-                (None, Config::default())
+                log::error!("failed to create config handler: {err}");
+                (None, Self::default())
             }
         }
     }
@@ -204,7 +202,7 @@ impl Config {
     }
 
     /// Construct tab config for dialog
-    pub fn dialog_tab(&self) -> TabConfig {
+    pub const fn dialog_tab(&self) -> TabConfig {
         TabConfig {
             folders_first: self.dialog.folders_first,
             icon_sizes: self.dialog.icon_sizes,
@@ -232,6 +230,7 @@ impl Default for Config {
                 Favorite::Videos,
             ],
             show_details: false,
+            show_recents: true,
             tab: TabConfig::default(),
             type_to_search: TypeToSearch::Recursive,
         }

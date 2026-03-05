@@ -1,11 +1,11 @@
 use crate::{
-    app::{ArchiveType, DialogPage, Message},
+    app::{ArchiveType, DialogPage, Message, REPLACE_BUTTON_ID},
     config::IconSizes,
     fl,
     spawn_detached::spawn_detached,
     tab,
 };
-use cosmic::iced::futures::{SinkExt, channel::mpsc::Sender};
+use cosmic::iced::futures::{self, SinkExt, StreamExt, channel::mpsc::Sender, stream};
 use std::{
     borrow::Cow,
     fmt::Formatter,
@@ -32,11 +32,12 @@ async fn handle_replace(
     file_from: PathBuf,
     file_to: PathBuf,
     multiple: bool,
+    conflict_count: usize,
 ) -> ReplaceResult {
     let item_from = match tab::item_from_path(file_from, IconSizes::default()) {
         Ok(ok) => ok,
         Err(err) => {
-            log::warn!("{}", err);
+            log::warn!("{err}");
             return ReplaceResult::Cancel;
         }
     };
@@ -44,7 +45,7 @@ async fn handle_replace(
     let item_to = match tab::item_from_path(file_to, IconSizes::default()) {
         Ok(ok) => ok,
         Err(err) => {
-            log::warn!("{}", err);
+            log::warn!("{err}");
             return ReplaceResult::Cancel;
         }
     };
@@ -53,13 +54,17 @@ async fn handle_replace(
     let _ = msg_tx
         .lock()
         .await
-        .send(Message::DialogPush(DialogPage::Replace {
-            from: item_from,
-            to: item_to,
-            multiple,
-            apply_to_all: false,
-            tx,
-        }))
+        .send(Message::DialogPush(
+            DialogPage::Replace {
+                from: item_from,
+                to: item_to,
+                multiple,
+                apply_to_all: false,
+                conflict_count,
+                tx,
+            },
+            Some(REPLACE_BUTTON_ID.clone()),
+        ))
         .await;
     rx.recv().await.unwrap_or(ReplaceResult::Cancel)
 }
@@ -95,13 +100,13 @@ async fn copy_or_move(
     compio::runtime::spawn(async move {
         let controller = controller_c;
         log::info!(
-            "{} {:?} to {:?}",
+            "{} {:?} to {}",
             match method {
                 Method::Copy => "Copy",
                 Method::Move { .. } => "Move",
             },
             paths,
-            to
+            to.display()
         );
 
         // Handle duplicate file names by renaming paths
@@ -138,12 +143,15 @@ async fn copy_or_move(
                 //TODO: use compio::fs::rename?
                 match fs::rename(from, to) {
                     Ok(()) => {
-                        log::info!("renamed {from:?} to {to:?}");
+                        log::info!("renamed {} to {}", from.display(), to.display());
                         false
                     }
                     Err(err) => {
                         log::info!(
-                            "failed to rename {from:?} to {to:?}, fallback to recursive move: {err}"
+                            "failed to rename {} to {}, fallback to recursive move: {}",
+                            from.display(),
+                            to.display(),
+                            err
                         );
                         true
                     }
@@ -174,9 +182,9 @@ async fn copy_or_move(
 
         {
             let msg_tx = msg_tx.clone();
-            context = context.on_replace(move |op| {
+            context = context.on_replace(move |op, conflict_count| {
                 let msg_tx = msg_tx.clone();
-                Box::pin(handle_replace(msg_tx, op.from.clone(), op.to.clone(), true))
+                Box::pin(handle_replace(msg_tx, op.from.clone(), op.to.clone(), true, conflict_count))
             });
         }
 
@@ -190,7 +198,32 @@ async fn copy_or_move(
     .map_err(wrap_compio_spawn_error)?
 }
 
-fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
+pub async fn sync_to_disk(
+    written_files: Vec<PathBuf>,
+    target_dirs: std::collections::HashSet<PathBuf>,
+) {
+    // Sync files to disk
+    stream::iter(written_files.into_iter().map(|path| async move {
+        if let Ok(file) = compio::fs::OpenOptions::new().write(true).open(&path).await {
+            let _ = file.sync_all().await;
+        }
+    }))
+    .buffer_unordered(32)
+    .collect::<Vec<_>>()
+    .await;
+
+    // Sync directories to disk
+    stream::iter(target_dirs.into_iter().map(|path| async move {
+        if let Ok(dir) = compio::fs::OpenOptions::new().read(true).open(&path).await {
+            let _ = dir.sync_all().await;
+        }
+    }))
+    .buffer_unordered(16)
+    .collect::<Vec<_>>()
+    .await;
+}
+
+pub fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
     // List of compound extensions to check
     const COMPOUND_EXTENSIONS: &[&str] = &[
         ".tar.gz",
@@ -214,8 +247,9 @@ fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
             let file_name = file_name.to_string();
             COMPOUND_EXTENSIONS
                 .iter()
-                .find(|&&ext| file_name.ends_with(ext))
-                .map(|&ext| {
+                .copied()
+                .find(|&ext| file_name.ends_with(ext))
+                .map(|ext| {
                     (
                         file_name.strip_suffix(ext).unwrap().to_string(),
                         Some(ext[1..].to_string()),
@@ -224,15 +258,14 @@ fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
                 .unwrap_or_else(|| {
                     from.file_stem()
                         .and_then(|s| s.to_str())
-                        .map(|stem| {
+                        .map_or((file_name, None), |stem| {
                             (
                                 stem.to_string(),
                                 from.extension()
                                     .and_then(|e| e.to_str())
-                                    .map(|e| e.to_string()),
+                                    .map(str::to_string),
                             )
                         })
-                        .unwrap_or((file_name, None))
                 })
         };
 
@@ -246,7 +279,7 @@ fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
                 }
             };
 
-            to = to.join(&new_name);
+            to.push(&new_name);
 
             if !matches!(to.try_exists(), Ok(true)) {
                 break;
@@ -280,7 +313,7 @@ fn paths_parent_name(paths: &[PathBuf]) -> Cow<'_, str> {
         return fl!("unknown-folder").into();
     };
 
-    for path in paths.iter() {
+    for path in paths {
         //TODO: is it possible to have different parents, and what should be returned?
         if path.parent() != Some(parent) {
             return fl!("unknown-folder").into();
@@ -324,7 +357,7 @@ pub enum Operation {
     EmptyTrash,
     /// Uncompress files
     Extract {
-        paths: Vec<PathBuf>,
+        paths: Box<[PathBuf]>,
         to: PathBuf,
         password: Option<String>,
     },
@@ -342,10 +375,10 @@ pub enum Operation {
     },
     /// Permanently delete items, skipping the trash
     PermanentlyDelete {
-        paths: Vec<PathBuf>,
+        paths: Box<[PathBuf]>,
     },
     RemoveFromRecents {
-        paths: Vec<PathBuf>,
+        paths: Box<[PathBuf]>,
     },
     Rename {
         from: PathBuf,
@@ -394,18 +427,18 @@ impl OperationError {
     pub fn from_err<T: ToString>(err: T, controller: &Controller) -> Self {
         controller.set_state(ControllerState::Failed);
 
-        OperationError {
+        Self {
             kind: OperationErrorType::Generic(err.to_string()),
         }
     }
 
     pub fn from_kind(kind: OperationErrorType, controller: &Controller) -> Self {
         controller.set_state(ControllerState::Failed);
-        OperationError { kind }
+        Self { kind }
     }
 
     pub fn from_msg(m: impl Into<String>) -> Self {
-        OperationError {
+        Self {
             kind: OperationErrorType::Generic(m.into()),
         }
     }
@@ -569,7 +602,7 @@ impl Operation {
         }
     }
 
-    pub fn show_progress_notification(&self) -> bool {
+    pub const fn show_progress_notification(&self) -> bool {
         // Long running operations show a progress notification
         match self {
             Self::Compress { .. }
@@ -622,7 +655,7 @@ impl Operation {
                         let controller = controller_c;
                         let Some(relative_root) = to.parent() else {
                             return Err(OperationError::from_err(
-                                format!("path {:?} has no parent directory", to),
+                                format!("path {} has no parent directory", to.display()),
                                 &controller,
                             ));
                         };
@@ -633,7 +666,7 @@ impl Operation {
                         };
 
                         let mut paths = paths;
-                        for path in paths.clone().iter() {
+                        for path in &paths.clone() {
                             if path.is_dir() {
                                 let new_paths_it = WalkDir::new(path).into_iter();
                                 for entry in new_paths_it.skip(1) {
@@ -860,6 +893,8 @@ impl Operation {
                         let items = trash::os_limited::list()
                             .map_err(|e| OperationError::from_err(e, &controller))?;
                         let count = items.len();
+                        let mut errors: Vec<trash::Error> = Vec::new();
+
                         for (i, item) in items.into_iter().enumerate() {
                             futures::executor::block_on(async {
                                 controller
@@ -868,11 +903,31 @@ impl Operation {
                                     .map_err(|s| OperationError::from_state(s, &controller))
                             })?;
 
-                            controller.set_progress(i as f32 / count as f32);
+                            if let Err(e) = trash::os_limited::purge_all([item]) {
+                                errors.push(e);
+                            }
 
-                            trash::os_limited::purge_all([item])
-                                .map_err(|e| OperationError::from_err(e, &controller))?;
+                            controller.set_progress(i as f32 / count as f32);
                         }
+
+                        // Report errors at the end
+                        if !errors.is_empty() {
+                            log::warn!("Failed to purge {} items:", errors.len());
+                            for e in &errors {
+                                log::warn!("  - {e}");
+                            }
+
+                            // Return an error to signal partial failure
+                            return Err(OperationError::from_err(
+                                format!(
+                                    "Failed to delete {} of {} items. Check log for details.",
+                                    errors.len(),
+                                    count
+                                ),
+                                &controller,
+                            ));
+                        }
+
                         Ok(())
                     })
                     .await
@@ -906,10 +961,10 @@ impl Operation {
                                 let dir_name = get_directory_name(file_name);
                                 let mut new_dir = to.join(dir_name);
 
-                                if new_dir.exists() {
-                                    if let Some(new_dir_parent) = new_dir.parent() {
-                                        new_dir = copy_unique_path(&new_dir, new_dir_parent);
-                                    }
+                                if new_dir.exists()
+                                    && let Some(new_dir_parent) = new_dir.parent()
+                                {
+                                    new_dir = copy_unique_path(&new_dir, new_dir_parent);
                                 }
 
                                 op_sel.ignored.push(path.clone());
@@ -1008,7 +1063,7 @@ impl Operation {
             }
             Self::RemoveFromRecents { paths } => {
                 tokio::task::spawn_blocking(move || {
-                    let path_refs = paths.iter().map(|p| p.as_ref()).collect::<Vec<&Path>>();
+                    let path_refs = paths.iter().map(PathBuf::as_path).collect::<Box<[_]>>();
                     recently_used_xbel::remove_recently_used(&path_refs)
                 })
                 .await
@@ -1157,7 +1212,7 @@ mod tests {
         path::PathBuf,
     };
 
-    use cosmic::iced::futures::{StreamExt, channel::mpsc};
+    use cosmic::iced::futures::{StreamExt, channel::mpsc, future};
     use log::debug;
     use test_log::test;
     use tokio::sync;
@@ -1198,11 +1253,11 @@ mod tests {
         let handle_messages = async move {
             while let Some(msg) = rx.next().await {
                 match msg {
-                    Message::DialogPush(DialogPage::Replace { tx, .. }) => {
+                    Message::DialogPush(DialogPage::Replace { tx, .. }, _id_to_focus) => {
                         debug!("[{id}] Replace request");
                         tx.send(ReplaceResult::Cancel)
                             .await
-                            .expect("Sending a response to a replace request should succeed")
+                            .expect("Sending a response to a replace request should succeed");
                     }
                     _ => unreachable!(
                         "Only [ `Message::PendingProgress`, `Message::DialogPush(DialogPage::Replace)` ] are sent from operation"
@@ -1211,7 +1266,7 @@ mod tests {
             }
         };
 
-        futures::future::join(handle_messages, handle_copy).await.1
+        future::join(handle_messages, handle_copy).await.1
     }
 
     #[test(compio::test)]

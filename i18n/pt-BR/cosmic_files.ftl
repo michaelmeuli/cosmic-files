@@ -1,18 +1,19 @@
 cosmic-files = Gestor de Arquivos COSMIC
+comment = Gerenciador de arquivos do ambiente COSMIC
 empty-folder = Pasta vazia
 empty-folder-hidden = Pasta vazia (contém itens ocultos)
 no-results = Nenhum item encontrado
-filesystem = Sistema de Arquivos
+filesystem = Sistema de arquivos
 home = Pasta pessoal
 networks = Redes
-notification-in-progress = Há operações de arquivo em andamento.
+notification-in-progress = Há operações de arquivo em andamento
 trash = Lixeira
 recents = Recentes
 undo = Desfazer
 today = Hoje
 # Desktop view options
 desktop-view-options = Opções de visualização da área de trabalho...
-show-on-desktop = Mostrar na área de trabalho
+show-on-desktop = Mostrar na Área de trabalho
 desktop-folder-content = Conteúdo da pasta da área de trabalho
 mounted-drives = Dispositivos montados
 trash-folder-icon = Ícone da lixeira
@@ -21,7 +22,7 @@ icon-size = Tamanho do ícone
 grid-spacing = Espaçamento entre ícones
 # List view
 name = Nome
-modified = Modificação
+modified = Modificado
 trashed-on = Enviado à lixeira
 size = Tamanho
 # Progress footer
@@ -56,11 +57,11 @@ extract-to-title = Extrair para pasta
 ## Empty Trash Dialog
 
 empty-trash = Esvaziar a lixeira
-empty-trash-warning = Tem certeza de que deseja apagar permanentemente todos os itens da lixeira?
+empty-trash-warning = Todos os itens da Lixeira serão permanentemente excluídos
 
 ## Mount Error Dialog
 
-mount-error = Não foi possível acessar o dispositivo
+mount-error = Não é possível acessar a unidade
 
 ## New File/Folder Dialog
 
@@ -68,16 +69,16 @@ create-new-file = Criar novo arquivo
 create-new-folder = Criar nova pasta
 file-name = Nome do arquivo
 folder-name = Nome da pasta
-file-already-exists = Já existe um arquivo com este nome.
-folder-already-exists = Já existe uma pasta com este nome.
-name-hidden = Nomes iniciando com "." serão ocultados.
-name-invalid = O nome não pode ser "{ $filename }".
-name-no-slashes = O nome não pode conter barras.
+file-already-exists = Já existe um arquivo com esse nome
+folder-already-exists = Já existe uma pasta com esse nome
+name-hidden = Os nomes que começam com "." serão ocultados
+name-invalid = O nome não pode ser "{ $filename }"
+name-no-slashes = O nome não pode conter barras
 
 ## Open/Save Dialog
 
 cancel = Cancelar
-create = Confirmar
+create = Criar
 open = Abrir
 open-file = Abrir arquivo
 open-folder = Abrir pasta
@@ -98,8 +99,8 @@ related-apps = Aplicativos relacionados
 
 ## Permanently delete Dialog
 
-selected-items = os { $items } itens selecionados
-permanently-delete-question = Excluir permanentemente
+selected-items = Os { $items } itens selecionados
+permanently-delete-question = Excluir permanentemente?
 delete = Excluir
 permanently-delete-warning = Deseja realmente excluir permanentemente { $target }? Esta operação não poderá ser desfeita.
 
@@ -111,9 +112,9 @@ rename-folder = Renomear pasta
 ## Replace Dialog
 
 replace = Substituir
-replace-title = "{ $filename }" já existe neste local.
-replace-warning = Deseja substituir o arquivo com o que você está salvando? Substituí-lo irá sobrescrever seu conteúdo.
-replace-warning-operation = Deseja substituir o arquivo? Substituí-lo irá sobrescrever seu conteúdo.
+replace-title = "{ $filename }" já existe neste local
+replace-warning = Deseja substituí-lo por aquele que está salvando? Ao substituí-lo, seu conteúdo será sobrescrito.
+replace-warning-operation = Deseja substituí-lo? Ao substituí-lo, seu conteúdo será sobrescrito.
 original-file = Arquivo original
 replace-with = Substituir por
 apply-to-all = Aplicar a todos
@@ -122,8 +123,8 @@ skip = Ignorar
 
 ## Set as Executable and Launch Dialog
 
-set-executable-and-launch = Marcar como executável e iniciar
-set-executable-and-launch-description = Deseja marcar "{ $name }" como executável e iniciá-lo?
+set-executable-and-launch = Definir como executável e iniciar
+set-executable-and-launch-description = Deseja definir "{ $name }" como executável e iniciá-lo?
 set-and-launch = Marcar e iniciar
 
 ## Metadata Dialog
@@ -169,8 +170,8 @@ read-write-execute = Leitura, escrita e execução
 
 favorite-path-error = Erro ao abrir diretório
 favorite-path-error-description =
-    Não foi possível abrir "{ $path }".
-    O item pode não existir ou você não tem permissão para abri-lo.
+    Não foi possível abrir "{ $path }"
+    "{ $path }" pode não existir ou você não tem permissão para abri-lo
 
     Deseja removê-lo da barra lateral?
 remove = Remover
@@ -226,16 +227,16 @@ progress-paused = { $percent }%, pausado
 failed = Com falha
 complete = Concluído
 compressing =
-    Comprimindo { $items } { $items ->
+    Compactando { $items } { $items ->
         [one] item
        *[other] itens
     } de "{ $from }" para "{ $to }" ({ $progress })...
 compressed =
     { $items } { $items ->
-        [one] item comprimido
-       *[other] itens comprimidos
+        [one] item compactado
+       *[other] itens compactados
     } de "{ $from }" para "{ $to }"
-copy_noun = Copiado
+copy_noun = Copiar
 creating = Criando "{ $name }" em "{ $parent }"
 created = "{ $name }" criado em "{ $parent }"
 copying =
@@ -354,7 +355,7 @@ type-to-search-recursive = Pesquisa na pasta atual e em todas as subpastas
 type-to-search-enter-path = Insere o caminho do diretório ou arquivo
 # Context menu
 add-to-sidebar = Adicionar à barra lateral
-compress = Comprimir
+compress = Compactar
 delete-permanently = Excluir permanentemente
 eject = Desmontar
 extract-here = Extrair
@@ -420,3 +421,15 @@ sort-newest-first = Mais novos primeiro
 sort-oldest-first = Mais antigos primeiro
 sort-smallest-to-largest = Do menor para o maior
 sort-largest-to-smallest = Do maior para o menor
+empty-trash-title = Esvaziar a lixeira?
+type-to-search-select = Seleciona o primeiro arquivo ou pasta correspondente
+pasted-image = Imagem colada
+pasted-text = Texto copiado
+pasted-video = Vídeo copiado
+copy-to-title = Selecione o destino da cópia
+copy-to-button-label = Copiar
+move-to-title = Selecione o destino da movimentação
+move-to-button-label = Mover
+copy-to = Copiar para...
+move-to = Mover para...
+keywords = Pasta;Gerenciador;
