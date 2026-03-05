@@ -52,16 +52,10 @@ i18n-embed = { version = "0.16", features = [
 ] }
 i18n-embed-fl = "0.10"
 rust-embed = "8"
-<<<<<<< HEAD
-slotmap = "1.0.7"
-recently-used-xbel = { git = "https://github.com/pop-os/recently-used-xbel.git" }
-zip = "5.1.1"
-=======
 slotmap = "1.1.1"
 recently-used-xbel = "1.2.0"
 zip = "7"
 uzers = "0.12.2"
->>>>>>> master
 md-5 = "0.10.6"
 png = "0.18"
 jxl-oxide = { version = "0.12.5", features = ["image"] }

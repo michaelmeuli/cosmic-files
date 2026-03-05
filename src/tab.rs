@@ -65,7 +65,6 @@ use std::{
     fs::{self, File, Metadata},
     hash::Hash,
     io::{BufRead, BufReader},
-    os::unix::fs::MetadataExt,
     path::{self, Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock, RwLock, atomic},
