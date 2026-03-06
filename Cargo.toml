@@ -56,8 +56,7 @@ i18n-embed-fl = "0.10"
 rust-embed = "8"
 slotmap = "1.0.7"
 recently-used-xbel = { git = "https://github.com/pop-os/recently-used-xbel.git" }
-zip = "6.0"
-uzers = "0.12.1"
+zip = "5.1.1"
 md-5 = "0.10.6"
 png = "0.18"
 jxl-oxide = { version = "0.12.5", features = ["image"] }
@@ -115,6 +114,7 @@ fork = "0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"
+uzers = "0.12.1"
 
 [dev-dependencies]
 # cap-std = "3"
