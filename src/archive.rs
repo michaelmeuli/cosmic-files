@@ -182,20 +182,28 @@ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
             let mut target = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut target)?;
 
+            // release mutable borrow of archive
+            drop(file);
+
             #[cfg(unix)]
             {
                 use std::os::unix::ffi::OsStringExt;
                 let target = OsString::from_vec(target);
                 std::os::unix::fs::symlink(&target, outpath.as_path())?;
             }
+
             #[cfg(windows)]
             {
                 let Ok(target) = String::from_utf8(target) else {
-                    return Err(ZipError::InvalidArchive("Invalid UTF-8 as symlink target"));
+                    return Err(ZipError::InvalidArchive(std::borrow::Cow::Borrowed(
+                        "Invalid UTF-8 as symlink target",
+                    )));
                 };
                 let target = target.into_boxed_str();
-                let target_is_dir_from_archive =
-                    archive.shared.files.contains_key(&target) && is_dir(&target);
+                let target_is_dir_from_archive = archive.file_names().any(|name| {
+                    name.ends_with('/')
+                        && name.trim_end_matches('/') == target.as_ref().trim_end_matches('/')
+                });
                 let target_path = directory.as_ref().join(OsString::from(target.to_string()));
                 let target_is_dir = if target_is_dir_from_archive {
                     true
