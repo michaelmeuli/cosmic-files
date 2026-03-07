@@ -415,6 +415,7 @@ impl Op {
                 }
 
                 let mut times = fs::FileTimes::new();
+                #[cfg(unix)]
                 {
                     use std::os::unix::prelude::MetadataExt;
                     log::info!("{}", metadata.mtime());

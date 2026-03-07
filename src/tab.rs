@@ -1,7 +1,6 @@
 use chrono::{Datelike, Timelike, Utc};
 use cosmic::{
     Apply, Element, cosmic_theme,
-    desktop::fde::{DesktopEntry, get_languages_from_env},
     font,
     iced::{
         Alignment,
@@ -40,6 +39,8 @@ use cosmic::{
         menu::{action::MenuAction, key_bind::KeyBind},
     },
 };
+#[cfg(not(windows))]
+use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use i18n_embed::LanguageLoader;
 use icu::{
     datetime::{
@@ -65,12 +66,16 @@ use std::{
     fs::{self, File, Metadata},
     hash::Hash,
     io::{BufRead, BufReader},
-    os::unix::fs::MetadataExt,
     path::{self, Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock, RwLock, atomic},
     time::{Duration, Instant, SystemTime},
 };
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
 use trash::{TrashItem, TrashItemMetadata, TrashItemSize};
@@ -99,6 +104,7 @@ use crate::{
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
 };
+#[cfg(unix)]
 use uzers::{get_group_by_gid, get_user_by_uid};
 
 pub const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
@@ -586,6 +592,7 @@ pub fn fs_kind(_metadata: &Metadata) -> FsKind {
     FsKind::Local
 }
 
+#[cfg(not(windows))]
 fn get_desktop_file_display_name(path: &Path) -> Option<String> {
     let locales = get_languages_from_env();
     let entry = match DesktopEntry::from_path(path, Some(&locales)) {
@@ -599,6 +606,15 @@ fn get_desktop_file_display_name(path: &Path) -> Option<String> {
     entry.name(&locales).map(|s| s.into_owned())
 }
 
+#[cfg(windows)]
+fn get_desktop_file_display_name(path: &Path) -> Option<String> {
+    // Windows has no .desktop files; just use the filename
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+#[cfg(not(windows))]
 fn get_desktop_file_icon(path: &Path) -> Option<String> {
     let entry = match DesktopEntry::from_path::<&str>(path, None) {
         Ok(ok) => ok,
@@ -609,6 +625,12 @@ fn get_desktop_file_icon(path: &Path) -> Option<String> {
     };
 
     entry.icon().map(str::to_string)
+}
+
+#[cfg(windows)]
+fn get_desktop_file_icon(_path: &Path) -> Option<String> {
+    // Windows does not support .desktop files
+    None
 }
 
 /// Creates an icon handle from a desktop file's Icon field value.
@@ -622,6 +644,7 @@ fn desktop_icon_handle(icon: &str, size: u16) -> widget::icon::Handle {
     }
 }
 
+#[cfg(not(windows))]
 pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
     let locales = get_languages_from_env();
     let entry = match DesktopEntry::from_path(path, Some(&locales)) {
@@ -635,6 +658,17 @@ pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
         entry.name(&locales).map(|s| s.into_owned()),
         entry.icon().map(str::to_string),
     )
+}
+
+#[cfg(windows)]
+pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
+    // Windows has no .desktop files, so fall back to filename
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string());
+
+    (name, None)
 }
 
 fn display_name_for_file(path: &Path, name: &str, get_from_gvfs: bool, is_desktop: bool) -> String {

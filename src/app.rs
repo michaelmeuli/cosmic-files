@@ -19,7 +19,6 @@ use cosmic::{
     app::{self, Core, Task, context_drawer},
     cosmic_config::{self, ConfigSet},
     cosmic_theme,
-    desktop::fde::DesktopEntry,
     executor,
     iced::{
         self, Alignment, Event, Length, Rectangle, Size, Subscription,
@@ -45,6 +44,8 @@ use cosmic::{
         vertical_space,
     },
 };
+#[cfg(not(windows))]
+use cosmic::desktop::fde::DesktopEntry;
 use mime_guess::Mime;
 use notify_debouncer_full::{
     DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
@@ -870,7 +871,10 @@ impl App {
             // First launch apps that can be launched directly
             if mime == "application/x-desktop" {
                 // Try opening desktop application
-                Self::launch_desktop_entries(&paths);
+                #[cfg(not(windows))]
+                {
+                    Self::launch_desktop_entries(&paths);
+                }
                 continue;
             } else if mime == "application/x-executable" || mime == "application/vnd.appimage" {
                 // Try opening executable
@@ -932,6 +936,7 @@ impl App {
         Task::batch(tasks)
     }
 
+    #[cfg(not(windows))]
     fn launch_desktop_entries(paths: &[impl AsRef<Path>]) {
         for path in paths.iter().map(AsRef::as_ref) {
             match DesktopEntry::from_path::<&str>(path, None) {
