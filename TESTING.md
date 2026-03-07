@@ -17,6 +17,7 @@ This document provides a regression testing checklist for COSMIC Files. The chec
 
 - [ ] Right-click -> Create a new folder, then enter it.
 - [ ] Right-click in the empty folder -> Create a new file.
+- [ ] Navigate to the parent folder, create another new file, then drag it into the created folder.
 - [ ] Files can be renamed.
 - [ ] Files can be opened with non-default apps & browsing store for new apps works.
 - [ ] Normal right-click shows `Move to trash` option.
@@ -24,7 +25,7 @@ This document provides a regression testing checklist for COSMIC Files. The chec
 
 ### Advanced navigation & view settings
 
-- [ ] Image and video thumbnails display in local folders.
+- [ ] Image and video thumbnails generate & display in local folders.
 - [ ] Gallery preview shows with Spacebar.
 - [ ] Details pane shows with Ctrl+Spacebar.
 - [ ] Zoom in/out and reset to default zoom work.

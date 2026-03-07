@@ -5,13 +5,13 @@ no-results = Nincs találat
 filesystem = Fájlrendszer
 home = Saját mappa
 networks = Hálózatok
-notification-in-progress = A fájlműveletek még folyamatban vannak.
+notification-in-progress = A fájlműveletek folyamatban vannak
 trash = Kuka
 recents = Legutóbbiak
 undo = Visszavonás
 today = Ma
 # Desktop view options
-desktop-view-options = Asztali nézet beállításai...
+desktop-view-options = Asztali nézet beállításai…
 show-on-desktop = Megjelenítés az asztalon
 desktop-folder-content = Asztal mappa tartalma
 mounted-drives = Csatolt meghajtók
@@ -31,12 +31,12 @@ operations-running =
     { $running } { $running ->
         [one] művelet
        *[other] művelet
-    } fut ({ $percent }%)...
+    } fut ({ $percent }%)…
 operations-running-finished =
     { $running } { $running ->
         [one] művelet
        *[other] művelet
-    } fut ({ $percent }%), { $finished } befejeződött...
+    } fut ({ $percent }%), { $finished } befejeződött…
 pause = Szünet
 resume = Folytatás
 
@@ -50,29 +50,29 @@ create-archive = Tömörített fájl létrehozása
 ## Extract Dialog
 
 extract-password-required = Jelszó szükséges
-extract-to = Kibontás ide...
+extract-to = Kibontás ide…
 extract-to-title = Kibontás mappába
 
 ## Empty Trash Dialog
 
 empty-trash = Kuka ürítése
-empty-trash-warning = Biztosan véglegesen törölni szeretnéd a kukában lévő összes elemet?
+empty-trash-warning = A kukában lévő összes elem véglegesen törölve lesz
 
 ## Mount Error Dialog
 
-mount-error = A meghajtó nem elérhető
+mount-error = Nem érhető el a meghajtó
 
 ## New File/Folder Dialog
 
 create-new-file = Új fájl létrehozása
 create-new-folder = Új mappa létrehozása
 file-name = Fájlnév
-folder-name = Mappanév
-file-already-exists = Már létezik ilyen nevű fájl.
-folder-already-exists = Már létezik ilyen nevű mappa.
-name-hidden = A ponttal kezdődő nevek rejtve lesznek.
-name-invalid = A név nem lehet „{ $filename }”.
-name-no-slashes = A név nem tartalmazhat „/” jelet.
+folder-name = Mappa neve
+file-already-exists = Már létezik ilyen nevű fájl
+folder-already-exists = Már létezik ilyen nevű mappa
+name-hidden = A ponttal kezdődő nevek rejtve lesznek
+name-invalid = A név nem lehet „{ $filename }”
+name-no-slashes = A név nem tartalmazhat „/” jelet
 
 ## Open/Save Dialog
 
@@ -91,17 +91,17 @@ save-file = Fájl mentése
 
 ## Open With Dialog
 
-open-with-title = Hogyan szeretnéd megnyitni ezt: „{ $name }”?
+open-with-title = Hogyan szeretnéd megnyitni a következőt: „{ $name }”?
 browse-store = { $store } böngészése
 other-apps = Egyéb alkalmazások
 related-apps = Hasonló alkalmazások
 
 ## Permanently delete Dialog
 
-selected-items = a(z) { $items } kijelölt elemet
-permanently-delete-question = Végleges törlés
+selected-items = A(z) { $items } kijelölt elem
+permanently-delete-question = Végleges törlés?
 delete = Törlés
-permanently-delete-warning = Biztosan véglegesen törölni szeretnéd ezt: { $target }? A művelet nem visszavonható.
+permanently-delete-warning = { $target } véglegesen törölve lesz. A művelet nem visszavonható.
 
 ## Rename Dialog
 
@@ -111,8 +111,8 @@ rename-folder = Mappa átnevezése
 ## Replace Dialog
 
 replace = Csere
-replace-title = „{ $filename }” már létezik.
-replace-warning = Szeretnéd lecserélni a meglévő fájlt a menteni kívánt fájllal? A cseréje felülírja annak tartalmát.
+replace-title = „{ $filename }” már létezik
+replace-warning = Szeretnéd lecserélni a meglévő fájlt a mentendő fájllal? A cserével felülírod annak tartalmát.
 replace-warning-operation = Szeretnéd lecserélni? A csere felülírja annak tartalmát.
 original-file = Eredeti fájl
 replace-with = Csere erre
@@ -124,7 +124,7 @@ skip = Kihagyás
 
 set-executable-and-launch = Végrehajthatóvá tétel és indítás
 set-executable-and-launch-description = Szeretnéd végrehajthatóvá tenni a(z) „{ $name }” fájlt és elindítani?
-set-and-launch = Alkalmazás és indítás
+set-and-launch = Beállítás és indítás
 
 ## Metadata Dialog
 
@@ -169,8 +169,8 @@ read-write-execute = Olvasás, írás és végrehajtás
 
 favorite-path-error = Hiba a könyvtár megnyitásakor
 favorite-path-error-description =
-    Nem sikerült megnyitni: „{ $path }”.
-    Lehet, hogy nem létezik, vagy nincs megfelelő jogosultságod a megnyitásához.
+    Nem sikerült megnyitni ezt: „{ $path }”
+    „{ $path }” lehet nem létezik, vagy nincs jogosultságod a megnyitásához
 
     Szeretnéd eltávolítani az oldalsávról?
 remove = Eltávolítás
@@ -187,12 +187,12 @@ keep = Megtartás
 add-network-drive = Hálózati meghajtó hozzáadása
 connect = Csatlakozás
 connect-anonymously = Csatlakozás névtelenül
-connecting = Csatlakozás...
+connecting = Csatlakozás…
 domain = Tartomány
-enter-server-address = Add meg a szerver címét
+enter-server-address = Add meg a kiszolgáló címét
 network-drive-description =
-    A szervercímek tartalmazzák a protokoll előtagot és a címet.
-    Példák: ssh://192.168.0.1, ftp://[2001:db8::1]
+    A kiszolgálócímek tartalmazzák a protokoll előtagját és a címet.
+    Például: ssh://192.168.0.1, ftp://[2001:db8::1]
 
 ### Make sure to keep the comma which separates the columns
 
@@ -204,7 +204,7 @@ network-drive-schemes =
     Server Message Block,smb://
     SSH File Transfer Protocol,sftp:// vagy ssh://
     WebDAV,dav:// vagy davs://
-network-drive-error = A hálózati meghajtó nem elérhető
+network-drive-error = Nem érhető el a hálózati meghajtó
 password = Jelszó
 remember-password = Jelszó megjegyzése
 try-again = Újra
@@ -215,18 +215,18 @@ username = Felhasználónév
 cancelled = Megszakítva
 edit-history = Fájlműveleti előzmények
 history = Előzmények
-no-history = Nem találhatók elemek az előzményekben.
+no-history = Nem találhatók elemek az előzményekben
 pending = Függőben
 progress = { $percent }%
 progress-cancelled = { $percent }%, megszakítva
 progress-paused = { $percent }%, szüneteltetve
 failed = Sikertelen
-complete = Befejeződött
+complete = Befejezett
 compressing =
     { $items } { $items ->
         [one] elem
        *[other] elem
-    } tömörítése innen: „{ $from }” ide: „{ $to }” ({ $progress })...
+    } tömörítése innen: „{ $from }” ide: „{ $to }” ({ $progress })…
 compressed =
     { $items } { $items ->
         [one] elem
@@ -239,7 +239,7 @@ copying =
     { $items } { $items ->
         [one] elem
        *[other] elem
-    } másolása innen: „{ $from }” ide: „{ $to }” ({ $progress })...
+    } másolása innen: „{ $from }” ide: „{ $to }” ({ $progress })…
 copied =
     { $items } { $items ->
         [one] elem
@@ -249,33 +249,33 @@ deleting =
     { $items } { $items ->
         [one] elem
        *[other] elem
-    } törlése a kukából ({ $progress })...
+    } törlése a kukából ({ $progress })…
 deleted =
     { $items } { $items ->
         [one] elem
        *[other] elem
     } törölve a kukából
-emptying-trash = { trash } kiürítése ({ $progress })...
+emptying-trash = { trash } kiürítése ({ $progress })…
 emptied-trash = { trash } kiürítve
 extracting =
     { $items } { $items ->
         [one] elem
        *[other] elem
-    } kibontása innen: „{ $from }” ide: „{ $to }” ({ $progress })...
+    } kibontása innen: „{ $from }” ide: „{ $to }” ({ $progress })…
 extracted =
     { $items } { $items ->
         [one] elem
        *[other] elem
     } kibontva innen: „{ $from }” ide: „{ $to }”
 setting-executable-and-launching = „{ $name }” végrehajthatóvá tétele és futtatása
-set-executable-and-launched = ”{ $name }” végrehajthatóvá lett téve és futtatva
+set-executable-and-launched = „{ $name }” végrehajthatóvá lett téve és futtatva
 setting-permissions = „{ $name }” jogosultságainak beállítása: { $mode }
 set-permissions = „{ $name }” jogosultságai beállítva: { $mode }
 moving =
     { $items } { $items ->
         [one] elem
        *[other] elem
-    } áthelyezése innen: „{ $from }” ide: „{ $to }” ({ $progress })...
+    } áthelyezése innen: „{ $from }” ide: „{ $to }” ({ $progress })…
 moved =
     { $items } { $items ->
         [one] elem
@@ -307,7 +307,7 @@ restoring =
     { $items } { $items ->
         [one] elem
        *[other] elem
-    } visszaállítása a kukából ({ $progress })...
+    } visszaállítása a kukából ({ $progress })…
 restored =
     { $items } { $items ->
         [one] elem
@@ -317,19 +317,19 @@ unknown-folder = ismeretlen mappa
 
 ## Open with
 
-menu-open-with = Megnyitás mással...
+menu-open-with = Megnyitás mással…
 default-app = { $name } (alapértelmezett)
 
 ## Show details
 
-show-details = Részletek mutatása
+show-details = Részletek megjelenítése
 type = Típus: { $mime }
 items = Elemek: { $items }
 item-size = Méret: { $size }
 item-created = Létrehozva: { $created }
 item-modified = Módosítva: { $modified }
 item-accessed = Hozzáférve: { $accessed }
-calculating = Számolás...
+calculating = Számítás…
 
 ## Settings
 
@@ -347,7 +347,7 @@ light = Világos
 ### Type to Search
 
 type-to-search = Gépeléssel keresés
-type-to-search-recursive = A jelenlegi mappában és almappákban keres
+type-to-search-recursive = Keresés a jelenlegi mappában és almappákban
 type-to-search-enter-path = Elérési út megadása
 # Context menu
 add-to-sidebar = Hozzáadás az oldalsávhoz
@@ -355,8 +355,8 @@ compress = Tömörítés
 delete-permanently = Végleges törlés
 eject = Kiadás
 extract-here = Kibontás
-new-file = Új fájl...
-new-folder = Új mappa...
+new-file = Új fájl…
+new-folder = Új mappa…
 open-in-terminal = Megnyitás a terminálban
 move-to-trash = Kukába helyezés
 restore-from-trash = Visszaállítás a kukából
@@ -369,9 +369,9 @@ remove-from-recents = Eltávolítás a legutóbbiak közül
 
 ## Desktop
 
-change-wallpaper = Háttérkép cseréje...
-desktop-appearance = Asztali megjelenés...
-display-settings = Képernyő beállításai...
+change-wallpaper = Háttérkép cseréje…
+desktop-appearance = Asztali megjelenés…
+display-settings = Képernyő-beállítások…
 
 # Menu
 
@@ -382,7 +382,7 @@ file = Fájl
 new-tab = Új lap
 new-window = Új ablak
 reload-folder = Mappa újratöltése
-rename = Átnevezés...
+rename = Átnevezés…
 close-tab = Lap bezárása
 quit = Kilépés
 
@@ -405,8 +405,8 @@ list-view = Listanézet
 show-hidden-files = Rejtett fájlok megjelenítése
 list-directories-first = Könyvtárak listázása először
 gallery-preview = Galéria előnézet
-menu-settings = Beállítások...
-menu-about = A COSMIC Fájlok névjegye...
+menu-settings = Beállítások…
+menu-about = A COSMIC Fájlok névjegye…
 
 ## Sort
 
@@ -420,3 +420,5 @@ sort-largest-to-smallest = Legnagyobbtól a legkisebbig
 repository = Tároló
 support = Támogatás
 progress-failed = { $percent }%, sikertelen
+empty-trash-title = Kuka ürítése?
+type-to-search-select = Kijelöli az első egyező fájlt vagy mappát

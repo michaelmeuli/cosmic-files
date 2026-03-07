@@ -7,7 +7,7 @@ use std::time::Instant;
 use std::{cell::Cell, error::Error, fs, ops::ControlFlow, path::PathBuf, rc::Rc};
 use walkdir::WalkDir;
 
-use crate::operation::OperationError;
+use crate::operation::{OperationError, sync_to_disk};
 
 use super::{Controller, OperationSelection, ReplaceResult, copy_unique_path};
 
@@ -57,6 +57,8 @@ impl Context {
     ) -> Result<bool, OperationError> {
         let mut ops = Vec::new();
         let mut cleanup_ops = Vec::new();
+        let mut written_files = Vec::new();
+        let mut target_dirs = std::collections::HashSet::new();
         for (from_parent, to_parent) in from_to_pairs {
             self.controller
                 .check()
@@ -141,6 +143,9 @@ impl Context {
                         cleanup_ops.push(cleanup_op);
                     }
                 }
+                if let Some(parent) = op.to.parent() {
+                    target_dirs.insert(parent.to_path_buf());
+                }
                 ops.push(op);
             }
 
@@ -177,16 +182,28 @@ impl Context {
                     &self.controller,
                 )
             })? {
+                if matches!(
+                    op.kind,
+                    OpKind::Copy
+                        | OpKind::Move {
+                            cross_device_copy: true
+                        }
+                ) {
+                    written_files.push(op.to.clone());
+                }
                 // The from path is ignored in the operation selection if it is a top level item
                 if self.op_sel.ignored.contains(&op.from) {
                     // So add the to path to the selection
-                    self.op_sel.selected.push(op.to.clone());
+                    self.op_sel.selected.push(op.to);
                 }
             } else {
                 // Cancelled
                 return Ok(false);
             }
         }
+
+        // Flush files to disk
+        sync_to_disk(written_files, target_dirs).await;
 
         Ok(true)
     }
@@ -384,7 +401,34 @@ impl Op {
                     buf_in = buf_out;
                 }
 
-                to_file.sync_all().await?;
+                let mut times = fs::FileTimes::new();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::prelude::MetadataExt;
+                    log::info!("{}", metadata.mtime());
+                }
+                if let Ok(time) = dbg!(metadata.modified()) {
+                    times = times.set_modified(time);
+                }
+                if let Ok(time) = dbg!(metadata.accessed()) {
+                    times = times.set_accessed(time);
+                }
+                //TODO: upstream set_times implementation to compio?
+                {
+                    use compio::driver::{ToSharedFd, op::AsyncifyFd};
+                    let op =
+                        AsyncifyFd::new(to_file.to_shared_fd(), move |file: &std::fs::File| {
+                            BufResult(file.set_times(times).map(|_| 0), ())
+                        });
+                    match compio::runtime::submit(op).await.0.map(|_| ()) {
+                        Ok(()) => {
+                            log::info!("set times for {} to {:?}", self.to.display(), times);
+                        }
+                        Err(err) => {
+                            log::warn!("failed to set times for {}: {}", self.to.display(), err);
+                        }
+                    }
+                }
             }
             OpKind::Move { cross_device_copy } => {
                 // Remove `to` if overwriting and it is an existing file

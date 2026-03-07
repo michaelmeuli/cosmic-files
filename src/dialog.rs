@@ -11,9 +11,12 @@ use cosmic::{
         event,
         futures::{self, SinkExt},
         keyboard::{Event as KeyEvent, Key, Modifiers, key::Named},
-        stream, window,
+        stream,
+        widget::scrollable,
+        window,
     },
     iced_core::widget::operation,
+    iced_winit::{self, SurfaceIdWrapper},
     theme,
     widget::{
         self, Operation,
@@ -368,7 +371,45 @@ impl<M: Send + 'static> Dialog<M> {
             .map(DialogMessage)
             .map(move |message| cosmic::action::app(mapper(message)));
         if let Some(result) = self.cosmic.app.result_opt.take() {
+            #[cfg(feature = "wayland")]
+            if !self.cosmic.surface_views.is_empty() {
+                log::debug!("waiting for surfaces to close...");
+                let mut tasks = Vec::new();
+                for id in self.cosmic.surface_views.iter() {
+                    match id.1.1 {
+                        SurfaceIdWrapper::Window(id) => {
+                            tasks.push(window::close::<M>(id).discard());
+                        }
+                        SurfaceIdWrapper::LayerSurface(id) => {
+                            tasks.push(iced_winit::wayland::commands::layer_surface::destroy_layer_surface::<M>(id).discard());
+                        }
+                        SurfaceIdWrapper::Popup(id) => {
+                            tasks.push(
+                                iced_winit::wayland::commands::popup::destroy_popup::<M>(id)
+                                    .discard(),
+                            );
+                        }
+                        SurfaceIdWrapper::Subsurface(id) => {
+                            tasks.push(
+                                iced_winit::wayland::commands::subsurface::destroy_subsurface::<M>(
+                                    id,
+                                )
+                                .discard(),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                let on_result_message = (self.on_result)(result);
+
+                tasks.push(Task::future(async move {
+                    cosmic::action::app(on_result_message)
+                }));
+                tasks.push(command);
+                return Task::batch(tasks);
+            }
             let on_result_message = (self.on_result)(result);
+
             Task::batch([
                 command,
                 Task::future(async move { cosmic::action::app(on_result_message) }),
@@ -387,6 +428,11 @@ impl<M: Send + 'static> Dialog<M> {
 
     pub const fn window_id(&self) -> window::Id {
         self.cosmic.app.flags.window_id
+    }
+
+    #[cfg(feature = "wayland")]
+    pub fn contains_surface(&self, id: &window::Id) -> bool {
+        self.cosmic.surface_views.contains_key(id)
     }
 }
 
@@ -524,6 +570,8 @@ struct App {
         FxHashSet<PathBuf>,
     )>,
     auto_scroll_speed: Option<i16>,
+    type_select_prefix: String,
+    type_select_last_key: Option<Instant>,
 }
 
 impl App {
@@ -653,14 +701,23 @@ impl App {
             }
             PreviewKind::Selected => {
                 if let Some(items) = self.tab.items_opt() {
-                    for item in items {
-                        if item.selected {
-                            children.push(item.preview_view(None, military_time));
-                            // Only show one property view to avoid issues like hangs when generating
-                            // preview images on thousands of files
-                            break;
+                    let preview_opt = {
+                        let mut selected = items.iter().filter(|item| item.selected);
+
+                        match (selected.next(), selected.next()) {
+                            // At least two selected items
+                            (Some(_), Some(_)) => Some(self.tab.multi_preview_view()),
+                            // Exactly one selected item
+                            (Some(item), None) => Some(item.preview_view(None, military_time)),
+                            // No selected items
+                            _ => None,
                         }
+                    };
+
+                    if let Some(preview) = preview_opt {
+                        children.push(preview);
                     }
+
                     if children.is_empty() {
                         if let Some(item) = &self.tab.parent_item_opt {
                             children.push(item.preview_view(None, military_time));
@@ -985,6 +1042,8 @@ impl Application for App {
             key_binds,
             watcher_opt: None,
             auto_scroll_speed: None,
+            type_select_prefix: String::new(),
+            type_select_last_key: None,
         };
 
         let commands = Task::batch([
@@ -1395,15 +1454,32 @@ impl Application for App {
                                         Some(location.with_path(PathBuf::from(path_string)).into());
                                 }
                             }
+                            TypeToSearch::SelectByPrefix => {
+                                // Reset buffer if timeout elapsed
+                                if let Some(last_key) = self.type_select_last_key {
+                                    if last_key.elapsed() >= tab::TYPE_SELECT_TIMEOUT {
+                                        self.type_select_prefix.clear();
+                                    }
+                                }
+
+                                // Accumulate character and select
+                                self.type_select_prefix.push_str(&text.to_lowercase());
+                                self.type_select_last_key = Some(Instant::now());
+
+                                self.tab.select_by_prefix(&self.type_select_prefix);
+                                if let Some(offset) = self.tab.select_focus_scroll() {
+                                    return scrollable::scroll_to(
+                                        self.tab.scrollable_id.clone(),
+                                        offset,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
             }
             Message::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers;
-                return self.update(Message::TabMessage(tab::Message::ModifiersChanged(
-                    modifiers,
-                )));
             }
             Message::MounterItems(mounter_key, mounter_items) => {
                 // Check for unmounted folders
@@ -1883,7 +1959,11 @@ impl Application for App {
             }
         }
 
-        col = col.push(self.tab.view(&self.key_binds).map(Message::TabMessage));
+        col = col.push(
+            self.tab
+                .view(&self.key_binds, &self.modifiers)
+                .map(Message::TabMessage),
+        );
 
         col.into()
     }

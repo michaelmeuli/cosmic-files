@@ -196,6 +196,29 @@ async fn copy_or_move(
     .map_err(wrap_compio_spawn_error)?
 }
 
+pub async fn sync_to_disk(
+    written_files: Vec<PathBuf>,
+    target_dirs: std::collections::HashSet<PathBuf>,
+) {
+    use futures::{StreamExt, stream};
+
+    // Sync files to disk
+    let file_stream = stream::iter(written_files.into_iter().map(|path| async move {
+        if let Ok(file) = compio::fs::OpenOptions::new().write(true).open(&path).await {
+            let _ = file.sync_all().await;
+        }
+    }));
+    file_stream.buffer_unordered(32).collect::<Vec<_>>().await;
+
+    // Sync directories to disk
+    let dir_stream = stream::iter(target_dirs.into_iter().map(|path| async move {
+        if let Ok(dir) = compio::fs::OpenOptions::new().read(true).open(&path).await {
+            let _ = dir.sync_all().await;
+        }
+    }));
+    dir_stream.buffer_unordered(16).collect::<Vec<_>>().await;
+}
+
 fn copy_unique_path(from: &Path, to: &Path) -> PathBuf {
     // List of compound extensions to check
     const COMPOUND_EXTENSIONS: &[&str] = &[
@@ -866,6 +889,8 @@ impl Operation {
                         let items = trash::os_limited::list()
                             .map_err(|e| OperationError::from_err(e, &controller))?;
                         let count = items.len();
+                        let mut errors: Vec<trash::Error> = Vec::new();
+
                         for (i, item) in items.into_iter().enumerate() {
                             futures::executor::block_on(async {
                                 controller
@@ -874,11 +899,31 @@ impl Operation {
                                     .map_err(|s| OperationError::from_state(s, &controller))
                             })?;
 
-                            controller.set_progress(i as f32 / count as f32);
+                            if let Err(e) = trash::os_limited::purge_all([item]) {
+                                errors.push(e);
+                            }
 
-                            trash::os_limited::purge_all([item])
-                                .map_err(|e| OperationError::from_err(e, &controller))?;
+                            controller.set_progress(i as f32 / count as f32);
                         }
+
+                        // Report errors at the end
+                        if !errors.is_empty() {
+                            log::warn!("Failed to purge {} items:", errors.len());
+                            for e in &errors {
+                                log::warn!("  - {e}");
+                            }
+
+                            // Return an error to signal partial failure
+                            return Err(OperationError::from_err(
+                                format!(
+                                    "Failed to delete {} of {} items. Check log for details.",
+                                    errors.len(),
+                                    count
+                                ),
+                                &controller,
+                            ));
+                        }
+
                         Ok(())
                     })
                     .await
