@@ -1,3 +1,10 @@
+# TB Profiler GUI
+Forked from [cosmic-files](https://github.com/pop-os/cosmic-files.git)
+
+Run on Windows with:
+$env:RUST_LOG="info"; cargo run --no-default-features --features russh
+
+
 # cosmic-files
 File manager for the COSMIC desktop environment
 
