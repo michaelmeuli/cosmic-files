@@ -1,6 +1,7 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(windows))]
 use cosmic::desktop::fde::GenericEntry;
 use mime_guess::Mime;
 use rustc_hash::FxHashMap;
@@ -69,10 +70,10 @@ impl ThumbnailerCache {
         thumbnailer_cache
     }
 
-    #[cfg(not(feature = "desktop"))]
+    #[cfg(windows)]
     pub fn reload(&mut self) {}
 
-    #[cfg(feature = "desktop")]
+    #[cfg(not(windows))]
     pub fn reload(&mut self) {
         let start = Instant::now();
 
