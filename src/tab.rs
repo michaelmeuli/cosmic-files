@@ -53,6 +53,7 @@ use icu::{
 use image::{DynamicImage, ImageDecoder, ImageReader};
 use jxl_oxide::integration::JxlDecoder;
 use mime_guess::{Mime, mime};
+use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -77,7 +78,7 @@ use std::os::windows::fs::MetadataExt;
 
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
-use trash::TrashItemSize;
+use trash::{TrashItem, TrashItemMetadata, TrashItemSize};
 use walkdir::WalkDir;
 
 use crate::{
@@ -368,39 +369,6 @@ fn tab_complete(path: &Path) -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
     Ok(completions)
 }
 
-#[cfg(target_os = "macos")]
-pub fn trash_entries() -> usize {
-    0
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn trash_entries() -> usize {
-    match trash::os_limited::list() {
-        Ok(entries) => entries.len(),
-        Err(_err) => 0,
-    }
-}
-
-pub fn trash_icon(icon_size: u16) -> widget::icon::Handle {
-    widget::icon::from_name(if trash::os_limited::is_empty().unwrap_or(true) {
-        "user-trash"
-    } else {
-        "user-trash-full"
-    })
-    .size(icon_size)
-    .handle()
-}
-
-pub fn trash_icon_symbolic(icon_size: u16) -> widget::icon::Handle {
-    widget::icon::from_name(if trash::os_limited::is_empty().unwrap_or(true) {
-        "user-trash-symbolic"
-    } else {
-        "user-trash-full-symbolic"
-    })
-    .size(icon_size)
-    .handle()
-}
-
 //TODO: translate, add more levels?
 fn format_size(size: u64) -> String {
     const KB: u64 = 1000;
@@ -683,7 +651,6 @@ pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
             return (None, None);
         }
     };
-
     (
         entry.name(&locales).map(|s| s.into_owned()),
         entry.icon().map(str::to_string),
@@ -709,7 +676,17 @@ fn display_name_for_file(path: &Path, name: &str, get_from_gvfs: bool, is_deskto
         );
     } else if get_from_gvfs {
         #[cfg(feature = "gvfs")]
-        return Item::display_name(glib::filename_display_name(path).as_str());
+        {
+            let file = gio::File::for_path(path);
+            if let Ok(info) = gio::prelude::FileExt::query_info(
+                &file,
+                "standard::display-name",
+                gio::FileQueryInfoFlags::NONE,
+                gio::Cancellable::NONE,
+            ) {
+                return Item::display_name(info.display_name().as_str());
+            }
+        }
     }
     Item::display_name(name)
 }
@@ -809,6 +786,13 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
         overlaps_drag_rect: false,
         dir_size,
         cut: false,
+    }
+}
+
+pub fn item_from_search_item(search_item: SearchItem, sizes: IconSizes) -> Item {
+    match search_item {
+        SearchItem::Path(path, name, metadata) => item_from_entry(path, name, metadata, sizes),
+        SearchItem::Trash(entry, metadata) => item_from_trash_entry(entry, metadata, sizes),
     }
 }
 
@@ -931,6 +915,59 @@ pub fn item_from_entry(
         highlighted: false,
         overlaps_drag_rect: false,
         dir_size,
+        cut: false,
+    }
+}
+
+pub fn item_from_trash_entry(
+    entry: TrashItem,
+    metadata: TrashItemMetadata,
+    sizes: IconSizes,
+) -> Item {
+    let original_path = entry.original_path();
+    let name = entry.name.to_string_lossy().into_owned();
+    let display_name = Item::display_name(&name);
+
+    let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = match metadata.size
+    {
+        trash::TrashItemSize::Entries(_) => (
+            //TODO: make this a static
+            "inode/directory".parse().unwrap(),
+            folder_icon(&original_path, sizes.grid()),
+            folder_icon(&original_path, sizes.list()),
+            folder_icon(&original_path, sizes.list_condensed()),
+        ),
+        trash::TrashItemSize::Bytes(_) => {
+            // This passes remote = true so it does not read from the original path
+            let mime = mime_for_path(&original_path, None, true);
+            (
+                mime.clone(),
+                mime_icon(mime.clone(), sizes.grid()),
+                mime_icon(mime.clone(), sizes.list()),
+                mime_icon(mime, sizes.list_condensed()),
+            )
+        }
+    };
+
+    Item {
+        name,
+        display_name,
+        is_mount_point: false,
+        metadata: ItemMetadata::Trash { metadata, entry },
+        hidden: false,
+        location_opt: None,
+        mime,
+        icon_handle_grid,
+        icon_handle_list,
+        icon_handle_list_condensed,
+        thumbnail_opt: Some(ItemThumbnail::NotImage),
+        button_id: widget::Id::unique(),
+        pos_opt: Cell::new(None),
+        rect_opt: Cell::new(None),
+        selected: false,
+        highlighted: false,
+        overlaps_drag_rect: false,
+        dir_size: DirSize::NotDirectory,
         cut: false,
     }
 }
@@ -1072,8 +1109,8 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
     items
 }
 
-pub fn scan_search<F: Fn(&Path, &str, Metadata) -> bool + Sync>(
-    tab_path: &PathBuf,
+pub fn scan_search<F: Fn(SearchItem) -> bool + Sync>(
+    search_location: &SearchLocation,
     term: &str,
     show_hidden: bool,
     callback: F,
@@ -1094,48 +1131,99 @@ pub fn scan_search<F: Fn(&Path, &str, Metadata) -> bool + Sync>(
         }
     };
 
-    ignore::WalkBuilder::new(tab_path)
-        .standard_filters(false)
-        .hidden(!show_hidden)
-        //TODO: only use this on supported targets
-        .same_file_system(true)
-        .build_parallel()
-        .run(|| {
-            Box::new(|entry_res| {
-                let Ok(entry) = entry_res else {
-                    // Skip invalid entries
-                    return ignore::WalkState::Skip;
-                };
+    match search_location {
+        SearchLocation::Path(tab_path) => {
+            ignore::WalkBuilder::new(tab_path)
+                .standard_filters(false)
+                .hidden(!show_hidden)
+                //TODO: only use this on supported targets
+                .same_file_system(true)
+                .build_parallel()
+                .run(|| {
+                    Box::new(|entry_res| {
+                        let Ok(entry) = entry_res else {
+                            // Skip invalid entries
+                            return ignore::WalkState::Skip;
+                        };
 
-                let Some(file_name) = entry.file_name().to_str() else {
-                    // Skip anything with an invalid name
-                    return ignore::WalkState::Skip;
-                };
+                        let Some(file_name) = entry.file_name().to_str() else {
+                            // Skip anything with an invalid name
+                            return ignore::WalkState::Skip;
+                        };
 
-                if regex.is_match(file_name) {
-                    let path = entry.path();
+                        if regex.is_match(file_name) {
+                            let path = entry.path();
 
-                    let metadata = match entry.metadata() {
-                        Ok(ok) => ok,
-                        Err(err) => {
-                            log::warn!(
-                                "failed to read metadata for entry at {}: {}",
-                                path.display(),
-                                err
-                            );
-                            return ignore::WalkState::Continue;
+                            let metadata = match entry.metadata() {
+                                Ok(ok) => ok,
+                                Err(err) => {
+                                    log::warn!(
+                                        "failed to read metadata for entry at {}: {}",
+                                        path.display(),
+                                        err
+                                    );
+                                    return ignore::WalkState::Continue;
+                                }
+                            };
+
+                            if !callback(SearchItem::Path(
+                                path.to_path_buf(),
+                                file_name.to_string(),
+                                metadata,
+                            )) {
+                                return ignore::WalkState::Quit;
+                            }
                         }
-                    };
 
-                    //TODO: use entry.into_path?
-                    if !callback(path, file_name, metadata) {
-                        return ignore::WalkState::Quit;
+                        ignore::WalkState::Continue
+                    })
+                });
+        }
+        SearchLocation::Recents => {
+            let recent_files = match recently_used_xbel::parse_file() {
+                Ok(recent_files) => recent_files,
+                Err(err) => {
+                    log::warn!("Error reading recent files: {err:?}");
+                    return;
+                }
+            };
+
+            for bookmark in recent_files.bookmarks {
+                let path = uri_to_path(bookmark.href);
+                if let Some(path) = path
+                    && path.exists()
+                {
+                    let file_name = path.file_name();
+                    if let Some(file_name) = file_name {
+                        let file_name = file_name.to_string_lossy();
+                        if regex.is_match(&file_name) {
+                            match path.metadata() {
+                                Ok(metadata) => {
+                                    if !callback(SearchItem::Path(
+                                        path.to_path_buf(),
+                                        file_name.to_string(),
+                                        metadata,
+                                    )) {
+                                        break;
+                                    }
+                                }
+                                Err(err) => {
+                                    log::warn!(
+                                        "failed to read metadata for entry at {}: {}",
+                                        path.display(),
+                                        err
+                                    );
+                                }
+                            };
+                        }
                     }
                 }
-
-                ignore::WalkState::Continue
-            })
-        });
+            }
+        }
+        SearchLocation::Trash => {
+            trash_helpers::scan_search_trash(callback, &regex);
+        }
+    }
 }
 
 // This config statement is from trash::os_limited, inverted
@@ -1148,9 +1236,31 @@ pub fn scan_search<F: Fn(&Path, &str, Metadata) -> bool + Sync>(
         not(target_os = "android")
     )
 )))]
-pub fn scan_trash(_sizes: IconSizes) -> Vec<Item> {
-    log::warn!("viewing trash not supported on this platform");
-    Vec::new()
+mod trash_helpers {
+    use super::*;
+
+    pub fn trash_entries() -> usize {
+        0
+    }
+
+    pub fn trash_icon(icon_size: u16) -> widget::icon::Handle {
+        widget::icon::from_name("user-trash")
+            .size(icon_size)
+            .handle()
+    }
+
+    pub fn trash_icon_symbolic(icon_size: u16) -> widget::icon::Handle {
+        widget::icon::from_name("user-trash-symbolic")
+            .size(icon_size)
+            .handle()
+    }
+
+    pub fn scan_trash(_sizes: IconSizes) -> Vec<Item> {
+        log::warn!("viewing trash not supported on this platform");
+        Vec::new()
+    }
+
+    pub fn scan_search_trash<F: Fn(SearchItem) -> bool + Sync>(callback: F, regex: &Regex) {}
 }
 
 // This config statement is from trash::os_limited
@@ -1163,76 +1273,85 @@ pub fn scan_trash(_sizes: IconSizes) -> Vec<Item> {
         not(target_os = "android")
     )
 ))]
-pub fn scan_trash(sizes: IconSizes) -> Vec<Item> {
-    let entries = match trash::os_limited::list() {
-        Ok(entry) => entry,
-        Err(err) => {
-            log::warn!("failed to read trash items: {err}");
-            return Vec::new();
+pub mod trash_helpers {
+    use super::*;
+
+    pub fn trash_entries() -> usize {
+        match trash::os_limited::list() {
+            Ok(entries) => entries.len(),
+            Err(_err) => 0,
         }
-    };
-    let mut items: Vec<_> = entries
-        .into_iter()
-        .filter_map(|entry| {
-            let metadata = trash::os_limited::metadata(&entry)
-                .inspect_err(|err| {
-                    log::warn!("failed to get metadata for trash item {entry:?}: {err}")
-                })
-                .ok()?;
-            let original_path = entry.original_path();
-            let name = entry.name.to_string_lossy().into_owned();
-            let display_name = Item::display_name(&name);
+    }
 
-            let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) =
-                match metadata.size {
-                    trash::TrashItemSize::Entries(_) => (
-                        //TODO: make this a static
-                        "inode/directory".parse().unwrap(),
-                        folder_icon(&original_path, sizes.grid()),
-                        folder_icon(&original_path, sizes.list()),
-                        folder_icon(&original_path, sizes.list_condensed()),
-                    ),
-                    trash::TrashItemSize::Bytes(_) => {
-                        // This passes remote = true so it does not read from the original path
-                        let mime = mime_for_path(&original_path, None, true);
-                        (
-                            mime.clone(),
-                            mime_icon(mime.clone(), sizes.grid()),
-                            mime_icon(mime.clone(), sizes.list()),
-                            mime_icon(mime, sizes.list_condensed()),
-                        )
-                    }
-                };
-
-            Some(Item {
-                name,
-                display_name,
-                is_mount_point: false,
-                metadata: ItemMetadata::Trash { metadata, entry },
-                hidden: false,
-                location_opt: None,
-                mime,
-                icon_handle_grid,
-                icon_handle_list,
-                icon_handle_list_condensed,
-                thumbnail_opt: Some(ItemThumbnail::NotImage),
-                button_id: widget::Id::unique(),
-                pos_opt: Cell::new(None),
-                rect_opt: Cell::new(None),
-                selected: false,
-                highlighted: false,
-                overlaps_drag_rect: false,
-                dir_size: DirSize::NotDirectory,
-                cut: false,
-            })
+    pub fn trash_icon(icon_size: u16) -> widget::icon::Handle {
+        widget::icon::from_name(if trash::os_limited::is_empty().unwrap_or(true) {
+            "user-trash"
+        } else {
+            "user-trash-full"
         })
-        .collect();
-    items.sort_by(|a, b| match (a.metadata.is_dir(), b.metadata.is_dir()) {
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        _ => LANGUAGE_SORTER.compare(&a.display_name, &b.display_name),
-    });
-    items
+        .size(icon_size)
+        .handle()
+    }
+
+    pub fn trash_icon_symbolic(icon_size: u16) -> widget::icon::Handle {
+        widget::icon::from_name(if trash::os_limited::is_empty().unwrap_or(true) {
+            "user-trash-symbolic"
+        } else {
+            "user-trash-full-symbolic"
+        })
+        .size(icon_size)
+        .handle()
+    }
+
+    pub fn scan_trash(sizes: IconSizes) -> Vec<Item> {
+        let entries = match trash::os_limited::list() {
+            Ok(entry) => entry,
+            Err(err) => {
+                log::warn!("failed to read trash items: {err}");
+                return Vec::new();
+            }
+        };
+        let mut items: Vec<_> = entries
+            .into_iter()
+            .filter_map(|entry| {
+                let metadata = trash::os_limited::metadata(&entry)
+                    .inspect_err(|err| {
+                        log::warn!("failed to get metadata for trash item {entry:?}: {err}")
+                    })
+                    .ok()?;
+                Some(item_from_trash_entry(entry, metadata, sizes))
+            })
+            .collect();
+        items.sort_by(|a, b| match (a.metadata.is_dir(), b.metadata.is_dir()) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => LANGUAGE_SORTER.compare(&a.display_name, &b.display_name),
+        });
+        items
+    }
+
+    pub fn scan_search_trash<F: Fn(SearchItem) -> bool + Sync>(callback: F, regex: &Regex) {
+        let entries = match trash::os_limited::list() {
+            Ok(entries) => entries,
+            Err(err) => {
+                log::warn!("failed to read trash items: {err}");
+                return;
+            }
+        };
+
+        for entry in entries {
+            if let Ok(metadata) = trash::os_limited::metadata(&entry).inspect_err(|err| {
+                log::warn!("failed to get metadata for trash item {entry:?}: {err}")
+            }) {
+                let name = entry.name.to_string_lossy();
+                if regex.is_match(&name) {
+                    if !callback(SearchItem::Trash(entry, metadata)) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn uri_to_path(uri: String) -> Option<PathBuf> {
@@ -1244,6 +1363,13 @@ fn uri_to_path(uri: String) -> Option<PathBuf> {
             None
         }
     })
+}
+
+pub fn has_recents() -> bool {
+    match recently_used_xbel::parse_file() {
+        Ok(recent_files) => !recent_files.bookmarks.is_empty(),
+        Err(_) => false,
+    }
 }
 
 pub fn scan_recents(sizes: IconSizes) -> Vec<Item> {
@@ -1281,7 +1407,7 @@ pub fn scan_recents(sizes: IconSizes) -> Vec<Item> {
                 let item = item_from_entry(path, name, metadata, sizes);
                 Some((item, last_edit.min(last_visit)))
             } else {
-                log::warn!("recent file path not exist: {}", path.display());
+                log::warn!("recent file path does not exist: {}", path.display());
                 None
             }
         })
@@ -1361,15 +1487,15 @@ pub fn scan_desktop(
         let display_name = Item::display_name(&name);
 
         let metadata = ItemMetadata::SimpleDir {
-            entries: trash_entries() as u64,
+            entries: trash_helpers::trash_entries() as u64,
         };
 
         let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
             (
                 "inode/directory".parse().unwrap(),
-                trash_icon(sizes.grid()),
-                trash_icon(sizes.list()),
-                trash_icon(sizes.list_condensed()),
+                trash_helpers::trash_icon(sizes.grid()),
+                trash_helpers::trash_icon(sizes.list()),
+                trash_helpers::trash_icon(sizes.list_condensed()),
             )
         };
 
@@ -1454,6 +1580,29 @@ impl EditLocation {
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum SearchLocation {
+    Path(PathBuf),
+    Recents,
+    Trash,
+}
+
+impl std::fmt::Display for SearchLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Path(path) => write!(f, "{}", path.display()),
+            Self::Recents => write!(f, "recents"),
+            Self::Trash => write!(f, "trash"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum SearchItem {
+    Path(PathBuf, String, fs::Metadata),
+    Trash(TrashItem, TrashItemMetadata),
+}
+
 impl From<Location> for EditLocation {
     fn from(location: Location) -> Self {
         Self {
@@ -1470,7 +1619,7 @@ pub enum Location {
     Network(String, String, Option<PathBuf>),
     Path(PathBuf),
     Recents,
-    Search(PathBuf, String, bool, Instant),
+    Search(SearchLocation, String, bool, Instant),
     Trash,
 }
 
@@ -1483,7 +1632,9 @@ impl std::fmt::Display for Location {
             Self::Network(uri, ..) => write!(f, "{uri}"),
             Self::Path(path) => write!(f, "{}", path.display()),
             Self::Recents => write!(f, "recents"),
-            Self::Search(path, term, ..) => write!(f, "search {} for {}", path.display(), term),
+            Self::Search(location, term, ..) => {
+                write!(f, "search {} for {}", location, term)
+            }
             Self::Trash => write!(f, "trash"),
         }
     }
@@ -1532,7 +1683,7 @@ impl Location {
         match self {
             Self::Desktop(path, ..) => Some(path),
             Self::Path(path) => Some(path),
-            Self::Search(path, ..) => Some(path),
+            Self::Search(SearchLocation::Path(path), ..) => Some(path),
             Self::Network(_, _, path) => path.as_ref(),
             _ => None,
         }
@@ -1542,7 +1693,7 @@ impl Location {
         match self {
             Self::Desktop(path, ..) => Some(path),
             Self::Path(path) => Some(path),
-            Self::Search(path, ..) => Some(path),
+            Self::Search(SearchLocation::Path(path), ..) => Some(path),
             Self::Network(_, _, path) => path,
             _ => None,
         }
@@ -1555,9 +1706,12 @@ impl Location {
                 Self::Desktop(path, display.clone(), *desktop_config)
             }
             Self::Path(..) => Self::Path(path),
-            Self::Search(_, term, show_hidden, time) => {
-                Self::Search(path, term.clone(), *show_hidden, *time)
-            }
+            Self::Search(SearchLocation::Path(_), term, show_hidden, time) => Self::Search(
+                SearchLocation::Path(path),
+                term.clone(),
+                *show_hidden,
+                *time,
+            ),
 
             other => other.clone(),
         }
@@ -1581,7 +1735,7 @@ impl Location {
                 // Search is done incrementally
                 Vec::new()
             }
-            Self::Trash => scan_trash(sizes),
+            Self::Trash => trash_helpers::scan_trash(sizes),
             Self::Recents => scan_recents(sizes),
             Self::Network(uri, _, _) => scan_network(uri, sizes),
         };
@@ -1609,9 +1763,14 @@ impl Location {
                 let (name, _) = folder_name(path);
                 name
             }
-            Self::Search(path, term, ..) => {
+            Self::Search(location, term, ..) => {
+                let name = match location {
+                    SearchLocation::Path(path) => folder_name(path).0,
+                    SearchLocation::Trash => fl!("trash"),
+                    SearchLocation::Recents => fl!("recents"),
+                };
+
                 //TODO: translate
-                let (name, _) = folder_name(path);
                 format!("Search \"{term}\": {name}")
             }
             Self::Trash => {
@@ -1638,6 +1797,32 @@ impl Location {
             }
             _ => path,
         }
+    }
+
+    pub fn is_trash(&self) -> bool {
+        matches!(
+            self,
+            Location::Trash | Location::Search(SearchLocation::Trash, ..)
+        )
+    }
+
+    pub fn is_recents(&self) -> bool {
+        matches!(
+            self,
+            Location::Recents | Location::Search(SearchLocation::Recents, ..)
+        )
+    }
+
+    /// Returns true if this location supports paste operations (not Trash)
+    pub fn supports_paste(&self) -> bool {
+        matches!(
+            self,
+            Self::Desktop(..)
+                | Self::Path(..)
+                | Self::Search(..)
+                | Self::Recents
+                | Self::Network(_, _, Some(_))
+        )
     }
 }
 
@@ -2241,6 +2426,28 @@ impl Item {
         name.replace('.', ".\u{200B}").replace('_', "_\u{200B}")
     }
 
+    /// Text widget for a filename in grid/icon view: word-or-glyph wrapping, middle-ellipsized to 3 lines.
+    fn grid_display_name<'a>(
+        name: impl Into<Cow<'a, str>> + 'a,
+    ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
+        widget::text::body(name)
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
+                3,
+            )))
+    }
+
+    /// Text widget for a filename in list view: word-or-glyph wrapping, middle-ellipsized to 1 line.
+    fn list_display_name<'a>(
+        name: impl Into<Cow<'a, str>> + 'a,
+    ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
+        widget::text::body(name)
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
+                1,
+            )))
+    }
+
     pub fn path_opt(&self) -> Option<&PathBuf> {
         self.location_opt.as_ref()?.path_opt()
     }
@@ -2486,7 +2693,8 @@ impl Item {
         if let Some(path) = self.path_opt() {
             if self.selected {
                 column = column.push(
-                    widget::button::standard(fl!("open")).on_press(Message::Open(Some(path.clone()))),
+                    widget::button::standard(fl!("open"))
+                        .on_press(Message::Open(Some(path.clone()))),
                 );
             }
         }
@@ -2597,7 +2805,7 @@ impl Mode {
 }
 
 struct SearchContext {
-    results_rx: mpsc::Receiver<(PathBuf, String, Metadata)>,
+    results_rx: mpsc::Receiver<SearchItem>,
     ready: Arc<atomic::AtomicBool>,
     last_modified_opt: Arc<RwLock<Option<SystemTime>>>,
 }
@@ -4063,21 +4271,26 @@ impl Tab {
                     if let Some(items) = &mut self.items_opt {
                         if finished || context.ready.swap(false, atomic::Ordering::SeqCst) {
                             let duration = Instant::now();
-                            while let Ok((path, name, metadata)) = context.results_rx.try_recv() {
+                            while let Ok(search_item) = context.results_rx.try_recv() {
                                 //TODO: combine this with column_sort logic, they must match!
-                                let item_modified = metadata.modified().ok();
-                                let index = match items.binary_search_by(|other| {
-                                    item_modified.cmp(&other.metadata.modified())
-                                }) {
-                                    Ok(index) => index,
-                                    Err(index) => index,
-                                };
+                                let index =
+                                    if let SearchItem::Path(_, _, ref metadata) = search_item {
+                                        let item_modified = metadata.modified().ok();
+                                        match items.binary_search_by(|other| {
+                                            item_modified.cmp(&other.metadata.modified())
+                                        }) {
+                                            Ok(index) => index,
+                                            Err(index) => index,
+                                        }
+                                    } else {
+                                        items.len()
+                                    };
+
                                 if index < MAX_SEARCH_RESULTS {
                                     //TODO: use correct IconSizes
-                                    items.insert(
-                                        index,
-                                        item_from_entry(path, name, metadata, IconSizes::default()),
-                                    );
+                                    let item =
+                                        item_from_search_item(search_item, IconSizes::default());
+                                    items.insert(index, item);
                                 }
                                 // Ensure that updates make it to the GUI in a timely manner
                                 if !finished && duration.elapsed() >= MAX_SEARCH_LATENCY {
@@ -4723,6 +4936,7 @@ impl Tab {
                 vertical_alignment: Vertical::Top,
                 shaping: text::Shaping::default(),
                 wrapping: text::Wrapping::None,
+                ellipsize: text::Ellipsize::End(text::EllipsizeHeightLimit::Lines(1)),
             };
             graphics::text::Paragraph::with_text(text)
                 .min_bounds()
@@ -4804,7 +5018,7 @@ impl Tab {
 
         let heading_row = widget::row::with_children([
             heading_item(fl!("name"), Length::Fill, HeadingOptions::Name),
-            if self.location == Location::Trash {
+            if self.location.is_trash() {
                 heading_item(
                     fl!("trashed-on"),
                     Length::Fixed(modified_width),
@@ -4928,7 +5142,9 @@ impl Tab {
 
         let mut children: Vec<Element<_>> = Vec::new();
         match &self.location {
-            Location::Desktop(path, ..) | Location::Path(path) | Location::Search(path, ..) => {
+            Location::Desktop(path, ..)
+            | Location::Path(path)
+            | Location::Search(SearchLocation::Path(path), ..) => {
                 let excess_str = "...";
                 let excess_width = text_width_body(excess_str);
                 for (index, ancestor) in path.ancestors().enumerate() {
@@ -4936,7 +5152,11 @@ impl Tab {
                     let (name_width, name_text) = if children.is_empty() {
                         (
                             text_width_heading(&name),
-                            widget::text::heading(name).wrapping(text::Wrapping::None),
+                            widget::text::heading(name)
+                                .wrapping(text::Wrapping::None)
+                                .ellipsize(text::Ellipsize::End(
+                                    text::EllipsizeHeightLimit::Lines(1),
+                                )),
                         )
                     } else {
                         children.push(
@@ -5011,7 +5231,7 @@ impl Tab {
                 }
                 children.reverse();
             }
-            Location::Trash => {
+            Location::Trash | Location::Search(SearchLocation::Trash, ..) => {
                 children.push(
                     widget::button::custom(widget::text::heading(fl!("trash")))
                         .padding(space_xxxs)
@@ -5020,7 +5240,7 @@ impl Tab {
                         .into(),
                 );
             }
-            Location::Recents => {
+            Location::Recents | Location::Search(SearchLocation::Recents, ..) => {
                 children.push(
                     widget::button::custom(widget::text::heading(fl!("recents")))
                         .padding(space_xxxs)
@@ -5235,7 +5455,7 @@ impl Tab {
                         ))
                         .into(),
                         widget::tooltip(
-                            widget::button::custom(widget::text::body(&item.display_name))
+                            widget::button::custom(Item::grid_display_name(&item.display_name))
                                 .id(item.button_id.clone())
                                 .padding([0, space_xxxs])
                                 .class(button_style(
@@ -5400,18 +5620,20 @@ impl Tab {
                                 false,
                                 false,
                             )),
-                            widget::button::custom(widget::text::body(item.display_name.clone()))
-                                .id(item.button_id.clone())
-                                .on_press(Message::Click(Some(*i)))
-                                .padding([0, space_xxxs])
-                                .class(button_style(
-                                    item.selected,
-                                    item.highlighted,
-                                    item.cut,
-                                    true,
-                                    true,
-                                    false,
-                                )),
+                            widget::button::custom(Item::grid_display_name(
+                                item.display_name.clone(),
+                            ))
+                            .id(item.button_id.clone())
+                            .on_press(Message::Click(Some(*i)))
+                            .padding([0, space_xxxs])
+                            .class(button_style(
+                                item.selected,
+                                item.highlighted,
+                                item.cut,
+                                true,
+                                true,
+                                false,
+                            )),
                         ];
 
                         let column =
@@ -5610,7 +5832,7 @@ impl Tab {
                                 .size(icon_size)
                                 .into(),
                             widget::column::with_children([
-                                widget::text::body(item.display_name.clone()).into(),
+                                Item::list_display_name(item.display_name.clone()).into(),
                                 //TODO: translate?
                                 widget::text::caption(format!("{modified_text} - {size_text}"))
                                     .into(),
@@ -5627,7 +5849,7 @@ impl Tab {
                                 .size(icon_size)
                                 .into(),
                             widget::column::with_children([
-                                widget::text::body(item.display_name.clone()).into(),
+                                Item::list_display_name(item.display_name.clone()).into(),
                                 widget::text::caption(match item.path_opt() {
                                     Some(path) => path.display().to_string(),
                                     None => String::new(),
@@ -5652,7 +5874,7 @@ impl Tab {
                                 .content_fit(ContentFit::Contain)
                                 .size(icon_size)
                                 .into(),
-                            widget::text::body(item.display_name.clone())
+                            Item::list_display_name(item.display_name.clone())
                                 .width(Length::Fill)
                                 .into(),
                             widget::text::body(modified_text.clone())
@@ -5719,7 +5941,7 @@ impl Tab {
                                     .size(icon_size)
                                     .into(),
                                 widget::column::with_children([
-                                    widget::text::body(item.display_name.clone()).into(),
+                                    Item::list_display_name(item.display_name.clone()).into(),
                                     //TODO: translate?
                                     widget::text::body(format!("{modified_text} - {size_text}"))
                                         .into(),
@@ -5736,7 +5958,7 @@ impl Tab {
                                     .size(icon_size)
                                     .into(),
                                 widget::column::with_children([
-                                    widget::text::body(item.display_name.clone()).into(),
+                                    Item::list_display_name(item.display_name.clone()).into(),
                                     widget::text::caption(match item.path_opt() {
                                         Some(path) => path.display().to_string(),
                                         None => String::new(),
@@ -5761,7 +5983,7 @@ impl Tab {
                                     .content_fit(ContentFit::Contain)
                                     .size(icon_size)
                                     .into(),
-                                widget::text::body(item.display_name.clone())
+                                Item::list_display_name(item.display_name.clone())
                                     .width(Length::Fill)
                                     .into(),
                                 widget::text(modified_text)
@@ -5843,6 +6065,7 @@ impl Tab {
         key_binds: &'a HashMap<KeyBind, Action>,
         modifiers: &'a Modifiers,
         size: Size,
+        clipboard_paste_available: bool,
     ) -> Element<'a, Message> {
         // Update cached size
         self.size_opt.set(Some(size));
@@ -5930,7 +6153,8 @@ impl Tab {
         if let Some(point) = self.context_menu
             && (!cfg!(feature = "wayland") || !crate::is_wayland())
         {
-            let context_menu = menu::context_menu(self, key_binds, modifiers);
+            let context_menu =
+                menu::context_menu(self, key_binds, modifiers, clipboard_paste_available);
             popover = popover
                 .popup(context_menu)
                 .position(widget::popover::Position::Point(point));
@@ -5952,7 +6176,7 @@ impl Tab {
             tab_column = tab_column.push(popover);
         }
         match &self.location {
-            Location::Trash => {
+            Location::Trash | Location::Search(SearchLocation::Trash, ..) => {
                 if let Some(items) = self.items_opt()
                     && !items.is_empty()
                 {
@@ -6058,7 +6282,20 @@ impl Tab {
         );
 
         let selected_items: Vec<&Item> = self.items_opt().map_or(Vec::new(), |items| {
-            items.iter().filter(|item| item.selected).collect()
+            items
+                .iter()
+                .filter(|item| {
+                    if item.selected {
+                        item.location_opt
+                            .as_ref()
+                            .map(Location::path_opt)
+                            .flatten()
+                            .is_some()
+                    } else {
+                        false
+                    }
+                })
+                .collect()
         });
 
         let mut details = widget::column().spacing(space_xxxs);
@@ -6136,8 +6373,12 @@ impl Tab {
         &'a self,
         key_binds: &'a HashMap<KeyBind, Action>,
         modifiers: &'a Modifiers,
+        clipboard_paste_available: bool,
     ) -> Element<'a, Message> {
-        widget::responsive(|size| self.view_responsive(key_binds, modifiers, size)).into()
+        widget::responsive(move |size| {
+            self.view_responsive(key_binds, modifiers, size, clipboard_paste_available)
+        })
+        .into()
     }
 
     pub fn subscription(&self, preview: bool) -> Subscription<Message> {
@@ -6327,9 +6568,9 @@ impl Tab {
         }
 
         // Load search items incrementally
-        if let Location::Search(path, term, show_hidden, start) = &self.location {
+        if let Location::Search(search_location, term, show_hidden, start) = &self.location {
             let location = self.location.clone();
-            let path = path.clone();
+            let search_location = search_location.clone();
             let term = term.clone();
             let show_hidden = *show_hidden;
             let start = *start;
@@ -6358,27 +6599,25 @@ impl Tab {
                         let output = output.clone();
                         tokio::task::spawn_blocking(move || {
                             scan_search(
-                                &path,
+                                &search_location,
                                 &term,
                                 show_hidden,
-                                move |path, name, metadata| -> bool {
+                                move |search_item| -> bool {
                                     // Don't send if the result is too old
                                     if let Some(last_modified) = *last_modified_opt.read().unwrap()
                                     {
-                                        if let Ok(modified) = metadata.modified() {
-                                            if modified < last_modified {
+                                        if let SearchItem::Path(_, _, ref metadata) = search_item {
+                                            if let Ok(modified) = metadata.modified() {
+                                                if modified < last_modified {
+                                                    return true;
+                                                }
+                                            } else {
                                                 return true;
                                             }
-                                        } else {
-                                            return true;
                                         }
                                     }
 
-                                    match results_tx.blocking_send((
-                                        path.to_path_buf(),
-                                        name.to_string(),
-                                        metadata,
-                                    )) {
+                                    match results_tx.blocking_send(search_item) {
                                         Ok(()) => {
                                             if ready.swap(true, atomic::Ordering::SeqCst) {
                                                 true
@@ -6401,7 +6640,7 @@ impl Tab {
                             log::info!(
                                 "searched for {:?} in {} in {:?}",
                                 term,
-                                path.display(),
+                                search_location,
                                 start.elapsed(),
                             );
                         })

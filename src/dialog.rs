@@ -11,7 +11,7 @@ use cosmic::{
         event,
         futures::{self, SinkExt},
         keyboard::{Event as KeyEvent, Key, Modifiers, key::Named},
-        stream,
+        mouse, stream,
         widget::scrollable,
         window,
     },
@@ -48,7 +48,7 @@ use crate::{
     localize::LANGUAGE_SORTER,
     menu,
     mounter::{MOUNTERS, MounterItem, MounterItems, MounterKey, MounterMessage},
-    tab::{self, ItemMetadata, Location, Tab},
+    tab::{self, ItemMetadata, Location, SearchLocation, Tab},
     zoom::{zoom_in_view, zoom_out_view, zoom_to_default},
 };
 
@@ -468,6 +468,7 @@ enum Message {
     Key(Modifiers, Key, Option<SmolStr>),
     ModifiersChanged(Modifiers),
     MounterItems(MounterKey, MounterItems),
+    Mouse(window::Id, mouse::Button),
     NewFolder,
     NotifyEvents(Vec<DebouncedEvent>),
     NotifyWatcher(WatcherWrapper),
@@ -662,7 +663,11 @@ impl App {
             )
             .padding(0)
             .on_press_maybe(if self.flags.kind.save() {
-                Some(Message::Save(false))
+                if let DialogKind::SaveFile { filename } = &self.flags.kind {
+                    (!filename.is_empty()).then_some(Message::Save(false))
+                } else {
+                    None
+                }
             } else if has_selected || self.flags.kind.is_dir() {
                 Some(Message::Open)
             } else {
@@ -775,19 +780,35 @@ impl App {
 
     fn search_set(&mut self, term_opt: Option<String>) -> Task<Message> {
         let location_opt = match term_opt {
-            Some(term) => self.tab.location.path_opt().map(|path| {
-                (
-                    Location::Search(
-                        path.clone(),
-                        term,
-                        self.tab.config.show_hidden,
-                        Instant::now(),
-                    ),
-                    true,
-                )
-            }),
+            Some(term) => {
+                let search_location = if let Some(path) = self.tab.location.path_opt() {
+                    Some(SearchLocation::Path(path.clone()))
+                } else if self.tab.location.is_recents() {
+                    Some(SearchLocation::Recents)
+                } else if self.tab.location.is_trash() {
+                    Some(SearchLocation::Trash)
+                } else {
+                    None
+                };
+
+                search_location.map(|search_location| {
+                    return (
+                        Location::Search(
+                            search_location,
+                            term,
+                            self.tab.config.show_hidden,
+                            Instant::now(),
+                        ),
+                        true,
+                    );
+                })
+            }
             None => match &self.tab.location {
-                Location::Search(path, ..) => Some((Location::Path(path.clone()), false)),
+                Location::Search(search_location, ..) => match search_location {
+                    SearchLocation::Path(path) => Some((Location::Path(path.clone()), false)),
+                    SearchLocation::Recents => Some((Location::Recents, false)),
+                    SearchLocation::Trash => Some((Location::Trash, false)),
+                },
                 _ => None,
             },
         };
@@ -848,6 +869,15 @@ impl App {
             let active = self.nav_model.active();
             segmented_button::Selectable::deactivate(&mut self.nav_model, active);
         }
+    }
+
+    fn close_context_menus(&mut self) -> Task<Message> {
+        self.tab.location_context_menu_index = None;
+        if self.tab.context_menu.is_some() {
+            return self.update(Message::TabMessage(tab::Message::ContextMenu(None, None)));
+        }
+
+        Task::none()
     }
 
     fn update_nav_model(&mut self) {
@@ -1296,9 +1326,9 @@ impl Application for App {
             return Task::none();
         }
 
-        if self.search_get().is_some() {
-            // Close search if open
-            return self.search_set(None);
+        if self.tab.location_context_menu_index.is_some() {
+            self.tab.location_context_menu_index = None;
+            return Task::none();
         }
 
         if self.tab.context_menu.is_some() {
@@ -1309,6 +1339,11 @@ impl Application for App {
             // Close location editing if enabled
             self.tab.edit_location = None;
             return Task::none();
+        }
+
+        if self.search_get().is_some() {
+            // Close search if open
+            return self.search_set(None);
         }
 
         let had_focused_button = self.tab.select_focus_id().is_some();
@@ -1525,6 +1560,12 @@ impl Application for App {
 
                 return Task::batch(commands);
             }
+            Message::Mouse(window_id, _button) => {
+                // Close context menu when clicking outside.
+                if self.core.main_window_id() == Some(window_id) {
+                    return self.close_context_menus();
+                }
+            }
             Message::NewFolder => {
                 if let Some(path) = self.tab.location.path_opt() {
                     self.dialog_pages.push_back(DialogPage::NewFolder {
@@ -1605,12 +1646,14 @@ impl Application for App {
                             && let Some(path) = item.path_opt()
                         {
                             paths.push(path.clone());
-                            let _ = update_recently_used(
-                                path,
-                                Self::APP_ID.to_string(),
-                                "cosmic-files".to_string(),
-                                None,
-                            );
+                            if self.flags.config.show_recents {
+                                let _ = update_recently_used(
+                                    path,
+                                    Self::APP_ID.to_string(),
+                                    "cosmic-files".to_string(),
+                                    None,
+                                );
+                            }
                         }
                     }
                 }
@@ -1680,14 +1723,18 @@ impl Application for App {
                 )));
             }
             Message::SearchActivate => {
-                return if self.search_get().is_none() {
-                    self.search_set(Some(String::new()))
+                let mut tasks = vec![self.close_context_menus()];
+
+                if self.search_get().is_none() {
+                    tasks.push(self.search_set(Some(String::new())));
                 } else {
-                    widget::text_input::focus(self.search_id.clone())
-                };
+                    tasks.push(widget::text_input::focus(self.search_id.clone()));
+                }
+
+                return Task::batch(tasks);
             }
             Message::SearchClear => {
-                return self.search_set(None);
+                return Task::batch([self.close_context_menus(), self.search_set(None)]);
             }
             Message::SearchInput(input) => {
                 return self.search_set(Some(input));
@@ -1773,6 +1820,7 @@ impl Application for App {
                                                             &app.tab,
                                                             &app.key_binds,
                                                             &app.modifiers,
+                                                            false, // Paste not used in dialogs
                                                         )
                                                         .map(Message::TabMessage)
                                                         .map(cosmic::Action::App),
@@ -1957,7 +2005,7 @@ impl Application for App {
 
         col = col.push(
             self.tab
-                .view(&self.key_binds, &self.modifiers)
+                .view(&self.key_binds, &self.modifiers, false)
                 .map(Message::TabMessage),
         );
 
@@ -1968,7 +2016,11 @@ impl Application for App {
         struct WatcherSubscription;
         struct TimeSubscription;
         let mut subscriptions = vec![
-            event::listen_with(|event, status, _window_id| match event {
+            event::listen_with(|event, status, window_id| match event {
+                Event::Mouse(mouse::Event::ButtonPressed(button)) => match status {
+                    event::Status::Ignored => Some(Message::Mouse(window_id, button)),
+                    event::Status::Captured => None,
+                },
                 Event::Keyboard(KeyEvent::KeyPressed {
                     key,
                     modifiers,

@@ -1,4 +1,6 @@
 cosmic-files = Soubory COSMIC
+comment = Správce souborů pro prostředí COSMIC
+keywords = Složky;Správce;Manažer;Prohlížeč;
 empty-folder = Složka je prázdná
 empty-folder-hidden = Složka je prázdná (obsahuje skryté položky)
 filesystem = Souborový systém
@@ -51,7 +53,7 @@ rename-folder = Přejmenovat složku
 ## Replace Dialog
 
 replace = Nahradit
-replace-title = „{ $filename }“ již na daném místě existuje
+replace-title = Soubor „{ $filename }“ již na daném místě existuje
 replace-warning = Chcete nahradit soubor tím, který ukládáte? Nahrazení přepíše veškerý jeho obsah.
 
 # Context Pages
@@ -403,3 +405,12 @@ sort = Řazení
 sort-a-z = A-Z
 empty-trash-title = Vysypat koš?
 type-to-search-select = Vybere první shodující se soubor nebo složku
+pasted-image = Vložen obrázek
+pasted-text = Vložen text
+pasted-video = Vloženo video
+copy-to-button-label = Kopírovat
+move-to-button-label = Přesunout
+copy-to = Kopírovat do...
+move-to = Přesunout do...
+copy-to-title = Vyberte cíl kopírování
+move-to-title = Vyberte cíl přesunutí

@@ -422,3 +422,14 @@ removed-from-recents =
     } de { recents }
 progress-failed = { $percent }%, échec
 type-to-search-select = Sélectionne le premier fichier ou dossier qui convient
+pasted-image = Image collée
+pasted-text = Text collé
+pasted-video = Vidéo collée
+copy-to-title = Sélectionner la destination de la copie
+copy-to-button-label = Copier
+move-to-title = Sélectionner la destination du déplacement
+move-to-button-label = Déplacer
+copy-to = Copier vers...
+move-to = Déplacer vers...
+comment = Explorateur de fichiers pour le bureau COSMIC
+keywords = Dossier;Gestionnaire;
