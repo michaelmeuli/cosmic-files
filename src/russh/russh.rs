@@ -291,7 +291,8 @@ async fn remote_sftp_list(
             remote_file.port,
         ))
         .unwrap();
-        url.set_path(&new_path.to_string_lossy());
+        let url_path = format!("{}/{}", path.trim_end_matches('/'), name);
+        url.set_path(&url_path);
         let child_uri = url.to_string();
         let location = Location::Remote(child_uri.clone(), name.clone(), Some(new_path.clone()));
 
@@ -464,7 +465,8 @@ async fn remote_sftp_list(
             ))
             .unwrap();
 
-            url.set_path(&json_path.to_string_lossy());
+            let url_path = json_path.to_string_lossy().replace('\\', "/");
+            url.set_path(&url_path);
 
             match load_remote_json(client, url.as_str()).await {
                 Ok(json) => json_opt = Some(json),
