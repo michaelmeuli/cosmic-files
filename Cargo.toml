@@ -112,18 +112,6 @@ name = "gvfs"
 required-features = ["gvfs"]
 
 [features]
-default = [
-    "bzip2",
-    "dbus-config",
-    "desktop",
-    "gvfs",
-    "russh",
-    "io-uring",
-    "lzma-rust2",
-    "notify",
-    "wgpu",
-    "wayland",
-]
 dbus-config = ["libcosmic/dbus-config"]
 desktop = ["dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
@@ -132,7 +120,7 @@ russh = ["dep:async-ssh2-tokio", "dep:russh-sftp"]
 io-uring = ["compio/io-uring"]
 jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]
-wayland = ["libcosmic/wayland", "dep:cctk", "dep:wayland-client"]
+wayland = ["libcosmic/wayland", "dep:cctk"]
 wgpu = ["libcosmic/wgpu"]
 
 [profile.dev]
