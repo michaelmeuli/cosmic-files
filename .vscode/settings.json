@@ -1,7 +1,3 @@
 {
     "editor.inlayHints.enabled": "offUnlessPressed",
-    "rust-analyzer.cargo.target": "x86_64-pc-windows-msvc",
-    "rust-analyzer.checkOnSave.command": "check",
-    "rust-analyzer.checkOnSave.allTargets": true,
-    "rust-analyzer.cargo.features": "all"
 }

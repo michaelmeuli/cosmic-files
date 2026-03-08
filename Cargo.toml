@@ -160,5 +160,3 @@ tokio = { version = "1", features = ["rt", "macros"] }
 # [patch.'https://github.com/pop-os/smithay-clipboard']
 # smithay-clipboard = { path = "../smithay-clipboard" }
 
-[workspace]
-members = ["cosmic-files-applet"]
