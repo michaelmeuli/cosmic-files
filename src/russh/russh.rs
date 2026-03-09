@@ -502,7 +502,8 @@ async fn perform_download(
                 target = download_unique_path(&from, &to, &mut reserved);
             }
             reserved.insert(target.clone());
-            Some((from.to_string_lossy().to_string(), target))
+            let remote = from.to_string_lossy().replace('\\', "/");
+            Some((remote, target))
         })
         .collect();
     for (path, target) in &path_target_pairs {
