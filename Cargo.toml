@@ -105,17 +105,6 @@ name = "gvfs"
 required-features = ["gvfs"]
 
 [features]
-default = [
-    "bzip2",
-    "dbus-config",
-    "desktop",
-    "gvfs",
-    "io-uring",
-    "lzma-rust2",
-    "notify",
-    "wgpu",
-    "wayland",
-]
 dbus-config = ["libcosmic/dbus-config"]
 desktop = ["dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
@@ -161,5 +150,3 @@ tokio = { version = "1", features = ["rt", "macros"] }
 # [patch.'https://github.com/pop-os/smithay-clipboard']
 # smithay-clipboard = { path = "../smithay-clipboard" }
 
-[workspace]
-members = ["cosmic-files-applet"]
