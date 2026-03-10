@@ -455,6 +455,7 @@ pub enum Message {
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
     SaveSortNames,
+    ScanForResistantSamples,
     ScrollTab(i16),
     SearchActivate,
     SearchClear,
@@ -3917,6 +3918,14 @@ impl Application for App {
                     self.remote_drive_input
                 );
             }
+            Massage::ScanForResistantSamples => {
+                //TODO: know which client to use for remote drives
+                if let Some((client_key, client)) = CLIENTS.iter().next() {
+                    return client
+                        .scan_for_resistant_samples()
+                        .map(|()| cosmic::action::none());
+                }
+            }
             Message::NetworkResult(mounter_key, uri, res) => {
                 if self
                     .network_drive_connecting
@@ -4856,6 +4865,9 @@ impl Application for App {
                         tab::Command::AddRemoteDrive => {
                             self.context_page = ContextPage::RemoteDrive;
                             self.set_show_context(true);
+                        }
+                        tab::Command::ScanForResistantSamples => {
+                            commands.push(self.update(Message::ScanForResistantSamples));
                         }
                         tab::Command::AddToSidebar(path) => {
                             let mut favorites = self.config.favorites.clone();

@@ -1976,6 +1976,7 @@ pub enum Command {
     OpenInNewWindow(PathBuf),
     OpenTrash,
     Preview(PreviewKind),
+    ScanForResistantSamples,
     SetOpenWith(Mime, String),
     SetPermissions(PathBuf, u32),
     SetSort(String, HeadingOptions, bool),
@@ -2026,6 +2027,7 @@ pub enum Message {
     RightClick(Option<Point>, Option<usize>),
     MiddleClick(usize),
     Resize(Rectangle),
+    ScanForResistantSamples,
     Scroll(Viewport),
     ScrollTab(f32),
     ScrollToFocused,
@@ -3814,6 +3816,9 @@ impl Tab {
             }
             Message::AddRemoteDrive => {
                 commands.push(Command::AddRemoteDrive);
+            }
+            Message::ScanForResistantSamples => {
+                commands.push(Command::ScanForResistantSamples);
             }
             Message::AutoScroll(auto_scroll) => {
                 commands.push(Command::AutoScroll(auto_scroll));
@@ -6688,6 +6693,20 @@ impl Tab {
                         widget::horizontal_space().into(),
                         widget::button::standard(fl!("add-remote-drive"))
                             .on_press(Message::AddRemoteDrive)
+                            .into(),
+                    ]))
+                    .padding([space_xxs, space_xs])
+                    .layer(cosmic_theme::Layer::Primary)
+                    .apply(widget::container)
+                    .padding([0, 0, 7, 0]),
+                );
+            }
+            Location::Remote(uri, _display_name, _path) if uri.contains("/results/") => {
+                tab_column = tab_column.push(
+                    widget::layer_container(widget::row::with_children([
+                        widget::horizontal_space().into(),
+                        widget::button::standard(fl!("scan-for-resistant-samples"))
+                            .on_press(Message::ScanForResistantSamples)
                             .into(),
                     ]))
                     .padding([space_xxs, space_xs])

@@ -390,3 +390,7 @@ sort-newest-first = Newest first
 sort-oldest-first = Oldest first
 sort-smallest-to-largest = Smallest to largest
 sort-largest-to-smallest = Largest to smallest
+
+
+## TB Profiler
+scan-for-resistant-samples = Scan for resistant Samples
