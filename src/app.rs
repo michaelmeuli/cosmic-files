@@ -209,6 +209,7 @@ pub enum Action {
     TabViewList,
     ToggleFoldersFirst,
     ToggleShowHidden,
+    ToggleShowSusceptible,
     ToggleSort(HeadingOptions),
     ToggleShowAsSamples,
     WindowClose,
@@ -287,6 +288,7 @@ impl Action {
             Self::TabViewList => Message::TabView(entity_opt, tab::View::List),
             Self::ToggleFoldersFirst => Message::ToggleFoldersFirst,
             Self::ToggleShowHidden => Message::ToggleShowHidden,
+            Self::ToggleShowSusceptible => Message::ToggleShowSusceptible,
             Self::ToggleSort(sort) => {
                 Message::TabMessage(entity_opt, tab::Message::ToggleSort(*sort))
             }
@@ -483,6 +485,7 @@ pub enum Message {
     ToggleContextPage(ContextPage),
     ToggleFoldersFirst,
     ToggleShowHidden,
+    ToggleShowSusceptible,
     ToggleShowAsSamples,
     Undo(usize),
     UndoTrash(widget::ToastId, Arc<[PathBuf]>),
@@ -4828,6 +4831,11 @@ impl Application for App {
             Message::ToggleShowHidden => {
                 let mut config = self.config.tab;
                 config.show_hidden = !config.show_hidden;
+                return self.update(Message::TabConfig(config));
+            }
+            Message::ToggleShowSusceptible => {
+                let mut config = self.config.tab;
+                config.show_susceptible = !config.show_susceptible;
                 return self.update(Message::TabConfig(config));
             }
             Message::ToggleShowAsSamples => {

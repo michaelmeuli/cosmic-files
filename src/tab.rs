@@ -1,7 +1,8 @@
 use chrono::{Datelike, Timelike, Utc};
+#[cfg(not(windows))]
+use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use cosmic::{
-    Apply, Element, cosmic_theme,
-    font,
+    Apply, Element, cosmic_theme, font,
     iced::{
         Alignment,
         Border,
@@ -39,8 +40,6 @@ use cosmic::{
         menu::{action::MenuAction, key_bind::KeyBind},
     },
 };
-#[cfg(not(windows))]
-use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use i18n_embed::LanguageLoader;
 use icu::{
     datetime::{
@@ -56,6 +55,10 @@ use mime_guess::{Mime, mime};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
@@ -71,10 +74,6 @@ use std::{
     sync::{Arc, LazyLock, RwLock, atomic},
     time::{Duration, Instant, SystemTime},
 };
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
 
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
@@ -2111,6 +2110,7 @@ pub enum ItemMetadata {
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
+        is_susceptible: bool,
     },
 }
 
@@ -2232,6 +2232,13 @@ impl ItemMetadata {
                 ..
             } => sample_docx_path_opt.as_ref(),
             _ => None,
+        }
+    }
+    pub fn is_susceptible(&self) -> bool {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath { is_susceptible, .. } => *is_susceptible,
+            _ => false,
         }
     }
 }
@@ -5745,7 +5752,7 @@ impl Tab {
         popover.into()
     }
 
-    pub fn empty_view(&self, has_hidden: bool) -> Element<'_, Message> {
+    pub fn empty_view(&self, has_hidden: bool, susceptible_hidden: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
 
         mouse_area::MouseArea::new(widget::column::with_children([widget::container(
@@ -5757,6 +5764,8 @@ impl Tab {
                         .into(),
                     widget::text::body(if has_hidden {
                         fl!("empty-folder-hidden")
+                    } else if susceptible_hidden {
+                        fl!("empty-folder-susceptible-hidden")
                     } else if matches!(self.location, Location::Search(..)) {
                         fl!("no-results")
                     } else {
@@ -5790,6 +5799,7 @@ impl Tab {
 
         let TabConfig {
             show_hidden,
+            show_susceptible,
             mut icon_sizes,
             ..
         } = self.config;
@@ -5866,12 +5876,19 @@ impl Tab {
             let mut row = 0;
             let mut page_row = 0;
             let mut hidden = 0;
+            let mut susceptible_hidden = 0;
             let mut grid_elements = Vec::new();
             for &(i, item) in &items {
                 if !show_hidden && item.hidden {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     hidden += 1;
+                    continue;
+                }
+                if item.metadata.is_susceptible() && !show_susceptible {
+                    item.pos_opt.set(None);
+                    item.rect_opt.set(None);
+                    susceptible_hidden += 1;
                     continue;
                 }
                 item.pos_opt.set(Some((row, col)));
@@ -6008,7 +6025,7 @@ impl Tab {
             }
 
             if count == 0 {
-                return (None, self.empty_view(hidden > 0), false);
+                return (None, self.empty_view(hidden > 0, susceptible_hidden > 0), false);
             }
 
             column = column.push(grid);
@@ -6136,6 +6153,7 @@ impl Tab {
 
         let TabConfig {
             show_hidden,
+            show_susceptible,
             icon_sizes,
             ..
         } = self.config;
@@ -6180,11 +6198,18 @@ impl Tab {
         if let Some(items) = self.column_sort() {
             let mut count = 0;
             let mut hidden = 0;
+            let mut susceptible_hidden = 0;
             for (i, item) in items {
                 if item.hidden && !show_hidden {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     hidden += 1;
+                    continue;
+                }
+                if item.metadata.is_susceptible() && !show_susceptible {
+                    item.pos_opt.set(None);
+                    item.rect_opt.set(None);
+                    susceptible_hidden += 1;
                     continue;
                 }
 
@@ -6496,7 +6521,7 @@ impl Tab {
             }
 
             if count == 0 {
-                return (None, self.empty_view(hidden > 0), false);
+                return (None, self.empty_view(hidden > 0, susceptible_hidden > 0), false);
             }
 
             // Cache content height for scroll clamping on next frame

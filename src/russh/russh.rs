@@ -335,20 +335,13 @@ async fn remote_sftp_list(
             let is_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             let mut json_opt = None;
+            let mut is_susceptible = false;
             if is_json {
                 match load_remote_json(client, &child_uri).await {
                     Ok(json) => {
+                        let sus = json.dr_variants.iter().all(|v| v.is_susceptible());
                         json_opt = Some(json);
-                        log::info!(
-                            "Loaded JSON metadata for {}: {}",
-                            new_path.display(),
-                            child_uri
-                        );
-                        log::info!(
-                            "JSON content for {}: {}",
-                            new_path.display(),
-                            json_opt.as_ref().unwrap()
-                        );
+                        is_susceptible = sus;
                     }
                     Err(e) => {
                         log::info!("Failed to load JSON for {}: {}", new_path.display(), e);
@@ -385,6 +378,7 @@ async fn remote_sftp_list(
                 sample_json_path_opt: None,
                 sample_csv_path_opt: None,
                 sample_docx_path_opt: None,
+                is_susceptible,
             }
         } else {
             ItemMetadata::SimpleDir { entries: 0 }
@@ -451,6 +445,7 @@ async fn remote_sftp_list(
     // ------------------------------------------------------------
     for (sample_id, files) in samples {
         let mut json_opt = None;
+        let mut is_susceptible = false;
 
         if let Some(json_path) = &files.json {
             let mut url = Url::parse(&format!(
@@ -467,9 +462,12 @@ async fn remote_sftp_list(
 
             let url_path = json_path.to_string_lossy().replace('\\', "/");
             url.set_path(&url_path);
-
             match load_remote_json(client, url.as_str()).await {
-                Ok(json) => json_opt = Some(json),
+                Ok(json) => {
+                    let sus = json.dr_variants.iter().all(|v| v.is_susceptible());
+                    json_opt = Some(json);
+                    is_susceptible = sus;
+                }
                 Err(e) => log::warn!("Failed to load sample JSON: {}", e),
             }
         }
@@ -486,6 +484,7 @@ async fn remote_sftp_list(
             sample_json_path_opt: files.json.clone(),
             sample_csv_path_opt: files.csv.clone(),
             sample_docx_path_opt: files.docx.clone(),
+            is_susceptible,
         };
 
         items.push(tab::Item {
@@ -605,6 +604,7 @@ async fn remote_sftp_parent(
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
+            is_susceptible: false,
         }
     };
     let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {

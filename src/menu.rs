@@ -722,6 +722,12 @@ pub fn menu_bar<'a>(
                             Action::ToggleShowHidden,
                         ),
                         menu::Item::CheckBox(
+                            fl!("show-susceptible-samples"),
+                            None,
+                            tab_opt.is_some_and(|tab| tab.config.show_susceptible),
+                            Action::ToggleShowSusceptible,
+                        ),
+                        menu::Item::CheckBox(
                             fl!("list-directories-first"),
                             None,
                             tab_opt.is_some_and(|tab| tab.config.folders_first),

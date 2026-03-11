@@ -58,6 +58,14 @@ impl DrVariant {
             .min() // strongest (lowest number)
             .unwrap_or(5)
     }
+    pub fn is_susceptible(&self) -> bool {
+        self.drugs
+            .iter()
+            .map(|d| confidence_rank(d.confidence.as_str()))
+            .min() // strongest (lowest rank)
+            .map(|rank| rank >= 2)
+            .unwrap_or(true) // if no drugs listed, treat as susceptible
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

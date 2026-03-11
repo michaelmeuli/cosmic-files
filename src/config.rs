@@ -237,6 +237,7 @@ impl Config {
             single_click: false,
             view: self.dialog.view,
             show_as_samples: false,
+            show_susceptible: self.dialog.show_susceptible,
         }
     }
 }
@@ -308,6 +309,8 @@ pub struct DialogConfig {
     pub show_hidden: bool,
     /// Selected view, grid or list
     pub view: View,
+    /// Show susceptible samples
+    pub show_susceptible: bool,
 }
 
 impl Default for DialogConfig {
@@ -318,6 +321,7 @@ impl Default for DialogConfig {
             show_details: true,
             show_hidden: false,
             view: View::List,
+            show_susceptible: true,
         }
     }
 }
@@ -363,6 +367,8 @@ pub struct TabConfig {
     pub view: View,
     /// Show samples instead of files
     pub show_as_samples: bool,
+    /// Show susceptible samples
+    pub show_susceptible: bool,
 }
 
 impl Default for TabConfig {
@@ -375,6 +381,7 @@ impl Default for TabConfig {
             single_click: false,
             view: View::List,
             show_as_samples: false,
+            show_susceptible: true,
         }
     }
 }
