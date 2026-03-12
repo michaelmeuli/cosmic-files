@@ -1596,12 +1596,13 @@ impl Connector for Russh {
                 command_tx
                     .send(Cmd::RunTbProfiler(paths, uris, tb_config, res_tx))
                     .unwrap();
+
                 res_rx.await
             },
-            |x| {
-                if let Err(err) = x {
-                    log::error!("{err:?}");
-                }
+            |x| match x {
+                Ok(Ok(msg)) => log::info!("TBProfiler started: {msg}"),
+                Ok(Err(err)) => log::error!("TBProfiler failed: {err}"),
+                Err(err) => log::error!("Channel error: {err}"),
             },
         )
     }
