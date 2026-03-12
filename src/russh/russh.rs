@@ -772,13 +772,20 @@ pub async fn run_tbprofiler(
     paths: Box<[PathBuf]>,
     tb_config: TBConfig,
 ) -> Result<String, anyhow::Error> {
+    if tb_config.script_path.is_empty()
+        || tb_config.out_dir.is_empty()
+        || tb_config.docx_template_path.is_empty()
+    {
+        return Err(anyhow::anyhow!(
+            "Please configure paths under TB profiler settings..."
+        ));
+    }
     let mut sample_map: BTreeMap<String, BTreeSet<u8>> = BTreeMap::new();
     for path in paths.iter() {
         let filename = path
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| anyhow::anyhow!("Invalid filename in path: {:?}", path))?;
-
         if let Some(sample) = filename.strip_suffix("_1.fastq.gz") {
             sample_map.entry(sample.to_string()).or_default().insert(1);
         } else if let Some(sample) = filename.strip_suffix("_2.fastq.gz") {
@@ -808,12 +815,33 @@ pub async fn run_tbprofiler(
         .checked_sub(1)
         .ok_or_else(|| anyhow::anyhow!("Need at least 1 sample"))?;
 
+    let raw_sequence_dir_paired = {
+        let first_parent = paths
+            .first()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow::anyhow!("Could not determine parent directory"))?;
+
+        for p in paths.iter() {
+            let parent = p
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("Path has no parent: {:?}", p))?;
+            if parent != first_parent {
+                return Err(anyhow::anyhow!(
+                    "FASTQ files are in different directories: {:?} vs {:?}",
+                    first_parent,
+                    parent
+                ));
+            }
+        }
+        first_parent.to_string_lossy().into_owned()
+    };
+
     let command_run_tbprofiler = format!(
         "sbatch --array 0-{} {} \"{}\" {} {} {}",
         array_end,
         tb_config.script_path,
         sample_ids_string,
-        tb_config.raw_sequence_dir_paired,
+        raw_sequence_dir_paired,
         tb_config.out_dir,
         tb_config.docx_template_path,
     );

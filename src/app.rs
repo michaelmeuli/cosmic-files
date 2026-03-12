@@ -513,7 +513,6 @@ pub enum Message {
     Surface(surface::Action),
     CutPaths(Vec<PathBuf>),
     SetTbScriptPath(String),
-    SetTbRawSequenceDirPaired(String),
     SetTbOutDir(String),
     SetTbDocxTemplatePath(String),
 }
@@ -2332,12 +2331,6 @@ impl App {
                     widget::settings::item::builder("TB Profiler script path").control(
                         widget::text_input("", &self.config.tb_config.script_path)
                             .on_input(Message::SetTbScriptPath),
-                    ),
-                )
-                .add(
-                    widget::settings::item::builder("TB raw sequence dir paired").control(
-                        widget::text_input("", &self.config.tb_config.raw_sequence_dir_paired)
-                            .on_input(Message::SetTbRawSequenceDirPaired),
                     ),
                 )
                 .add(widget::settings::item::builder("TB Profiler output directory").control(
@@ -5809,12 +5802,6 @@ impl Application for App {
             Message::SetTbScriptPath(script_path) => {
                 let mut tb_config = self.config.tb_config.clone();
                 tb_config.script_path = script_path;
-                config_set!(tb_config, tb_config);
-                return self.update_config();
-            }
-            Message::SetTbRawSequenceDirPaired(raw_sequence_dir_paired) => {
-                let mut tb_config = self.config.tb_config.clone();
-                tb_config.raw_sequence_dir_paired = raw_sequence_dir_paired;
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }

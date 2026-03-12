@@ -167,7 +167,6 @@ impl State {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TBConfig {
     pub script_path: String,
-    pub raw_sequence_dir_paired: String,
     pub out_dir: String,
     pub docx_template_path: String,
 }
@@ -176,7 +175,6 @@ impl Default for TBConfig {
     fn default() -> Self {
         Self {
             script_path: String::new(),
-            raw_sequence_dir_paired: String::new(),
             out_dir: String::new(),
             docx_template_path: String::new(),
         }
