@@ -945,6 +945,7 @@ enum Event {
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
+    TbProfiler(String, Result<bool, String>),
 }
 
 #[derive(Clone, Debug)]
@@ -1630,6 +1631,10 @@ impl Connector for Russh {
                             .unwrap(),
                         Event::RemoteResult(uri, res) => output
                             .send(ClientMessage::RemoteResult(uri, res))
+                            .await
+                            .unwrap(),
+                        Event::TbProfiler(uri, res) => output
+                            .send(ClientMessage::TbProfiler(uri, res))
                             .await
                             .unwrap(),
                     }
