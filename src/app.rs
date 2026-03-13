@@ -602,6 +602,11 @@ pub enum DialogPage {
         uri: String,
         error: String,
     },
+    RunTbProfilerError {
+        client_key: ClientKey,
+        uri: String,
+        error: String,
+    },
     NewItem {
         parent: PathBuf,
         name: String,
@@ -3367,6 +3372,14 @@ impl Application for App {
                             tasks.push(self.update(Message::RemoteDriveInput(uri)));
                             tasks.push(self.update(Message::RemoteDriveSubmit));
                         }
+                        DialogPage::RunTbProfilerError {
+                            client_key: _,
+                            uri,
+                            error: _,
+                        } => {
+                            tasks.push(self.update(Message::RemoteDriveInput(uri)));
+                            tasks.push(self.update(Message::RemoteDriveSubmit));
+                        }
                         DialogPage::NewItem { parent, name, dir } => {
                             let path = parent.join(name);
                             tasks.push(self.operation(if dir {
@@ -3982,14 +3995,14 @@ impl Application for App {
             Message::RunTbProfilerResult(client_key, uri, res) => {
                 match res {
                     Ok(true) => {
-                        log::info!("TbProfiler ran successfully for {uri:?}");
+                        log::info!("TbProfiler started successfully for {uri:?}");
                     }
                     Ok(false) => {
                         log::info!("TbProfiler was cancelled for {uri:?}");
                     }
                     Err(error) => {
                         log::warn!("failed to run TbProfiler for {uri:?}: {error}");
-                        return self.dialog_pages.push_back(DialogPage::RemoteError {
+                        return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
                             client_key,
                             uri,
                             error,
@@ -6421,6 +6434,20 @@ impl Application for App {
                 error,
             } => widget::dialog()
                 .title(fl!("remote-access-error"))
+                .body(error)
+                .icon(icon::from_name("dialog-error").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("try-again")).on_press(Message::DialogComplete),
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
+            DialogPage::RunTbProfilerError {
+                client_key: _,
+                uri: _,
+                error,
+            } => widget::dialog()
+                .title("TB Profiler Error")
                 .body(error)
                 .icon(icon::from_name("dialog-error").size(64))
                 .primary_action(
