@@ -456,6 +456,7 @@ pub enum Message {
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
+    RunTbProfilerResult(ClientKey, String, Result<bool, String>),
     SaveSortNames,
     ScrollTab(i16),
     SearchActivate,
@@ -3978,6 +3979,24 @@ impl Application for App {
                         .map(|()| cosmic::action::none());
                 }
             }
+            Message::RunTbProfilerResult(client_key, uri, res) => {
+                match res {
+                    Ok(true) => {
+                        log::info!("TbProfiler ran successfully for {uri:?}");
+                    }
+                    Ok(false) => {
+                        log::info!("TbProfiler was cancelled for {uri:?}");
+                    }
+                    Err(error) => {
+                        log::warn!("failed to run TbProfiler for {uri:?}: {error}");
+                        return self.dialog_pages.push_back(DialogPage::RemoteError {
+                            client_key,
+                            uri,
+                            error,
+                        });
+                    }
+                }
+            }
             Message::NewItem(entity_opt, dir) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
                 if let Some(tab) = self.tab_model.data_mut::<Tab>(entity)
@@ -7474,6 +7493,9 @@ impl Application for App {
                         }
                         ClientMessage::RemoteResult(uri, res) => {
                             Message::RemoteResult(key, uri, res)
+                        }
+                        ClientMessage::RunTbProfilerResult(uri, res) => {
+                            Message::RunTbProfilerResult(key, uri, res)
                         }
                     },
                 ),

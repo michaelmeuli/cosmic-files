@@ -110,7 +110,7 @@ pub enum ClientMessage {
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
-    TbProfiler(String, Result<bool, String>),
+    RunTbProfilerResult(String, Result<bool, String>),
 }
 
 pub trait Connector: Send + Sync {

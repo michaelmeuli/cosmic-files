@@ -945,7 +945,7 @@ enum Event {
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
-    TbProfiler(String, Result<bool, String>),
+    RunTbProfilerResult(String, Result<bool, String>),
 }
 
 #[derive(Clone, Debug)]
@@ -1424,32 +1424,59 @@ impl Russh {
                             let _ = result_tx.send(result);
                         }
                         Cmd::RunTbProfiler(paths, uris, tb_config, result_tx) => {
-                            let result: Result<String, anyhow::Error> = async {
-                                let remote_files: Vec<_> = uris
-                                    .iter()
-                                    .map(|u| {
-                                        remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e))
-                                    })
-                                    .collect::<Result<_, anyhow::Error>>()?;
-                                let host = remote_files
-                                    .first()
-                                    .ok_or_else(|| anyhow::anyhow!("No URIs provided"))?
-                                    .host
-                                    .clone();
-                                if remote_files.iter().any(|rf| rf.host != host) {
-                                    return Err(anyhow::anyhow!(
-                                        "All URIs must be from the same host"
-                                    ));
-                                }
-                                let client = {
-                                    let read = clients.read().await;
-                                    read.get(&host).cloned()
-                                }
-                                .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
-                                run_tbprofiler(&client, paths.clone(), tb_config).await
+                            let uri = uris
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| "ssh:///".to_string());
+                            if uris.is_empty() {
+                                let err = anyhow::anyhow!("No URIs provided");
+                                let _ = result_tx.send(Err(err));
+                                continue;
                             }
-                            .await;
+                            let remote_files: Vec<_> = match uris
+                                .iter()
+                                .map(|u| remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e)))
+                                .collect::<Result<_, _>>()
+                            {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    let _ = result_tx.send(Err(err));
+                                    continue;
+                                }
+                            };
+                            let host = match remote_files.first() {
+                                Some(rf) => rf.host.clone(),
+                                None => {
+                                    let _ =
+                                        result_tx.send(Err(anyhow::anyhow!("No URIs provided")));
+                                    continue;
+                                }
+                            };
+                            if remote_files.iter().any(|rf| rf.host != host) {
+                                let _ = result_tx.send(Err(anyhow::anyhow!(
+                                    "All URIs must be from the same host"
+                                )));
+                                continue;
+                            }
+                            let client = {
+                                let read = clients.read().await;
+                                read.get(&host).cloned()
+                            };
+                            let client = match client {
+                                Some(c) => c,
+                                None => {
+                                    let err = anyhow::anyhow!("No client for host {}", host);
+                                    let _ = result_tx.send(Err(err));
+                                    continue;
+                                }
+                            };
+                            let result = run_tbprofiler(&client, paths, tb_config).await;
+                            let event_result: Result<bool, String> =
+                                result.as_ref().map(|_| true).map_err(|e| e.to_string());
                             let _ = result_tx.send(result);
+                            event_tx
+                                .send(Event::RunTbProfilerResult(uri, event_result))
+                                .unwrap();
                         }
                     }
                 }
@@ -1633,8 +1660,8 @@ impl Connector for Russh {
                             .send(ClientMessage::RemoteResult(uri, res))
                             .await
                             .unwrap(),
-                        Event::TbProfiler(uri, res) => output
-                            .send(ClientMessage::TbProfiler(uri, res))
+                        Event::RunTbProfilerResult(uri, res) => output
+                            .send(ClientMessage::RunTbProfilerResult(uri, res))
                             .await
                             .unwrap(),
                     }
