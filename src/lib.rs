@@ -1,7 +1,7 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic::{app::Settings, iced::Limits};
+use cosmic::{app::Settings, iced::{Limits, Size}};
 use std::{env, fs, path::PathBuf, process};
 
 use app::{App, Flags};
@@ -81,7 +81,7 @@ pub fn desktop() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut settings = Settings::default();
     settings = settings.theme(config.app_theme.theme());
-    settings = settings.size_limits(Limits::NONE.min_width(460.0).min_height(180.0));
+    settings = settings.size_limits(Limits::NONE.min_width(360.0).min_height(180.0));
     settings = settings.exit_on_close(false);
     settings = settings.transparent(true);
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -170,7 +170,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut settings = Settings::default();
     settings = settings.theme(config.app_theme.theme());
-    settings = settings.size_limits(Limits::NONE.min_width(360.0).min_height(180.0));
+    settings = settings.size(Size::new(1400.0, 800.0)).size_limits(Limits::NONE.min_width(360.0).min_height(180.0));
     settings = settings.exit_on_close(false);
 
     #[cfg(feature = "jemalloc")]
