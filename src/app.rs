@@ -3374,11 +3374,12 @@ impl Application for App {
                         }
                         DialogPage::RunTbProfilerError {
                             client_key: _,
-                            uri,
+                            uri: _,
                             error: _,
                         } => {
-                            tasks.push(self.update(Message::RemoteDriveInput(uri)));
-                            tasks.push(self.update(Message::RemoteDriveSubmit));
+                            tasks.push(Task::future(async move {
+                                cosmic::action::none()
+                            }));
                         }
                         DialogPage::NewItem { parent, name, dir } => {
                             let path = parent.join(name);
@@ -6451,9 +6452,6 @@ impl Application for App {
                 .body(error)
                 .icon(icon::from_name("dialog-error").size(64))
                 .primary_action(
-                    widget::button::standard(fl!("try-again")).on_press(Message::DialogComplete),
-                )
-                .secondary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
                 ),
             DialogPage::NewItem { parent, name, dir } => {
