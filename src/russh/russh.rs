@@ -40,6 +40,7 @@ struct SampleFiles {
     size: Option<u64>,
 }
 
+
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
         "Could not determine the user home directory.\n\

@@ -93,7 +93,7 @@ use crate::{
         Controller, Operation, OperationError, OperationErrorType, OperationSelection,
         ReplaceResult, copy_unique_path,
     },
-    russh::{CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage},
+    russh::{CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, same_uri},
     spawn_detached::spawn_detached,
     tab::{
         self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
@@ -3960,7 +3960,7 @@ impl Application for App {
                 if self
                     .remote_drive_connecting
                     .as_ref()
-                    .is_some_and(|(m, u)| *m == client_key && *u == uri)
+                    .is_some_and(|(m, u)| *m == client_key && same_uri(u, &uri))
                 {
                     self.remote_drive_connecting = None;
                 }
