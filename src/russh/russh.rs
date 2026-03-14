@@ -1602,12 +1602,9 @@ impl Connector for Russh {
 
     fn disconnect(&self, item: ClientItem) -> Task<()> {
         let command_tx = self.command_tx.clone();
-        Task::perform(
-            async move {
-                command_tx.send(Cmd::Disconnect(item)).unwrap();
-            },
-            |_| {},
-        )
+        Task::future(async move {
+            command_tx.send(Cmd::Disconnect(item)).unwrap();
+        })
     }
 
     fn run_tb_profiler(
