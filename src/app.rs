@@ -5950,7 +5950,7 @@ impl Application for App {
                 self.tb_settings(),
                 Message::ToggleContextPage(ContextPage::TBSettings),
             )
-            .title("TB Profiler Settings"),
+            .title(fl!("tb-profiler-settings")),
         })
     }
 

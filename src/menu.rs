@@ -754,7 +754,7 @@ pub fn menu_bar<'a>(
                         menu::Item::Divider,
                         menu::Item::Button(fl!("menu-settings"), None, Action::Settings),
                         menu::Item::Button(
-                            "TB profiler settings...".to_string(),
+                            fl!("menu-tb-profiler-settings"),
                             None,
                             Action::TBSettings,
                         ),

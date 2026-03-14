@@ -401,3 +401,9 @@ repository = Repository
 empty-trash-title = Papierkorb leeren?
 copy-to-title = Kopierziel auswählen
 copy-to-button-label = Kopieren
+
+
+
+menu-tb-profiler-settings = TB profiler Einstellungen...
+tb-profiler-settings = TB profiler Einstellungen
+run-tb-profiler = TB-Profiler Starten

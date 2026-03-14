@@ -63,7 +63,6 @@ extract-to-title = Extract to folder
 ## Download Dialog
 download-to = Download To...
 download-to-title = Download to folder
-run-tb-profiler = Run TB-Profiler
 
 ## Empty Trash Dialog
 empty-trash = Empty trash
@@ -392,3 +391,8 @@ sort-newest-first = Newest first
 sort-oldest-first = Oldest first
 sort-smallest-to-largest = Smallest to largest
 sort-largest-to-smallest = Largest to smallest
+
+
+menu-tb-profiler-settings = TB profiler settings...
+tb-profiler-settings = TB profiler settings
+run-tb-profiler = Run TB-Profiler
