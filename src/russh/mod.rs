@@ -7,42 +7,21 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::config::TabConfig;
+use crate::{config::TabConfig, russh::russh::remote_file_from_uri};
 use crate::{config::IconSizes, config::TBConfig, tab};
 
 pub(crate) mod jsondata;
 #[cfg(feature = "russh")]
 mod russh;
-use url::Url;
+
 
 pub fn same_uri(a: &str, b: &str) -> bool {
-    let Ok(a) = Url::parse(a) else { return false };
-    let Ok(b) = Url::parse(b) else { return false };
+    let Ok(a_file) = remote_file_from_uri(a) else { return false };
+    let Ok(b_file) = remote_file_from_uri(b) else { return false };
 
-    let a_port = a.port().unwrap_or(22);
-    let b_port = b.port().unwrap_or(22);
-
-    log::info!(
-        "Parsed URIs -> a: scheme={} user={} host={:?} port={:?}, \
-         b: scheme={} user={} host={:?} port={:?}",
-        a.scheme(),
-        a.username(),
-        a.host_str(),
-        a_port,
-        b.scheme(),
-        b.username(),
-        b.host_str(),
-        b_port
-    );
-
-    let same = a.scheme() == b.scheme()
-        && a.host_str() == b.host_str()
-        && a.username() == b.username()
-        && a_port == b_port;
-
-    log::info!("URI comparison result: {}", same);
-
-    same
+    a_file.host == b_file.host
+        && a_file.username == b_file.username
+        && a_file.port == b_file.port
 }
 
 #[derive(Clone)]
