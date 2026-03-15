@@ -43,7 +43,7 @@ use crate::{
     app::{
         Action, ContextPage, Message as AppMessage, PreviewItem, PreviewKind, REPLACE_BUTTON_ID,
     },
-    config::{Config, DialogConfig, Favorite, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch},
+    config::{Config, DialogConfig, Favorite, TBConfig, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch},
     fl, home_dir,
     key_bind::key_binds,
     localize::LANGUAGE_SORTER,
@@ -1060,6 +1060,7 @@ impl Application for App {
         let mut tab = Tab::new(
             location,
             flags.config.dialog_tab(),
+            flags.config.tb_config(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),

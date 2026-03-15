@@ -79,7 +79,7 @@ use crate::{
     },
     config::{
         AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TIME_CONFIG_ID, TabConfig,
-        TimeConfig, TypeToSearch,
+        TimeConfig, TypeToSearch, TBConfig,
     },
     dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings},
     fl, home_dir,
@@ -366,6 +366,7 @@ pub enum Message {
     CosmicSettings(&'static str),
     Cut(Option<Entity>),
     Delete(Option<Entity>),
+    DeleteTbProfilerResults(String, TBConfig),
     DesktopConfig(DesktopConfig),
     DesktopViewOptions,
     DesktopDialogs(bool),
@@ -1239,6 +1240,7 @@ impl App {
         let mut tab = Tab::new(
             location.clone(),
             self.config.tab,
+            self.config.tb_config.clone(),
             self.config.thumb_cfg,
             Some(&self.state.sort_names),
             scrollable_id,
@@ -4011,6 +4013,13 @@ impl Application for App {
                     }
                 }
             }
+            Message::DeleteTbProfilerResults(uri, tb_config) => {
+                if let Some((_client_key, client)) = CLIENTS.iter().next() {
+                    return client
+                        .delete_tb_profiler_results(uri, tb_config)
+                        .map(|()| cosmic::action::none()); 
+                }
+            }
             Message::NewItem(entity_opt, dir) => {
                 let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
                 if let Some(tab) = self.tab_model.data_mut::<Tab>(entity)
@@ -4890,6 +4899,9 @@ impl Application for App {
                         tab::Command::AddRemoteDrive => {
                             self.context_page = ContextPage::RemoteDrive;
                             self.set_show_context(true);
+                        }
+                        tab::Command::DeleteTbProfilerResults(uri, tb_config) => {
+                            commands.push(self.update(Message::DeleteTbProfilerResults(uri, tb_config)));
                         }
                         tab::Command::AddToSidebar(path) => {
                             let mut favorites = self.config.favorites.clone();
@@ -7638,7 +7650,7 @@ pub(crate) mod test_utils {
     use tempfile::{TempDir, tempdir};
 
     use crate::{
-        config::{IconSizes, TabConfig, ThumbCfg},
+        config::{IconSizes, TBConfig, TabConfig, ThumbCfg},
         tab::Item,
     };
 
@@ -7811,6 +7823,7 @@ pub(crate) mod test_utils {
         let mut tab = Tab::new(
             location,
             TabConfig::default(),
+            TBConfig::default(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),

@@ -84,7 +84,7 @@ use crate::{
     FxOrderMap,
     app::{Action, PreviewItem, PreviewKind},
     clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
-    config::{DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig, ThumbCfg},
+    config::{DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig, TabConfig, ThumbCfg},
     dialog::DialogKind,
     fl,
     large_image::{
@@ -97,9 +97,7 @@ use crate::{
     mounter::MOUNTERS,
     mouse_area,
     operation::{Controller, OperationError},
-    russh::CLIENTS,
-    russh::jsondata::TB_ECOLI_MAPPING,
-    russh::jsondata::TbProfilerJson,
+    russh::{CLIENTS, jsondata::{TB_ECOLI_MAPPING, TbProfilerJson}},
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
 };
@@ -1958,6 +1956,7 @@ pub enum Command {
     Action(Action),
     AddNetworkDrive,
     AddRemoteDrive,
+    DeleteTbProfilerResults(String, TBConfig),
     AddToSidebar(PathBuf),
     AutoScroll(Option<f32>),
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
@@ -1986,6 +1985,7 @@ pub enum Command {
 pub enum Message {
     AddNetworkDrive,
     AddRemoteDrive,
+    DeleteTbProfilerResults(String, TBConfig),
     AutoScroll(Option<f32>),
     Click(Option<usize>),
     DoubleClick(Option<usize>),
@@ -3234,6 +3234,7 @@ pub struct Tab {
     pub history_i: usize,
     pub history: Vec<Location>,
     pub config: TabConfig,
+    pub tb_config: TBConfig,
     pub thumb_config: ThumbCfg,
     pub sort_name: HeadingOptions,
     pub sort_direction: bool,
@@ -3322,6 +3323,7 @@ impl Tab {
     pub fn new(
         location: Location,
         config: TabConfig,
+        tb_config: TBConfig,
         thumb_config: ThumbCfg,
         sorting_options: Option<&FxOrderMap<String, (HeadingOptions, bool)>>,
         scrollable_id: widget::Id,
@@ -3355,6 +3357,7 @@ impl Tab {
             history_i: 0,
             history,
             config,
+            tb_config,
             thumb_config,
             sort_name,
             sort_direction,
@@ -3821,6 +3824,9 @@ impl Tab {
             }
             Message::AddRemoteDrive => {
                 commands.push(Command::AddRemoteDrive);
+            }
+            Message::DeleteTbProfilerResults(uri, tb_config) => {
+                commands.push(Command::DeleteTbProfilerResults(uri, tb_config));
             }
             Message::AutoScroll(auto_scroll) => {
                 commands.push(Command::AutoScroll(auto_scroll));
@@ -6721,6 +6727,21 @@ impl Tab {
                     .padding([0, 0, 7, 0]),
                 );
             }
+            // Todo: Location::Remote(uri, _display_name, _path) if uri == self.tb_config.out_dir.as_str() => {
+            Location::Remote(uri, _display_name, _path) => {
+                tab_column = tab_column.push(
+                    widget::layer_container(widget::row::with_children([
+                        widget::horizontal_space().into(),
+                        widget::button::standard(fl!("delete-tb-profiler-results"))
+                            .on_press(Message::DeleteTbProfilerResults(uri.to_string(), self.tb_config.clone()))
+                            .into(),
+                    ]))
+                    .padding([space_xxs, space_xs])
+                    .layer(cosmic_theme::Layer::Primary)
+                    .apply(widget::container)
+                    .padding([0, 0, 7, 0]),
+                );
+            }
             _ => {}
         }
         let mut tab_view = widget::container(tab_column)
@@ -7467,7 +7488,7 @@ mod tests {
             NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
             eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
         },
-        config::{IconSizes, TabConfig, ThumbCfg},
+        config::{IconSizes, TabConfig, TBConfig,ThumbCfg},
     };
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
@@ -7511,6 +7532,7 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(path.into()),
             TabConfig::default(),
+            TBConfig::default(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),
@@ -7621,6 +7643,7 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(path.to_owned()),
             TabConfig::default(),
+            TBConfig::default(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),
@@ -7762,6 +7785,7 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(path.into()),
             TabConfig::default(),
+            TBConfig::default(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),
@@ -7791,6 +7815,7 @@ mod tests {
         let mut tab = Tab::new(
             Location::Path(next_dir.clone()),
             TabConfig::default(),
+            TBConfig::default(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),
@@ -7832,6 +7857,7 @@ mod tests {
         Tab::new(
             Location::Path(path.into()),
             TabConfig::default(),
+            TBConfig::default(),
             ThumbCfg::default(),
             None,
             widget::Id::unique(),

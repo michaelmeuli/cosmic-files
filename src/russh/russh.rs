@@ -40,7 +40,6 @@ struct SampleFiles {
     size: Option<u64>,
 }
 
-
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
         "Could not determine the user home directory.\n\
@@ -804,6 +803,18 @@ pub async fn run_tbprofiler(
     Ok(res.stdout)
 }
 
+pub async fn delete_tbprofiler_results(client: &Client, tb_config: TBConfig) -> Result<String, anyhow::Error> {
+    let command = format!("rm -rf {}/*", tb_config.out_dir);
+    let res = client.execute(&command).await?;
+    if res.exit_status != 0 {
+        return Err(anyhow::anyhow!(
+            "Failed to delete remote file (exit {}):\nstderr:\n{}",
+            res.exit_status, res.stderr
+        ));
+    }
+    Ok(res.stdout)
+}
+
 fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> ClientAuth {
     let auth = ClientAuth {
         message: String::new(),
@@ -877,6 +888,11 @@ enum Cmd {
     RunTbProfiler(
         Box<[PathBuf]>,
         Vec<String>,
+        TBConfig,
+        tokio::sync::oneshot::Sender<anyhow::Result<String>>,
+    ),
+    DeleteTbProfilerResults(
+        String,
         TBConfig,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
     ),
@@ -1414,6 +1430,30 @@ impl Russh {
                                 .send(Event::RunTbProfilerResult(uri, event_result))
                                 .unwrap();
                         }
+                        Cmd::DeleteTbProfilerResults(uri, tb_config, result_tx) => {
+                            let remote_file = match remote_file_from_uri(&uri) {
+                                Ok(rf) => rf,
+                                Err(e) => {
+                                    let _ = result_tx.send(Err(anyhow::anyhow!(e)));
+                                    continue;
+                                }
+                            };
+                            let host = remote_file.host.as_str();
+                            let client = {
+                                let read = clients.read().await;
+                                match read.get(host) {
+                                    Some(c) => Arc::clone(c),
+                                    None => {
+                                        let msg =
+                                            format!("No SSH client connected for host: {}", host);
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(msg)));
+                                        continue;
+                                    }
+                                }
+                            };
+                            let result = delete_tbprofiler_results(&client, tb_config).await;
+                            let _ = result_tx.send(result);
+                        }
                     }
                 }
             });
@@ -1563,6 +1603,26 @@ impl Connector for Russh {
             |x| match x {
                 Ok(Ok(msg)) => log::info!("TBProfiler started: {msg}"),
                 Ok(Err(err)) => log::error!("TBProfiler failed: {err}"),
+                Err(err) => log::error!("Channel error: {err}"),
+            },
+        )
+    }
+
+    fn delete_tb_profiler_results(&self, uri: String, tb_config: TBConfig) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+
+                command_tx
+                    .send(Cmd::DeleteTbProfilerResults(uri, tb_config, res_tx))
+                    .unwrap();
+
+                res_rx.await
+            },
+            |x| match x {
+                Ok(Ok(msg)) => log::info!("TBProfiler results deleted: {msg}"),
+                Ok(Err(err)) => log::error!("TBProfiler deletion failed: {err}"),
                 Err(err) => log::error!("Channel error: {err}"),
             },
         )

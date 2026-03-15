@@ -164,7 +164,8 @@ impl State {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, CosmicConfigEntry, Deserialize, Serialize)]
+#[serde(default)]
 pub struct TBConfig {
     pub script_path: String,
     pub out_dir: String,
@@ -236,6 +237,15 @@ impl Config {
             view: self.dialog.view,
             show_as_samples: false,
             show_susceptible: self.dialog.show_susceptible,
+        }
+    }
+
+        /// Construct tab config for dialog
+    pub fn tb_config(&self) -> TBConfig {
+        TBConfig {
+            script_path: self.tb_config.script_path.clone(),
+            out_dir: self.tb_config.out_dir.clone(),
+            docx_template_path: self.tb_config.docx_template_path.clone(),
         }
     }
 }

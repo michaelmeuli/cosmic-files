@@ -143,6 +143,11 @@ pub trait Connector: Send + Sync {
         uris: Vec<String>,
         tb_config: TBConfig,
     ) -> Task<()>;
+    fn delete_tb_profiler_results(
+        &self,
+        uri: String,
+        tb_config: TBConfig,
+    ) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 
