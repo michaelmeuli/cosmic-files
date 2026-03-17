@@ -804,7 +804,7 @@ pub async fn run_tbprofiler(
 }
 
 pub async fn delete_tbprofiler_results(client: &Client, tb_config: TBConfig) -> Result<String, anyhow::Error> {
-    let command = format!("rm -rf {}/*", tb_config.out_dir);
+    let command = format!("rm -rf {}/results/*", tb_config.out_dir);
     let res = client.execute(&command).await?;
     if res.exit_status != 0 {
         return Err(anyhow::anyhow!(

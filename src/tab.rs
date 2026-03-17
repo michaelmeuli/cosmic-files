@@ -84,7 +84,9 @@ use crate::{
     FxOrderMap,
     app::{Action, PreviewItem, PreviewKind},
     clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
-    config::{DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig, TabConfig, ThumbCfg},
+    config::{
+        DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig, TabConfig, ThumbCfg,
+    },
     dialog::DialogKind,
     fl,
     large_image::{
@@ -97,7 +99,10 @@ use crate::{
     mounter::MOUNTERS,
     mouse_area,
     operation::{Controller, OperationError},
-    russh::{CLIENTS, jsondata::{TB_ECOLI_MAPPING, TbProfilerJson}},
+    russh::{
+        CLIENTS,
+        jsondata::{TB_ECOLI_MAPPING, TbProfilerJson},
+    },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
 };
@@ -6031,7 +6036,11 @@ impl Tab {
             }
 
             if count == 0 {
-                return (None, self.empty_view(hidden > 0, susceptible_hidden > 0), false);
+                return (
+                    None,
+                    self.empty_view(hidden > 0, susceptible_hidden > 0),
+                    false,
+                );
             }
 
             column = column.push(grid);
@@ -6527,7 +6536,11 @@ impl Tab {
             }
 
             if count == 0 {
-                return (None, self.empty_view(hidden > 0, susceptible_hidden > 0), false);
+                return (
+                    None,
+                    self.empty_view(hidden > 0, susceptible_hidden > 0),
+                    false,
+                );
             }
 
             // Cache content height for scroll clamping on next frame
@@ -6727,13 +6740,20 @@ impl Tab {
                     .padding([0, 0, 7, 0]),
                 );
             }
-            // Todo: Location::Remote(uri, _display_name, _path) if uri == self.tb_config.out_dir.as_str() => {
-            Location::Remote(uri, _display_name, _path) => {
+            Location::Remote(uri, _display_name, path)
+                if path.as_ref().is_some_and(|p| {
+                    let expected = Path::new(&self.tb_config.out_dir).join("results");
+                    p == &expected
+                }) =>
+            {
                 tab_column = tab_column.push(
                     widget::layer_container(widget::row::with_children([
                         widget::horizontal_space().into(),
                         widget::button::standard(fl!("delete-tb-profiler-results"))
-                            .on_press(Message::DeleteTbProfilerResults(uri.to_string(), self.tb_config.clone()))
+                            .on_press(Message::DeleteTbProfilerResults(
+                                uri.to_string(),
+                                self.tb_config.clone(),
+                            ))
                             .into(),
                     ]))
                     .padding([space_xxs, space_xs])
@@ -7488,7 +7508,7 @@ mod tests {
             NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
             eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
         },
-        config::{IconSizes, TabConfig, TBConfig,ThumbCfg},
+        config::{IconSizes, TBConfig, TabConfig, ThumbCfg},
     };
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
