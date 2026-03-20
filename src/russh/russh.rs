@@ -942,6 +942,7 @@ enum Event {
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
     RunTbProfilerResult(String, Result<bool, String>),
+    DeleteRemoteFilesResult(String, Result<bool, String>),
 }
 
 #[derive(Clone, Debug)]
@@ -1789,6 +1790,10 @@ impl Connector for Russh {
                                     .unwrap(),
                                 Event::RunTbProfilerResult(uri, res) => output
                                     .send(ClientMessage::RunTbProfilerResult(uri, res))
+                                    .await
+                                    .unwrap(),
+                                Event::DeleteRemoteFilesResult(uri, res) => output
+                                    .send(ClientMessage::DeleteRemoteFilesResult(uri, res))
                                     .await
                                     .unwrap(),
                             }

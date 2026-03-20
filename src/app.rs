@@ -461,6 +461,7 @@ pub enum Message {
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
     RunTbProfilerResult(ClientKey, String, Result<bool, String>),
+    DeleteRemoteFilesResult(ClientKey, String, Result<bool, String>),
     SaveSortNames,
     ScrollTab(i16),
     SearchActivate,
@@ -607,6 +608,11 @@ pub enum DialogPage {
         error: String,
     },
     RunTbProfilerError {
+        client_key: ClientKey,
+        uri: String,
+        error: String,
+    },
+    DeleteRemoteFilesError {
         client_key: ClientKey,
         uri: String,
         error: String,
@@ -3385,6 +3391,15 @@ impl Application for App {
                                 cosmic::action::none()
                             }));
                         }
+                        DialogPage::DeleteRemoteFilesError {
+                            client_key: _,
+                            uri: _,
+                            error: _,
+                        } => {
+                            tasks.push(Task::future(async move {
+                                cosmic::action::none()
+                            }));
+                        }
                         DialogPage::NewItem { parent, name, dir } => {
                             let path = parent.join(name);
                             tasks.push(self.operation(if dir {
@@ -4020,6 +4035,24 @@ impl Application for App {
                     Err(error) => {
                         log::warn!("failed to run TbProfiler for {uri:?}: {error}");
                         return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
+                            client_key,
+                            uri,
+                            error,
+                        });
+                    }
+                }
+            }
+            Message::DeleteRemoteFilesResult(client_key, uri, res) => {
+                match res {
+                    Ok(true) => {
+                        log::info!("Remote files deleted successfully for {uri:?}");
+                    }
+                    Ok(false) => {
+                        log::info!("Remote file deletion was cancelled for {uri:?}");
+                    }
+                    Err(error) => {
+                        log::warn!("failed to delete remote files for {uri:?}: {error}");
+                        return self.dialog_pages.push_back(DialogPage::DeleteRemoteFilesError {
                             client_key,
                             uri,
                             error,
@@ -7563,6 +7596,9 @@ impl Application for App {
                         }
                         ClientMessage::RunTbProfilerResult(uri, res) => {
                             Message::RunTbProfilerResult(key, uri, res)
+                        }
+                        ClientMessage::DeleteRemoteFilesResult(uri, res) => {
+                            Message::DeleteRemoteFilesResult(key, uri, res)
                         }
                     },
                 ),
