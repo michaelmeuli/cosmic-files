@@ -381,6 +381,7 @@ pub fn context_menu<'a>(
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
                     children.push(menu_item(fl!("download-to"), Action::DownloadTo).into());
                     children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
+                    children.push(menu_item(fl!("delete-remote-files"), Action::DeleteRemoteFiles).into());
                 }
             } else {
                 if tab.mode.multiple() {

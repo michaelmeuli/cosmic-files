@@ -804,6 +804,33 @@ pub async fn run_tbprofiler(
     Ok(res.stdout)
 }
 
+pub async fn delete_remote_files(
+    client: &Client,
+    paths: &[PathBuf],
+) -> Result<String, anyhow::Error> {
+    if paths.is_empty() {
+        return Ok(String::new());
+    }
+    let files = paths
+        .iter()
+        .map(|p| {
+            let remote = p.to_string_lossy().replace('\\', "/");
+            format!("'{}'", remote.replace('\'', "'\\''"))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let command = format!("rm -rf {}", files);
+    let res = client.execute(&command).await?;
+    if res.exit_status != 0 {
+        return Err(anyhow::anyhow!(
+            "Failed to delete files (exit {}):\nstderr:\n{}",
+            res.exit_status,
+            res.stderr
+        ));
+    }
+    Ok(res.stdout)
+}
+
 pub async fn delete_tbprofiler_results(
     client: &Client,
     tb_config: TBConfig,
@@ -894,6 +921,11 @@ enum Cmd {
         Box<[PathBuf]>,
         Vec<String>,
         TBConfig,
+        tokio::sync::oneshot::Sender<anyhow::Result<String>>,
+    ),
+    DeleteRemoteFiles(
+        Box<[PathBuf]>,
+        Vec<String>,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
     ),
     DeleteTbProfilerResults(
@@ -1435,6 +1467,61 @@ impl Russh {
                                 .send(Event::RunTbProfilerResult(uri, event_result))
                                 .unwrap();
                         }
+                        Cmd::DeleteRemoteFiles(paths, uris, result_tx) => {
+                            let uri = uris
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| "ssh:///".to_string());
+                            if uris.is_empty() {
+                                let err = anyhow::anyhow!("No URIs provided");
+                                let _ = result_tx.send(Err(err));
+                                continue;
+                            }
+                            let remote_files: Vec<_> = match uris
+                                .iter()
+                                .map(|u| remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e)))
+                                .collect::<Result<_, _>>()
+                            {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    let _ = result_tx.send(Err(err));
+                                    continue;
+                                }
+                            };
+                            let host = match remote_files.first() {
+                                Some(rf) => rf.host.clone(),
+                                None => {
+                                    let _ =
+                                        result_tx.send(Err(anyhow::anyhow!("No URIs provided")));
+                                    continue;
+                                }
+                            };
+                            if remote_files.iter().any(|rf| rf.host != host) {
+                                let _ = result_tx.send(Err(anyhow::anyhow!(
+                                    "All URIs must be from the same host"
+                                )));
+                                continue;
+                            }
+                            let client = {
+                                let read = clients.read().await;
+                                read.get(&host).cloned()
+                            };
+                            let client = match client {
+                                Some(c) => c,
+                                None => {
+                                    let err = anyhow::anyhow!("No client for host {}", host);
+                                    let _ = result_tx.send(Err(err));
+                                    continue;
+                                }
+                            };
+                            let result = delete_remote_files(&client, &paths).await;
+                            let event_result: Result<bool, String> =
+                                result.as_ref().map(|_| true).map_err(|e| e.to_string());
+                            let _ = result_tx.send(result);
+                            event_tx
+                                .send(Event::DeleteRemoteFilesResult(uri, event_result))
+                                .unwrap();
+                        }
                         Cmd::DeleteTbProfilerResults(uri, tb_config, result_tx) => {
                             let remote_file = match remote_file_from_uri(&uri) {
                                 Ok(rf) => rf,
@@ -1613,6 +1700,26 @@ impl Connector for Russh {
         )
     }
 
+    fn delete_remote_files(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::perform(
+            async move {
+                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+
+                command_tx
+                    .send(Cmd::DeleteRemoteFiles(paths, uris, res_tx))
+                    .unwrap();
+
+                res_rx.await
+            },
+            |x| match x {
+                Ok(Ok(msg)) => log::info!("Remote files deleted: {msg}"),
+                Ok(Err(err)) => log::error!("Remote file deletion failed: {err}"),
+                Err(err) => log::error!("Channel error: {err}"),
+            },
+        )
+    }
+
     fn delete_tb_profiler_results(&self, uri: String, tb_config: TBConfig) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
@@ -1662,32 +1769,33 @@ impl Connector for Russh {
                         ClientMessage,
                     >| async move {
                         command_tx.send(Cmd::Rescan).unwrap();
-                    while let Some(event) = event_rx.lock().await.recv().await {
-                        match event {
-                            Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
-                            Event::Items(items) => {
-                                output.send(ClientMessage::Items(items)).await.unwrap()
+                        while let Some(event) = event_rx.lock().await.recv().await {
+                            match event {
+                                Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
+                                Event::Items(items) => {
+                                    output.send(ClientMessage::Items(items)).await.unwrap()
+                                }
+                                Event::ClientResult(item, res) => output
+                                    .send(ClientMessage::ClientResult(item, res))
+                                    .await
+                                    .unwrap(),
+                                Event::RemoteAuth(uri, auth, auth_tx) => output
+                                    .send(ClientMessage::RemoteAuth(uri, auth, auth_tx))
+                                    .await
+                                    .unwrap(),
+                                Event::RemoteResult(uri, res) => output
+                                    .send(ClientMessage::RemoteResult(uri, res))
+                                    .await
+                                    .unwrap(),
+                                Event::RunTbProfilerResult(uri, res) => output
+                                    .send(ClientMessage::RunTbProfilerResult(uri, res))
+                                    .await
+                                    .unwrap(),
                             }
-                            Event::ClientResult(item, res) => output
-                                .send(ClientMessage::ClientResult(item, res))
-                                .await
-                                .unwrap(),
-                            Event::RemoteAuth(uri, auth, auth_tx) => output
-                                .send(ClientMessage::RemoteAuth(uri, auth, auth_tx))
-                                .await
-                                .unwrap(),
-                            Event::RemoteResult(uri, res) => output
-                                .send(ClientMessage::RemoteResult(uri, res))
-                                .await
-                                .unwrap(),
-                            Event::RunTbProfilerResult(uri, res) => output
-                                .send(ClientMessage::RunTbProfilerResult(uri, res))
-                                .await
-                                .unwrap(),
                         }
-                    }
-                    pending().await
-                })
+                        pending().await
+                    },
+                )
             },
         )
     }

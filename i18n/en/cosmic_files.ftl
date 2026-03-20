@@ -397,3 +397,4 @@ menu-tb-profiler-settings = TB profiler settings...
 tb-profiler-settings = TB profiler settings
 run-tb-profiler = Run TB-Profiler
 delete-tb-profiler-results = Delete TB-Profiler results
+delete-remote-files = Delete Remote files

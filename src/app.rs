@@ -194,6 +194,7 @@ pub enum Action {
     Rename,
     RestoreFromTrash,
     RunTbProfiler,
+    DeleteRemoteFiles,
     SearchActivate,
     SelectFirst,
     SelectLast,
@@ -271,6 +272,7 @@ impl Action {
             Self::Rename => Message::Rename(entity_opt),
             Self::RestoreFromTrash => Message::RestoreFromTrash(entity_opt),
             Self::RunTbProfiler => Message::RunTbProfiler(entity_opt),
+            Self::DeleteRemoteFiles => Message::DeleteRemoteFiles(entity_opt),
             Self::SearchActivate => Message::SearchActivate,
             Self::SelectAll => Message::TabMessage(entity_opt, tab::Message::SelectAll),
             Self::SelectFirst => Message::TabMessage(entity_opt, tab::Message::SelectFirst),
@@ -396,6 +398,7 @@ pub enum Message {
     NavBarClose(Entity),
     NavBarContext(Entity),
     NavMenuAction(NavMenuAction),
+    DeleteRemoteFiles(Option<Entity>),
     NetworkAuth(MounterKey, String, MounterAuth, mpsc::Sender<MounterAuth>),
     NetworkDriveInput(String),
     NetworkDriveOpenEntityAfterMount {
@@ -3994,6 +3997,15 @@ impl Application for App {
                     let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
                     return client
                         .run_tb_profiler(selected_paths, selected_uris, self.config.tb_config.clone())
+                        .map(|()| cosmic::action::none());
+                }
+            }
+            Message::DeleteRemoteFiles(entity_opt) => {
+                if let Some((_client_key, client)) = CLIENTS.iter().next() {
+                    let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                    let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
+                    return client
+                        .delete_remote_files(selected_paths, selected_uris)
                         .map(|()| cosmic::action::none());
                 }
             }

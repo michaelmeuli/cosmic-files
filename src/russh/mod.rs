@@ -7,21 +7,22 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{config::TabConfig, russh::russh::remote_file_from_uri};
 use crate::{config::IconSizes, config::TBConfig, tab};
+use crate::{config::TabConfig, russh::russh::remote_file_from_uri};
 
 pub(crate) mod jsondata;
 #[cfg(feature = "russh")]
 mod russh;
 
-
 pub fn same_uri(a: &str, b: &str) -> bool {
-    let Ok(a_file) = remote_file_from_uri(a) else { return false };
-    let Ok(b_file) = remote_file_from_uri(b) else { return false };
+    let Ok(a_file) = remote_file_from_uri(a) else {
+        return false;
+    };
+    let Ok(b_file) = remote_file_from_uri(b) else {
+        return false;
+    };
 
-    a_file.host == b_file.host
-        && a_file.username == b_file.username
-        && a_file.port == b_file.port
+    a_file.host == b_file.host && a_file.username == b_file.username && a_file.port == b_file.port
 }
 
 #[derive(Clone)]
@@ -143,11 +144,8 @@ pub trait Connector: Send + Sync {
         uris: Vec<String>,
         tb_config: TBConfig,
     ) -> Task<()>;
-    fn delete_tb_profiler_results(
-        &self,
-        uri: String,
-        tb_config: TBConfig,
-    ) -> Task<()>;
+    fn delete_remote_files(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()>;
+    fn delete_tb_profiler_results(&self, uri: String, tb_config: TBConfig) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 
