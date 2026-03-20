@@ -6808,7 +6808,7 @@ impl Tab {
             Location::Remote(uri, _display_name, _path) if uri == "ssh:///" => {
                 tab_column = tab_column.push(
                     widget::layer_container(widget::row::with_children([
-                        widget::horizontal_space().into(),
+                        widget::space::horizontal().into(),
                         widget::button::standard(fl!("add-remote-drive"))
                             .on_press(Message::AddRemoteDrive)
                             .into(),
@@ -6827,7 +6827,7 @@ impl Tab {
             {
                 tab_column = tab_column.push(
                     widget::layer_container(widget::row::with_children([
-                        widget::horizontal_space().into(),
+                        widget::space::horizontal().into(),
                         widget::button::standard(fl!("delete-tb-profiler-results"))
                             .on_press(Message::DeleteTbProfilerResults(
                                 uri.to_string(),

@@ -5931,7 +5931,7 @@ impl Application for App {
                 .title(fl!("add-remote-drive"))
                 .header(text_input)
                 .footer(widget::row::with_children([
-                    widget::horizontal_space().into(),
+                    widget::space::horizontal().into(),
                     button.into(),
                 ]))
             }
