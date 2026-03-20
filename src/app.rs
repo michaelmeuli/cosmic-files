@@ -6386,8 +6386,9 @@ impl Application for App {
                     //TODO: what should submit do?
                     //TODO: button for showing password
                     controls = controls.push(
-                        widget::checkbox(fl!("remember-password"), *remember).on_toggle(
-                            move |value| {
+                        widget::checkbox(*remember)
+                            .label(fl!("remember-password"))
+                            .on_toggle(move |value| {
                                 Message::DialogUpdate(DialogPage::RemoteAuth {
                                     client_key: *client_key,
                                     uri: uri.clone(),
@@ -6397,8 +6398,7 @@ impl Application for App {
                                     },
                                     auth_tx: auth_tx.clone(),
                                 })
-                            },
-                        ),
+                            }),
                     );
                 }
 

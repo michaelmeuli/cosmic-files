@@ -13,6 +13,7 @@ use std::{
     cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     future::pending,
+    hash::Hash,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -803,13 +804,17 @@ pub async fn run_tbprofiler(
     Ok(res.stdout)
 }
 
-pub async fn delete_tbprofiler_results(client: &Client, tb_config: TBConfig) -> Result<String, anyhow::Error> {
+pub async fn delete_tbprofiler_results(
+    client: &Client,
+    tb_config: TBConfig,
+) -> Result<String, anyhow::Error> {
     let command = format!("rm -rf {}/results/*", tb_config.out_dir);
     let res = client.execute(&command).await?;
     if res.exit_status != 0 {
         return Err(anyhow::anyhow!(
             "Failed to delete remote file (exit {}):\nstderr:\n{}",
-            res.exit_status, res.stderr
+            res.exit_status,
+            res.stderr
         ));
     }
     Ok(res.stdout)
@@ -1631,36 +1636,59 @@ impl Connector for Russh {
     fn subscription(&self) -> Subscription<ClientMessage> {
         let command_tx = self.command_tx.clone();
         let event_rx = self.event_rx.clone();
-        Subscription::run_with_id(
-            TypeId::of::<Self>(),
-            stream::channel(1, |mut output| async move {
-                command_tx.send(Cmd::Rescan).unwrap();
-                while let Some(event) = event_rx.lock().await.recv().await {
-                    match event {
-                        Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
-                        Event::Items(items) => {
-                            output.send(ClientMessage::Items(items)).await.unwrap()
+        struct Wrapper {
+            command_tx: mpsc::UnboundedSender<Cmd>,
+            event_rx: Arc<Mutex<mpsc::UnboundedReceiver<Event>>>,
+        }
+        impl Hash for Wrapper {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                TypeId::of::<Self>().hash(state);
+            }
+        }
+        Subscription::run_with(
+            Wrapper {
+                command_tx,
+                event_rx,
+            },
+            |Wrapper {
+                 command_tx,
+                 event_rx,
+             }| {
+                let command_tx = command_tx.clone();
+                let event_rx = event_rx.clone();
+                stream::channel(
+                    1,
+                    move |mut output: cosmic::iced::futures::channel::mpsc::Sender<
+                        ClientMessage,
+                    >| async move {
+                        command_tx.send(Cmd::Rescan).unwrap();
+                    while let Some(event) = event_rx.lock().await.recv().await {
+                        match event {
+                            Event::Changed => command_tx.send(Cmd::Rescan).unwrap(),
+                            Event::Items(items) => {
+                                output.send(ClientMessage::Items(items)).await.unwrap()
+                            }
+                            Event::ClientResult(item, res) => output
+                                .send(ClientMessage::ClientResult(item, res))
+                                .await
+                                .unwrap(),
+                            Event::RemoteAuth(uri, auth, auth_tx) => output
+                                .send(ClientMessage::RemoteAuth(uri, auth, auth_tx))
+                                .await
+                                .unwrap(),
+                            Event::RemoteResult(uri, res) => output
+                                .send(ClientMessage::RemoteResult(uri, res))
+                                .await
+                                .unwrap(),
+                            Event::RunTbProfilerResult(uri, res) => output
+                                .send(ClientMessage::RunTbProfilerResult(uri, res))
+                                .await
+                                .unwrap(),
                         }
-                        Event::ClientResult(item, res) => output
-                            .send(ClientMessage::ClientResult(item, res))
-                            .await
-                            .unwrap(),
-                        Event::RemoteAuth(uri, auth, auth_tx) => output
-                            .send(ClientMessage::RemoteAuth(uri, auth, auth_tx))
-                            .await
-                            .unwrap(),
-                        Event::RemoteResult(uri, res) => output
-                            .send(ClientMessage::RemoteResult(uri, res))
-                            .await
-                            .unwrap(),
-                        Event::RunTbProfilerResult(uri, res) => output
-                            .send(ClientMessage::RunTbProfilerResult(uri, res))
-                            .await
-                            .unwrap(),
                     }
-                }
-                pending().await
-            }),
+                    pending().await
+                })
+            },
         )
     }
 }
