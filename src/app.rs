@@ -521,6 +521,8 @@ pub enum Message {
     SetTbScriptPath(String),
     SetTbOutDir(String),
     SetTbDocxTemplatePath(String),
+    SetTbPair1Suffix(String),
+    SetTbPair2Suffix(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2357,6 +2359,14 @@ impl App {
                 .add(widget::settings::item::builder("TB DOCX Template Path").control(
                     widget::text_input("", &self.config.tb_config.docx_template_path).
                             on_input(Message::SetTbDocxTemplatePath),
+                ))
+                .add(widget::settings::item::builder("Pair 1 suffix").control(
+                    widget::text_input("", &self.config.tb_config.pair1_suffix)
+                            .on_input(Message::SetTbPair1Suffix),
+                ))
+                .add(widget::settings::item::builder("Pair 2 suffix").control(
+                    widget::text_input("", &self.config.tb_config.pair2_suffix)
+                            .on_input(Message::SetTbPair2Suffix),
                 ))
                 .into(),
         ])
@@ -5912,6 +5922,18 @@ impl Application for App {
             Message::SetTbDocxTemplatePath(docx_template_path) => {
                 let mut tb_config = self.config.tb_config.clone();
                 tb_config.docx_template_path = docx_template_path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbPair1Suffix(pair1_suffix) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.pair1_suffix = pair1_suffix;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbPair2Suffix(pair2_suffix) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.pair2_suffix = pair2_suffix;
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }

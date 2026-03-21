@@ -729,9 +729,9 @@ pub async fn run_tbprofiler(
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| anyhow::anyhow!("Invalid filename in path: {:?}", path))?;
-        if let Some(sample) = filename.strip_suffix("_1.fastq.gz") {
+        if let Some(sample) = filename.strip_suffix(tb_config.pair1_suffix.as_str()) {
             sample_map.entry(sample.to_string()).or_default().insert(1);
-        } else if let Some(sample) = filename.strip_suffix("_2.fastq.gz") {
+        } else if let Some(sample) = filename.strip_suffix(tb_config.pair2_suffix.as_str()) {
             sample_map.entry(sample.to_string()).or_default().insert(2);
         } else {
             return Err(anyhow::anyhow!(
@@ -746,8 +746,10 @@ pub async fn run_tbprofiler(
     for (sample, reads) in &sample_map {
         if reads.len() != 2 {
             return Err(anyhow::anyhow!(
-                "Sample {} does not have both _1 and _2 FASTQ files",
-                sample
+                "Sample {} does not have both {} and {} FASTQ files",
+                sample,
+                tb_config.pair1_suffix,
+                tb_config.pair2_suffix
             ));
         }
     }

@@ -170,6 +170,8 @@ pub struct TBConfig {
     pub script_path: String,
     pub out_dir: String,
     pub docx_template_path: String,
+    pub pair1_suffix: String,
+    pub pair2_suffix: String,
 }
 
 impl Default for TBConfig {
@@ -178,6 +180,8 @@ impl Default for TBConfig {
             script_path: String::new(),
             out_dir: String::new(),
             docx_template_path: String::new(),
+            pair1_suffix: String::new(),
+            pair2_suffix: String::new(),
         }
     }
 }
@@ -246,6 +250,8 @@ impl Config {
             script_path: self.tb_config.script_path.clone(),
             out_dir: self.tb_config.out_dir.clone(),
             docx_template_path: self.tb_config.docx_template_path.clone(),
+            pair1_suffix: self.tb_config.pair1_suffix.clone(),
+            pair2_suffix: self.tb_config.pair2_suffix.clone(),
         }
     }
 }
