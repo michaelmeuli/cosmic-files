@@ -121,7 +121,7 @@ pub enum ClientMessage {
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
-    RunTbProfilerResult(String, Result<bool, String>),
+    RunTbProfilerResult(String, Result<String, String>),
     DeleteRemoteFilesResult(String, Result<bool, String>),
 }
 

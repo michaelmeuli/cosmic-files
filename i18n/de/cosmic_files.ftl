@@ -433,3 +433,5 @@ delete-remote-files = Remote Dateien löschen
 delete-remote-file = Remote Datei löschen
 tb-profiler-error = TB Profiler Error
 delete-remote-files-error = Einige Dateien auf dem Server konnen nicht gelöscht werden
+tb-profiler-success = TB-Profiler gestarted
+ok = OK

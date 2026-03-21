@@ -460,7 +460,7 @@ pub enum Message {
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
-    RunTbProfilerResult(ClientKey, String, Result<bool, String>),
+    RunTbProfilerResult(ClientKey, String, Result<String, String>),
     DeleteRemoteFilesResult(ClientKey, String, Result<bool, String>),
     SaveSortNames,
     ScrollTab(i16),
@@ -608,6 +608,11 @@ pub enum DialogPage {
         client_key: ClientKey,
         uri: String,
         error: String,
+    },
+    RunTbProfilerStarted {
+        client_key: ClientKey,
+        uri: String,
+        result: String,
     },
     RunTbProfilerError {
         client_key: ClientKey,
@@ -3392,6 +3397,15 @@ impl Application for App {
                             tasks.push(self.update(Message::RemoteDriveInput(uri)));
                             tasks.push(self.update(Message::RemoteDriveSubmit));
                         }
+                        DialogPage::RunTbProfilerStarted {
+                            client_key: _,
+                            uri: _,
+                            result: _,
+                        } => {
+                            tasks.push(Task::future(async move {
+                                cosmic::action::none()
+                            }));
+                        }
                         DialogPage::RunTbProfilerError {
                             client_key: _,
                             uri: _,
@@ -4036,11 +4050,13 @@ impl Application for App {
             }
             Message::RunTbProfilerResult(client_key, uri, res) => {
                 match res {
-                    Ok(true) => {
-                        log::info!("TbProfiler started successfully for {uri:?}");
-                    }
-                    Ok(false) => {
-                        log::info!("TbProfiler was cancelled for {uri:?}");
+                    Ok(result) => {
+                        log::info!("TbProfiler started successfully for {uri:?}: {result}");
+                        return self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
+                            client_key,
+                            uri,
+                            result,
+                        });
                     }
                     Err(error) => {
                         log::warn!("failed to run TbProfiler for {uri:?}: {error}");
@@ -6529,6 +6545,17 @@ impl Application for App {
                 )
                 .secondary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
+            DialogPage::RunTbProfilerStarted {
+                client_key: _,
+                uri: _,
+                result,
+            } => widget::dialog()
+                .title(fl!("tb-profiler-success"))
+                .body(result)
+                .icon(icon::from_name("dialog-success").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("ok")).on_press(Message::DialogCancel),
                 ),
             DialogPage::RunTbProfilerError {
                 client_key: _,

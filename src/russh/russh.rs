@@ -943,7 +943,7 @@ enum Event {
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
-    RunTbProfilerResult(String, Result<bool, String>),
+    RunTbProfilerResult(String, Result<String, String>),
     DeleteRemoteFilesResult(String, Result<bool, String>),
 }
 
@@ -1463,8 +1463,8 @@ impl Russh {
                                 }
                             };
                             let result = run_tbprofiler(&client, paths, tb_config).await;
-                            let event_result: Result<bool, String> =
-                                result.as_ref().map(|_| true).map_err(|e| e.to_string());
+                            let event_result: Result<String, String> =
+                                result.as_ref().map(|s| s.clone()).map_err(|e| e.to_string());
                             let _ = result_tx.send(result);
                             event_tx
                                 .send(Event::RunTbProfilerResult(uri, event_result))
