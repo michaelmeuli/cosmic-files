@@ -7,18 +7,17 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{config::IconSizes, config::TBConfig, tab};
-use crate::{config::TabConfig, russh::russh::remote_file_from_uri};
+use crate::{config::IconSizes, config::TBConfig, russh::russh::RemoteFile, tab};
 
 pub(crate) mod jsondata;
 #[cfg(feature = "russh")]
 mod russh;
 
 pub fn same_uri(a: &str, b: &str) -> bool {
-    let Ok(a_file) = remote_file_from_uri(a) else {
+    let Ok(a_file) = a.parse::<RemoteFile>() else {
         return false;
     };
-    let Ok(b_file) = remote_file_from_uri(b) else {
+    let Ok(b_file) = b.parse::<RemoteFile>() else {
         return false;
     };
 

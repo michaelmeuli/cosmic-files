@@ -12,9 +12,11 @@ use std::{
     any::TypeId,
     cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fmt,
     future::pending,
     hash::Hash,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock, mpsc};
@@ -79,7 +81,7 @@ pub async fn dir_info(
     client: &Client,
     uri: &str,
 ) -> Result<(String, String, Option<PathBuf>), String> {
-    let remote_file = remote_file_from_uri(uri)?;
+    let remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let resolved_uri = remote_file.uri();
 
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
@@ -109,37 +111,6 @@ pub async fn dir_info(
     Ok((resolved_uri, display_name, filepath))
 }
 
-pub fn remote_file_from_uri(uri: &str) -> Result<RemoteFile, String> {
-    let url = Url::parse(uri).map_err(|e| format!("Invalid remote URI {uri}: {e}"))?;
-    if url.scheme() != "ssh" {
-        return Err(format!(
-            "Unsupported scheme '{}', expected ssh://",
-            url.scheme()
-        ));
-    }
-    let host = url.host_str().ok_or("Missing host in ssh URI")?.to_string();
-    let port = url.port().unwrap_or(22);
-    let username = if url.username().is_empty() {
-        None
-    } else {
-        Some(url.username().to_string())
-    };
-    let mut path = url.path().to_string();
-    if path.is_empty() {
-        path = "/".into();
-    }
-    // Remove trailing slash except root
-    if path.len() > 1 && path.ends_with('/') {
-        path.pop();
-    }
-    Ok(RemoteFile {
-        host,
-        port,
-        username,
-        path,
-    })
-}
-
 pub async fn resolve_symlink(
     client: &Client,
     remotefile: &RemoteFile,
@@ -167,7 +138,7 @@ pub async fn resolve_symlink(
                 remotefile.port,
                 link_path
             );
-            remote_file_from_uri(&new_uri)
+            new_uri.parse::<RemoteFile>().map_err(|e| e.to_string())
         }
         Err(_) => Ok(remotefile.clone()), // not a symlink → keep original
     }
@@ -188,7 +159,7 @@ async fn remote_sftp_list(
     show_as_samples: bool,
 ) -> Result<Vec<tab::Item>, String> {
     log::info!("Listing remote directory: {}", uri);
-    let mut remote_file = remote_file_from_uri(uri)?;
+    let mut remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let force_dir = uri.starts_with("ssh:///");
     let path = remote_file.path.clone();
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
@@ -468,7 +439,7 @@ async fn remote_sftp_parent(
     uri: &str,
     sizes: IconSizes,
 ) -> Result<tab::Item, String> {
-    let remote_file = remote_file_from_uri(uri)?;
+    let remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let path = remote_file.path.clone();
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     channel
@@ -594,7 +565,7 @@ async fn remote_sftp_parent(
 }
 
 async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, String> {
-    let remote_file = remote_file_from_uri(&uri)?;
+    let remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
     channel
         .request_subsystem(true, "sftp")
@@ -905,6 +876,59 @@ impl RemoteFile {
     }
 }
 
+#[derive(Debug)]
+pub enum RemoteFileError {
+    InvalidUrl(String),
+    UnsupportedScheme(String),
+    MissingHost,
+}
+
+impl fmt::Display for RemoteFileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RemoteFileError::InvalidUrl(e) => write!(f, "Invalid URL: {e}"),
+            RemoteFileError::UnsupportedScheme(s) => {
+                write!(f, "Unsupported scheme: {s}")
+            }
+            RemoteFileError::MissingHost => write!(f, "Missing host"),
+        }
+    }
+}
+
+impl FromStr for RemoteFile {
+    type Err = RemoteFileError;
+
+    fn from_str(uri: &str) -> Result<Self, Self::Err> {
+        let url = Url::parse(uri).map_err(|e| RemoteFileError::InvalidUrl(e.to_string()))?;
+        if url.scheme() != "ssh" {
+            return Err(RemoteFileError::UnsupportedScheme(url.scheme().to_string()));
+        }
+        let host = url
+            .host_str()
+            .ok_or(RemoteFileError::MissingHost)?
+            .to_string();
+        let port = url.port().unwrap_or(22);
+        let username = if url.username().is_empty() {
+            None
+        } else {
+            Some(url.username().to_string())
+        };
+        let mut path = url.path().to_string();
+        if path.is_empty() {
+            path = "/".into();
+        }
+        if path.len() > 1 && path.ends_with('/') {
+            path.pop();
+        }
+        Ok(Self {
+            host,
+            port,
+            username,
+            path,
+        })
+    }
+}
+
 enum Cmd {
     Items(IconSizes, mpsc::Sender<ClientItems>),
     Rescan,
@@ -1080,7 +1104,7 @@ impl Russh {
                         Cmd::RemoteDrive(uri, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
-                            let remote_file = match remote_file_from_uri(&uri) {
+                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
                                 Ok(rf) => rf,
                                 Err(err) => {
                                     if let Some(result_tx) = result_tx_opt.take() {
@@ -1192,7 +1216,7 @@ impl Russh {
                         }
                         Cmd::RemoteScan(uri, sizes, show_as_samples, items_tx) => {
                             log::info!("RemoteScan for URI: {}", uri);
-                            let remote_file = match remote_file_from_uri(&uri) {
+                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
                                 Ok(rf) => rf,
                                 Err(e) => {
                                     let _ = items_tx.send(Err(e)).await;
@@ -1275,7 +1299,7 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteParent(uri, sizes, items_tx) => {
-                            let remote_file = match remote_file_from_uri(&uri) {
+                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
                                 Ok(rf) => rf,
                                 Err(e) => {
                                     let _ = items_tx.send(Err(e)).await;
@@ -1350,7 +1374,7 @@ impl Russh {
                             }
                         }
                         Cmd::DirInfo(uri, result_tx) => {
-                            let remote_file = match remote_file_from_uri(&uri) {
+                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
                                 Ok(rf) => rf,
                                 Err(e) => {
                                     let _ = result_tx.send(Err(anyhow::anyhow!(e))).await;
@@ -1400,7 +1424,7 @@ impl Russh {
                                 let remote_files: Vec<_> = uris
                                     .iter()
                                     .map(|u| {
-                                        remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e))
+                                        u.parse::<RemoteFile>().map_err(|e| anyhow::anyhow!(e))
                                     })
                                     .collect::<Result<_, anyhow::Error>>()?;
                                 let host = remote_files
@@ -1436,7 +1460,7 @@ impl Russh {
                             }
                             let remote_files: Vec<_> = match uris
                                 .iter()
-                                .map(|u| remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e)))
+                                .map(|u| u.parse::<RemoteFile>().map_err(|e| anyhow::anyhow!(e)))
                                 .collect::<Result<_, _>>()
                             {
                                 Ok(v) => v,
@@ -1493,7 +1517,7 @@ impl Russh {
                             }
                             let remote_files: Vec<_> = match uris
                                 .iter()
-                                .map(|u| remote_file_from_uri(u).map_err(|e| anyhow::anyhow!(e)))
+                                .map(|u| u.parse::<RemoteFile>().map_err(|e| anyhow::anyhow!(e)))
                                 .collect::<Result<_, _>>()
                             {
                                 Ok(v) => v,
@@ -1539,7 +1563,7 @@ impl Russh {
                                 .unwrap();
                         }
                         Cmd::DeleteTbProfilerResults(uri, tb_config, result_tx) => {
-                            let remote_file = match remote_file_from_uri(&uri) {
+                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
                                 Ok(rf) => rf,
                                 Err(e) => {
                                     let _ = result_tx.send(Err(anyhow::anyhow!(e)));
