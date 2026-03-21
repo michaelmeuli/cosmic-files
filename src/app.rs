@@ -7193,6 +7193,7 @@ impl Application for App {
                                 &self.key_binds,
                                 &window.modifiers,
                                 self.clipboard_has_content(),
+                                &self.config.tb_config,
                             )
                             .map(|x| Message::TabMessage(Some(*entity), x)),
                             id.clone(),

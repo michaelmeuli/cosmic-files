@@ -16,11 +16,11 @@ use cosmic::{
 };
 use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
-use std::{collections::HashMap, sync::LazyLock};
+use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::LazyLock};
 
 use crate::{
     app::{Action, Message},
-    config::Config,
+    config::{Config, TBConfig},
     fl,
     tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab},
 };
@@ -43,6 +43,24 @@ macro_rules! menu_button {
     );
 }
 
+fn is_valid_fastq_selection(paths: &[PathBuf], config: &TBConfig) -> bool {
+    let mut sample_map: HashMap<String, HashSet<u8>> = HashMap::new();
+    for path in paths.iter() {
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(f) => f,
+            None => return false,
+        };
+        if let Some(sample) = filename.strip_suffix(config.pair1_suffix.as_str()) {
+            sample_map.entry(sample.to_string()).or_default().insert(1);
+        } else if let Some(sample) = filename.strip_suffix(config.pair2_suffix.as_str()) {
+            sample_map.entry(sample.to_string()).or_default().insert(2);
+        } else {
+            return false;
+        }
+    }
+    sample_map.values().all(|set| set.len() == 2)
+}
+
 const fn menu_button_optional(
     label: String,
     action: Action,
@@ -60,6 +78,7 @@ pub fn context_menu<'a>(
     key_binds: &HashMap<KeyBind, Action>,
     modifiers: &Modifiers,
     clipboard_paste_available: bool,
+    config: &TBConfig,
 ) -> Element<'a, tab::Message> {
     let find_key = |action: &Action| -> String {
         for (key_bind, key_action) in key_binds {
@@ -130,6 +149,7 @@ pub fn context_menu<'a>(
     let mut selected_types: Vec<Mime> = vec![];
     let mut selected_mount_point = 0;
     let mut selected_client_point = 0;
+    let mut selected_remote_paths: Vec<PathBuf> = Vec::new();
     if let Some(items) = tab.items_opt() {
         for item in items {
             if item.selected {
@@ -138,6 +158,9 @@ pub fn context_menu<'a>(
                     selected_mount_point += i32::from(item.is_mount_point);
                     selected_client_point += i32::from(item.is_client_point);
                     selected_dir += 1;
+                }
+                if let Some(Location::Remote(_, _, Some(path))) = &item.location_opt {
+                    selected_remote_paths.push(path.clone());
                 }
                 match &item.location_opt {
                     Some(Location::Trash) | Some(Location::Search(SearchLocation::Trash, ..)) => {
@@ -377,18 +400,27 @@ pub fn context_menu<'a>(
         }
         (_, Location::Remote(..)) => {
             if selected > 0 {
+                if selected == selected_remote_paths.len()
+                    && selected_dir == 0
+                    && is_valid_fastq_selection(&selected_remote_paths, &config)
+                {
+                    children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
+                }
                 if matches!(tab.mode, tab::Mode::App) {
                     children.push(divider::horizontal::light().into());
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
                 }
                 if selected == 1 && selected_dir == 0 {
-                    children.push(menu_item(fl!("delete-remote-file"), Action::DeleteRemoteFiles).into());
+                    children.push(
+                        menu_item(fl!("delete-remote-file"), Action::DeleteRemoteFiles).into(),
+                    );
                 }
                 if selected > 1 && selected_dir == 0 {
-                    children.push(menu_item(fl!("delete-remote-files"), Action::DeleteRemoteFiles).into());
+                    children.push(
+                        menu_item(fl!("delete-remote-files"), Action::DeleteRemoteFiles).into(),
+                    );
                 }
                 children.push(menu_item(fl!("download-to"), Action::DownloadTo).into());
-                children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
             } else {
                 if tab.mode.multiple() {
                     children.push(menu_item(fl!("select-all"), Action::SelectAll).into());
