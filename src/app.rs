@@ -461,7 +461,7 @@ pub enum Message {
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
     RunTbProfilerResult(ClientKey, String, Result<String, String>),
-    DeleteRemoteFilesResult(ClientKey, String, Result<bool, String>),
+    DeleteRemoteFilesResult(ClientKey, String, Result<String, String>),
     SaveSortNames,
     ScrollTab(i16),
     SearchActivate,
@@ -618,6 +618,11 @@ pub enum DialogPage {
         client_key: ClientKey,
         uri: String,
         error: String,
+    },
+    DeleteRemoteFilesSuccess {
+        client_key: ClientKey,
+        uri: String,
+        result: String,
     },
     DeleteRemoteFilesError {
         client_key: ClientKey,
@@ -3415,6 +3420,15 @@ impl Application for App {
                                 cosmic::action::none()
                             }));
                         }
+                        DialogPage::DeleteRemoteFilesSuccess {
+                            client_key: _,
+                            uri: _,
+                            result: _,
+                        } => {
+                            tasks.push(Task::future(async move {
+                                cosmic::action::none()
+                            }));
+                        }
                         DialogPage::DeleteRemoteFilesError {
                             client_key: _,
                             uri: _,
@@ -4070,11 +4084,13 @@ impl Application for App {
             }
             Message::DeleteRemoteFilesResult(client_key, uri, res) => {
                 match res {
-                    Ok(true) => {
-                        log::info!("Remote files deleted successfully for {uri:?}");
-                    }
-                    Ok(false) => {
-                        log::info!("Remote file deletion was cancelled for {uri:?}");
+                    Ok(result) => {
+                        log::info!("Remote files deleted successfully for {uri:?}: {result}");
+                        return self.dialog_pages.push_back(DialogPage::DeleteRemoteFilesSuccess {
+                            client_key,
+                            uri,
+                            result,
+                        });
                     }
                     Err(error) => {
                         log::warn!("failed to delete remote files for {uri:?}: {error}");
@@ -6567,6 +6583,17 @@ impl Application for App {
                 .icon(icon::from_name("dialog-error").size(64))
                 .primary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
+            DialogPage::DeleteRemoteFilesSuccess {
+                client_key: _,
+                uri: _,
+                result,
+            } => widget::dialog()
+                .title(fl!("delete-remote-files-success"))
+                .body(result)
+                .icon(icon::from_name("dialog-success").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("ok")).on_press(Message::DialogCancel),
                 ),
             DialogPage::DeleteRemoteFilesError {
                 client_key: _,

@@ -403,3 +403,4 @@ tb-profiler-error = TB Profiler Error
 delete-remote-files-error = Some files on remote could not be deleted
 tb-profiler-success = TB-Profiler started
 ok = OK
+delete-remote-files-success = Deleted remote files sucessfully

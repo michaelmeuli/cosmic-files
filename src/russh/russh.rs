@@ -813,6 +813,15 @@ pub async fn delete_remote_files(
     if paths.is_empty() {
         return Ok(String::new());
     }
+    let filenames: Vec<String> = paths
+        .iter()
+        .map(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<invalid>")
+                .to_string()
+        })
+        .collect();
     let files = paths
         .iter()
         .map(|p| {
@@ -830,7 +839,7 @@ pub async fn delete_remote_files(
             res.stderr
         ));
     }
-    Ok(res.stdout)
+    Ok(filenames.join("\n"))
 }
 
 pub async fn delete_tbprofiler_results(
@@ -944,7 +953,7 @@ enum Event {
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
     RunTbProfilerResult(String, Result<String, String>),
-    DeleteRemoteFilesResult(String, Result<bool, String>),
+    DeleteRemoteFilesResult(String, Result<String, String>),
 }
 
 #[derive(Clone, Debug)]
@@ -1463,8 +1472,10 @@ impl Russh {
                                 }
                             };
                             let result = run_tbprofiler(&client, paths, tb_config).await;
-                            let event_result: Result<String, String> =
-                                result.as_ref().map(|s| s.clone()).map_err(|e| e.to_string());
+                            let event_result: Result<String, String> = result
+                                .as_ref()
+                                .map(|s| s.clone())
+                                .map_err(|e| e.to_string());
                             let _ = result_tx.send(result);
                             event_tx
                                 .send(Event::RunTbProfilerResult(uri, event_result))
@@ -1518,8 +1529,10 @@ impl Russh {
                                 }
                             };
                             let result = delete_remote_files(&client, &paths).await;
-                            let event_result: Result<bool, String> =
-                                result.as_ref().map(|_| true).map_err(|e| e.to_string());
+                            let event_result: Result<String, String> = result
+                                .as_ref()
+                                .map(|s| s.clone())
+                                .map_err(|e| e.to_string());
                             let _ = result_tx.send(result);
                             event_tx
                                 .send(Event::DeleteRemoteFilesResult(uri, event_result))
