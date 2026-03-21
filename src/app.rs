@@ -6513,7 +6513,18 @@ impl Application for App {
                 uri: _,
                 error,
             } => widget::dialog()
-                .title("TB Profiler Error")
+                .title(fl!("tb-profiler-error"))
+                .body(error)
+                .icon(icon::from_name("dialog-error").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
+            DialogPage::DeleteRemoteFilesError {
+                client_key: _,
+                uri: _,
+                error,
+            } => widget::dialog()
+                .title(fl!("delete-remote-files-error"))
                 .body(error)
                 .icon(icon::from_name("dialog-error").size(64))
                 .primary_action(

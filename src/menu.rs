@@ -378,11 +378,17 @@ pub fn context_menu<'a>(
         (_, Location::Remote(..)) => {
             if selected > 0 {
                 if matches!(tab.mode, tab::Mode::App) {
+                    children.push(divider::horizontal::light().into());
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
-                    children.push(menu_item(fl!("download-to"), Action::DownloadTo).into());
-                    children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
+                }
+                if selected == 1 && selected_dir == 0 {
+                    children.push(menu_item(fl!("delete-remote-file"), Action::DeleteRemoteFiles).into());
+                }
+                if selected > 1 && selected_dir == 0 {
                     children.push(menu_item(fl!("delete-remote-files"), Action::DeleteRemoteFiles).into());
                 }
+                children.push(menu_item(fl!("download-to"), Action::DownloadTo).into());
+                children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
             } else {
                 if tab.mode.multiple() {
                     children.push(menu_item(fl!("select-all"), Action::SelectAll).into());

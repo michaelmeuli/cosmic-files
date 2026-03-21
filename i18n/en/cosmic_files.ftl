@@ -398,3 +398,6 @@ tb-profiler-settings = TB profiler settings
 run-tb-profiler = Run TB-Profiler
 delete-tb-profiler-results = Delete TB-Profiler results
 delete-remote-files = Delete Remote files
+delete-remote-file = Delete Remote file
+tb-profiler-error = TB Profiler Error
+delete-remote-files-error = Some files on remote could not be deleted

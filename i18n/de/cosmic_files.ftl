@@ -430,3 +430,6 @@ tb-profiler-settings = TB profiler Einstellungen
 run-tb-profiler = TB-Profiler Starten
 delete-tb-profiler-results = TB-Profiler Resultate löschen
 delete-remote-files = Remote Dateien löschen
+delete-remote-file = Remote Datei löschen
+tb-profiler-error = TB Profiler Error
+delete-remote-files-error = Einige Dateien auf dem Server konnen nicht gelöscht werden
