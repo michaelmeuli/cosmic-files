@@ -1,7 +1,7 @@
 use crate::{
     app::{ArchiveType, DialogPage, Message, REPLACE_BUTTON_ID},
     archive,
-    config::IconSizes,
+    config::{IconSizes, TBConfig},
     fl,
     spawn_detached::spawn_detached,
     tab,
@@ -403,6 +403,16 @@ pub enum Operation {
     SetPermissions {
         path: PathBuf,
         mode: u32,
+    },
+    /// Run TB-Profiler
+    RunTBProfiler {
+        selected_paths: Box<[PathBuf]>,
+        selected_uris: Vec<String>,
+        script_path: String,
+        out_dir: String,
+        docx_template_path: String,
+        pair1_suffix: String,
+        pair2_suffix: String,
     },
 }
 
