@@ -144,6 +144,12 @@ pub trait Connector: Send + Sync {
         uris: Vec<String>,
         tb_config: TBConfig,
     ) -> Task<()>;
+    fn run_tb_profiler_future(
+        &self,
+        paths: Box<[PathBuf]>,
+        uris: Vec<String>,
+        tb_config: TBConfig,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'static>>;
     fn delete_remote_files(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()>;
     fn delete_tb_profiler_results(&self, uri: String, tb_config: TBConfig) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;

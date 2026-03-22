@@ -393,6 +393,14 @@ sort-smallest-to-largest = Smallest to largest
 sort-largest-to-smallest = Largest to smallest
 
 
+running-tb-profiler = Running TB-Profiler on {$items} {$items ->
+    [one] item
+    *[other] items
+}
+ran-tb-profiler = Ran TB-Profiler on {$items} {$items ->
+    [one] item
+    *[other] items
+}
 menu-tb-profiler-settings = TB profiler settings...
 tb-profiler-settings = TB profiler settings
 run-tb-profiler = Run TB-Profiler

@@ -551,6 +551,9 @@ impl Operation {
                     mode = format!("{:#03o}", mode)
                 )
             }
+            Self::RunTBProfiler { selected_paths, .. } => {
+                fl!("running-tb-profiler", items = selected_paths.len())
+            }
         }
     }
 
@@ -616,6 +619,9 @@ impl Operation {
                     mode = format!("{:#03o}", mode)
                 )
             }
+            Self::RunTBProfiler { selected_paths, .. } => {
+                fl!("ran-tb-profiler", items = selected_paths.len())
+            }
         }
     }
 
@@ -630,7 +636,8 @@ impl Operation {
             | Self::Extract { .. }
             | Self::Move { .. }
             | Self::PermanentlyDelete { .. }
-            | Self::Restore { .. } => true,
+            | Self::Restore { .. }
+            | Self::RunTBProfiler { .. } => true,
             Self::NewFile { .. }
             | Self::NewFolder { .. }
             | Self::RemoveFromRecents { .. }
@@ -1207,6 +1214,39 @@ impl Operation {
                 .await
                 .map_err(wrap_compio_spawn_error)?
                 .map_err(|e| OperationError::from_err(e, &controller))?;
+                Ok(OperationSelection::default())
+            }
+            Self::RunTBProfiler {
+                selected_paths,
+                selected_uris,
+                script_path,
+                out_dir,
+                docx_template_path,
+                pair1_suffix,
+                pair2_suffix,
+            } => {
+                controller
+                    .check()
+                    .await
+                    .map_err(|s| OperationError::from_state(s, &controller))?;
+
+                controller.set_progress(0.05);
+
+                let tb_config = TBConfig {
+                    script_path,
+                    out_dir,
+                    docx_template_path,
+                    pair1_suffix,
+                    pair2_suffix,
+                };
+
+                if let Some((_client_key, client)) = crate::russh::CLIENTS.iter().next() {
+                    client
+                        .run_tb_profiler_future(selected_paths, selected_uris, tb_config)
+                        .await
+                        .map_err(|e| OperationError::from_msg(e))?;
+                }
+
                 Ok(OperationSelection::default())
             }
         };

@@ -1,6 +1,8 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(windows))]
+use cosmic::desktop::fde::DesktopEntry;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced::{
     Limits, Point,
@@ -18,8 +20,7 @@ use cosmic::{
     Application, ApplicationExt, Element,
     app::{self, Core, Task, context_drawer},
     cosmic_config::{self, ConfigSet},
-    cosmic_theme,
-    executor,
+    cosmic_theme, executor,
     iced::{
         self, Alignment, Event, Length, Rectangle, Size, Subscription,
         clipboard::dnd::DndAction,
@@ -44,8 +45,6 @@ use cosmic::{
         space,
     },
 };
-#[cfg(not(windows))]
-use cosmic::desktop::fde::DesktopEntry;
 use mime_guess::Mime;
 use notify_debouncer_full::{
     DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
@@ -78,8 +77,8 @@ use crate::{
         ClipboardPasteText, ClipboardPasteVideo,
     },
     config::{
-        AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TIME_CONFIG_ID, TabConfig,
-        TimeConfig, TypeToSearch, TBConfig,
+        AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TBConfig, TIME_CONFIG_ID,
+        TabConfig, TimeConfig, TypeToSearch,
     },
     dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings},
     fl, home_dir,
@@ -1461,7 +1460,9 @@ impl App {
 
         Task::future(async move {
             let location2 = location.clone();
-            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples)).await {
+            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples))
+                .await
+            {
                 Ok((parent_item_opt, mut items)) => {
                     #[cfg(feature = "gvfs")]
                     {
@@ -2362,22 +2363,30 @@ impl App {
                             .on_input(Message::SetTbScriptPath),
                     ),
                 )
-                .add(widget::settings::item::builder("TB Profiler output directory").control(
-                    widget::text_input("", &self.config.tb_config.out_dir)
+                .add(
+                    widget::settings::item::builder("TB Profiler output directory").control(
+                        widget::text_input("", &self.config.tb_config.out_dir)
                             .on_input(Message::SetTbOutDir),
-                ))
-                .add(widget::settings::item::builder("TB DOCX Template Path").control(
-                    widget::text_input("", &self.config.tb_config.docx_template_path).
-                            on_input(Message::SetTbDocxTemplatePath),
-                ))
-                .add(widget::settings::item::builder("Pair 1 suffix").control(
-                    widget::text_input("", &self.config.tb_config.pair1_suffix)
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("TB DOCX Template Path").control(
+                        widget::text_input("", &self.config.tb_config.docx_template_path)
+                            .on_input(Message::SetTbDocxTemplatePath),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Pair 1 suffix").control(
+                        widget::text_input("", &self.config.tb_config.pair1_suffix)
                             .on_input(Message::SetTbPair1Suffix),
-                ))
-                .add(widget::settings::item::builder("Pair 2 suffix").control(
-                    widget::text_input("", &self.config.tb_config.pair2_suffix)
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Pair 2 suffix").control(
+                        widget::text_input("", &self.config.tb_config.pair2_suffix)
                             .on_input(Message::SetTbPair2Suffix),
-                ))
+                    ),
+                )
                 .into(),
         ])
         .into()
@@ -3407,36 +3416,28 @@ impl Application for App {
                             uri: _,
                             result: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::RunTbProfilerError {
                             client_key: _,
                             uri: _,
                             error: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::DeleteRemoteFilesSuccess {
                             client_key: _,
                             uri: _,
                             result: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::DeleteRemoteFilesError {
                             client_key: _,
                             uri: _,
                             error: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::NewItem { parent, name, dir } => {
                             let path = parent.join(name);
@@ -4045,13 +4046,18 @@ impl Application for App {
                 }
             }
             Message::RunTbProfiler(entity_opt) => {
-                if let Some((_client_key, client)) = CLIENTS.iter().next() {
-                    let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
-                    let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
-                    return client
-                        .run_tb_profiler(selected_paths, selected_uris, self.config.tb_config.clone())
-                        .map(|()| cosmic::action::none());
-                }
+                let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
+                let tb_config = self.config.tb_config.clone();
+                return self.operation(Operation::RunTBProfiler {
+                    selected_paths,
+                    selected_uris,
+                    script_path: tb_config.script_path,
+                    out_dir: tb_config.out_dir,
+                    docx_template_path: tb_config.docx_template_path,
+                    pair1_suffix: tb_config.pair1_suffix,
+                    pair2_suffix: tb_config.pair2_suffix,
+                });
             }
             Message::DeleteRemoteFiles(entity_opt) => {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
@@ -4062,51 +4068,53 @@ impl Application for App {
                         .map(|()| cosmic::action::none());
                 }
             }
-            Message::RunTbProfilerResult(client_key, uri, res) => {
-                match res {
-                    Ok(result) => {
-                        log::info!("TbProfiler started successfully for {uri:?}: {result}");
-                        return self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
+            Message::RunTbProfilerResult(client_key, uri, res) => match res {
+                Ok(result) => {
+                    log::info!("TbProfiler started successfully for {uri:?}: {result}");
+                    return self
+                        .dialog_pages
+                        .push_back(DialogPage::RunTbProfilerStarted {
                             client_key,
                             uri,
                             result,
                         });
-                    }
-                    Err(error) => {
-                        log::warn!("failed to run TbProfiler for {uri:?}: {error}");
-                        return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
-                            client_key,
-                            uri,
-                            error,
-                        });
-                    }
                 }
-            }
-            Message::DeleteRemoteFilesResult(client_key, uri, res) => {
-                match res {
-                    Ok(result) => {
-                        log::info!("Remote files deleted successfully for {uri:?}: {result}");
-                        return self.dialog_pages.push_back(DialogPage::DeleteRemoteFilesSuccess {
+                Err(error) => {
+                    log::warn!("failed to run TbProfiler for {uri:?}: {error}");
+                    return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
+                        client_key,
+                        uri,
+                        error,
+                    });
+                }
+            },
+            Message::DeleteRemoteFilesResult(client_key, uri, res) => match res {
+                Ok(result) => {
+                    log::info!("Remote files deleted successfully for {uri:?}: {result}");
+                    return self
+                        .dialog_pages
+                        .push_back(DialogPage::DeleteRemoteFilesSuccess {
                             client_key,
                             uri,
                             result,
                         });
-                    }
-                    Err(error) => {
-                        log::warn!("failed to delete remote files for {uri:?}: {error}");
-                        return self.dialog_pages.push_back(DialogPage::DeleteRemoteFilesError {
+                }
+                Err(error) => {
+                    log::warn!("failed to delete remote files for {uri:?}: {error}");
+                    return self
+                        .dialog_pages
+                        .push_back(DialogPage::DeleteRemoteFilesError {
                             client_key,
                             uri,
                             error,
                         });
-                    }
                 }
-            }
+            },
             Message::DeleteTbProfilerResults(uri, tb_config) => {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
                     return client
                         .delete_tb_profiler_results(uri, tb_config)
-                        .map(|()| cosmic::action::none()); 
+                        .map(|()| cosmic::action::none());
                 }
             }
             Message::NewItem(entity_opt, dir) => {
@@ -4996,7 +5004,9 @@ impl Application for App {
                             self.set_show_context(true);
                         }
                         tab::Command::DeleteTbProfilerResults(uri, tb_config) => {
-                            commands.push(self.update(Message::DeleteTbProfilerResults(uri, tb_config)));
+                            commands.push(
+                                self.update(Message::DeleteTbProfilerResults(uri, tb_config)),
+                            );
                         }
                         tab::Command::AddToSidebar(path) => {
                             let mut favorites = self.config.favorites.clone();
@@ -5319,8 +5329,10 @@ impl Application for App {
                 let show_as_samples = self.config.tab.show_as_samples;
 
                 return cosmic::task::future(async move {
-                    match tokio::task::spawn_blocking(move || Location::Trash.scan(icon_sizes, show_as_samples))
-                        .await
+                    match tokio::task::spawn_blocking(move || {
+                        Location::Trash.scan(icon_sizes, show_as_samples)
+                    })
+                    .await
                     {
                         Ok((_parent_item_opt, items)) => {
                             for path in &*recently_trashed {
