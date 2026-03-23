@@ -404,6 +404,10 @@ pub enum Operation {
         path: PathBuf,
         mode: u32,
     },
+    /// Start TB-Profiler on the remote host
+    RunTBProfiler {
+        selected_paths: Box<[PathBuf]>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -541,6 +545,9 @@ impl Operation {
                     mode = format!("{:#03o}", mode)
                 )
             }
+            Self::RunTBProfiler { selected_paths } => {
+                fl!("running-tb-profiler", items = selected_paths.len())
+            }
         }
     }
 
@@ -606,6 +613,9 @@ impl Operation {
                     mode = format!("{:#03o}", mode)
                 )
             }
+            Self::RunTBProfiler { selected_paths } => {
+                fl!("ran-tb-profiler", items = selected_paths.len())
+            }
         }
     }
 
@@ -620,7 +630,8 @@ impl Operation {
             | Self::Extract { .. }
             | Self::Move { .. }
             | Self::PermanentlyDelete { .. }
-            | Self::Restore { .. } => true,
+            | Self::Restore { .. }
+            | Self::RunTBProfiler { .. } => true,
             Self::NewFile { .. }
             | Self::NewFolder { .. }
             | Self::RemoveFromRecents { .. }
@@ -1199,6 +1210,7 @@ impl Operation {
                 .map_err(|e| OperationError::from_err(e, &controller))?;
                 Ok(OperationSelection::default())
             }
+            Self::RunTBProfiler { .. } => Ok(OperationSelection::default()),
         };
 
         controller_clone.set_progress(1.0);

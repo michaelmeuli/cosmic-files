@@ -825,6 +825,7 @@ pub struct App {
     pending_operation_id: u64,
     pending_operations: BTreeMap<u64, (Operation, Controller)>,
     progress_operations: BTreeSet<u64>,
+    tb_profiler_pending_operations: BTreeMap<String, VecDeque<u64>>,
     complete_operations: BTreeMap<u64, Operation>,
     failed_operations: BTreeMap<u64, (Operation, Controller, String)>,
     scrollable_id: widget::Id,
@@ -1388,6 +1389,47 @@ impl App {
             },
         ))
         .map(cosmic::Action::App)
+    }
+
+    fn finish_tb_profiler_submission(
+        &mut self,
+        uri: &str,
+        res: &Result<String, String>,
+    ) -> Task<Message> {
+        let Some(ids) = self.tb_profiler_pending_operations.get_mut(uri) else {
+            return Task::none();
+        };
+        let Some(id) = ids.pop_front() else {
+            return Task::none();
+        };
+        if ids.is_empty() {
+            self.tb_profiler_pending_operations.remove(uri);
+        }
+
+        match res {
+            Ok(_) => {
+                if let Some((op, _)) = self.pending_operations.remove(&id) {
+                    self.complete_operations.insert(id, op);
+                }
+            }
+            Err(error) => {
+                if let Some((op, controller)) = self.pending_operations.remove(&id) {
+                    controller.set_state(crate::operation::controller::ControllerState::Failed);
+                    self.failed_operations
+                        .insert(id, (op, controller, error.clone()));
+                }
+            }
+        }
+
+        if !self
+            .pending_operations
+            .values()
+            .any(|(op, _)| op.show_progress_notification())
+        {
+            self.progress_operations.clear();
+        }
+
+        self.update_notification()
     }
 
     fn remove_window(&mut self, id: &window::Id) {
@@ -2591,6 +2633,7 @@ impl Application for App {
             pending_operation_id: 0,
             pending_operations: BTreeMap::new(),
             progress_operations: BTreeSet::new(),
+            tb_profiler_pending_operations: BTreeMap::new(),
             complete_operations: BTreeMap::new(),
             failed_operations: BTreeMap::new(),
             scrollable_id: widget::Id::new("File Scrollable"),
@@ -4050,6 +4093,28 @@ impl Application for App {
                 let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
                 let tb_config = self.config.tb_config.clone();
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
+                    if let Some(uri) = selected_uris.first().cloned() {
+                        let id = self.pending_operation_id;
+                        self.pending_operation_id += 1;
+
+                        let controller = Controller::default();
+                        controller.set_progress(0.05);
+
+                        self.progress_operations.insert(id);
+                        self.pending_operations.insert(
+                            id,
+                            (
+                                Operation::RunTBProfiler {
+                                    selected_paths: selected_paths.clone(),
+                                },
+                                controller,
+                            ),
+                        );
+                        self.tb_profiler_pending_operations
+                            .entry(uri)
+                            .or_default()
+                            .push_back(id);
+                    }
                     return client
                         .run_tb_profiler(selected_paths, selected_uris, tb_config)
                         .map(|()| cosmic::action::none());
@@ -4064,35 +4129,42 @@ impl Application for App {
                         .map(|()| cosmic::action::none());
                 }
             }
-            Message::RunTbProfilerResult(client_key, uri, res) => match res {
-                Ok(result) => {
-                    self.state.tb_profiler_job_id = Some(result.clone());
-                    if let Some(state_handler) = self.state_handler.as_ref()
-                        && let Err(err) = state_handler.set::<&Option<String>>(
-                            "tb_profiler_job_id",
-                            &self.state.tb_profiler_job_id,
-                        )
-                    {
-                        log::warn!("Failed to save TB-Profiler job id: {err:?}");
+            Message::RunTbProfilerResult(client_key, uri, res) => {
+                let task = self.finish_tb_profiler_submission(&uri, &res);
+                match res {
+                    Ok(result) => {
+                        self.state.tb_profiler_job_id = Some(result.clone());
+                        if let Some(state_handler) = self.state_handler.as_ref()
+                            && let Err(err) = state_handler.set::<&Option<String>>(
+                                "tb_profiler_job_id",
+                                &self.state.tb_profiler_job_id,
+                            )
+                        {
+                            log::warn!("Failed to save TB-Profiler job id: {err:?}");
+                        }
+                        log::info!("TbProfiler started successfully for {uri:?}: {result}");
+                        return self
+                            .dialog_pages
+                            .push_back(DialogPage::RunTbProfilerStarted {
+                                client_key,
+                                uri,
+                                result,
+                            })
+                            .chain(task);
                     }
-                    log::info!("TbProfiler started successfully for {uri:?}: {result}");
-                    return self
-                        .dialog_pages
-                        .push_back(DialogPage::RunTbProfilerStarted {
-                            client_key,
-                            uri,
-                            result,
-                        });
+                    Err(error) => {
+                        log::warn!("failed to run TbProfiler for {uri:?}: {error}");
+                        return self
+                            .dialog_pages
+                            .push_back(DialogPage::RunTbProfilerError {
+                                client_key,
+                                uri,
+                                error,
+                            })
+                            .chain(task);
+                    }
                 }
-                Err(error) => {
-                    log::warn!("failed to run TbProfiler for {uri:?}: {error}");
-                    return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
-                        client_key,
-                        uri,
-                        error,
-                    });
-                }
-            },
+            }
             Message::DeleteRemoteFilesResult(client_key, uri, res) => match res {
                 Ok(result) => {
                     log::info!("Remote files deleted successfully for {uri:?}: {result}");
