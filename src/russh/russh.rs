@@ -5,7 +5,9 @@ use url::Url;
 
 use cosmic::{
     Task,
+    cosmic_theme::palette::white_point::A,
     iced::{Subscription, futures::SinkExt, stream},
+    iced_runtime::task,
     widget,
 };
 use std::{
@@ -35,12 +37,19 @@ use tokio::runtime::Builder;
 
 use crate::config::TBConfig;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SampleFiles {
     json: Option<PathBuf>,
     csv: Option<PathBuf>,
     docx: Option<PathBuf>,
     mtime: u64,
     size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SlurmJobId {
+    array_id: usize,
+    tasks: usize,
 }
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
@@ -685,7 +694,7 @@ pub async fn run_tbprofiler(
     client: &Client,
     paths: Box<[PathBuf]>,
     tb_config: TBConfig,
-) -> Result<String, anyhow::Error> {
+) -> Result<SlurmJobId, anyhow::Error> {
     if tb_config.script_path.is_empty()
         || tb_config.out_dir.is_empty()
         || tb_config.docx_template_path.is_empty()
@@ -753,7 +762,7 @@ pub async fn run_tbprofiler(
     };
 
     let command_run_tbprofiler = format!(
-        "sbatch --array 0-{} {} \"{}\" {} {} {}",
+        "sbatch --parsable --array 0-{} {} \"{}\" {} {} {}",
         array_end,
         tb_config.script_path,
         sample_ids_string,
@@ -774,7 +783,15 @@ pub async fn run_tbprofiler(
         log::warn!("tbprofiler stderr: {}", res.stderr);
     }
     log::info!("tbprofiler stdout: {}", res.stdout);
-    Ok(res.stdout)
+    let job_id: usize = res.stdout.split(';').next().unwrap().parse()?;
+    let tasks = array_end
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("Overflow when calculating tasks"))?;
+    let job_id = SlurmJobId {
+        array_id: job_id,
+        tasks,
+    };
+    Ok(job_id)
 }
 
 pub async fn delete_remote_files(
@@ -1104,17 +1121,18 @@ impl Russh {
                         Cmd::RemoteDrive(uri, result_tx) => {
                             let mut result_tx_opt = Some(result_tx);
                             let event_tx = event_tx.clone();
-                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
-                                Ok(rf) => rf,
-                                Err(err) => {
-                                    if let Some(result_tx) = result_tx_opt.take() {
-                                        _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
+                            let remote_file =
+                                match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
+                                    Ok(rf) => rf,
+                                    Err(err) => {
+                                        if let Some(result_tx) = result_tx_opt.take() {
+                                            _ = result_tx.send(Err(anyhow::anyhow!("{err:?}")));
+                                        }
+                                        let _ = event_tx
+                                            .send(Event::RemoteResult(uri, Err(err.to_string())));
+                                        continue;
                                     }
-                                    let _ = event_tx
-                                        .send(Event::RemoteResult(uri, Err(err.to_string())));
-                                    continue;
-                                }
-                            };
+                                };
                             let norm_uri = remote_file.uri();
                             let host = remote_file.host.as_str();
                             let port = remote_file.port;
@@ -1216,13 +1234,14 @@ impl Russh {
                         }
                         Cmd::RemoteScan(uri, sizes, show_as_samples, items_tx) => {
                             log::info!("RemoteScan for URI: {}", uri);
-                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
-                                Ok(rf) => rf,
-                                Err(e) => {
-                                    let _ = items_tx.send(Err(e)).await;
-                                    continue;
-                                }
-                            };
+                            let remote_file =
+                                match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
+                                    Ok(rf) => rf,
+                                    Err(e) => {
+                                        let _ = items_tx.send(Err(e)).await;
+                                        continue;
+                                    }
+                                };
                             let norm_uri = remote_file.uri();
                             let host = remote_file.host.as_str();
                             let port = remote_file.port;
@@ -1299,13 +1318,14 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteParent(uri, sizes, items_tx) => {
-                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
-                                Ok(rf) => rf,
-                                Err(e) => {
-                                    let _ = items_tx.send(Err(e)).await;
-                                    continue;
-                                }
-                            };
+                            let remote_file =
+                                match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
+                                    Ok(rf) => rf,
+                                    Err(e) => {
+                                        let _ = items_tx.send(Err(e)).await;
+                                        continue;
+                                    }
+                                };
                             let norm_uri = remote_file.uri();
                             let host = remote_file.host.as_str();
                             let port = remote_file.port;
@@ -1374,13 +1394,14 @@ impl Russh {
                             }
                         }
                         Cmd::DirInfo(uri, result_tx) => {
-                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
-                                Ok(rf) => rf,
-                                Err(e) => {
-                                    let _ = result_tx.send(Err(anyhow::anyhow!(e))).await;
-                                    continue;
-                                }
-                            };
+                            let remote_file =
+                                match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
+                                    Ok(rf) => rf,
+                                    Err(e) => {
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(e))).await;
+                                        continue;
+                                    }
+                                };
                             let host = remote_file.host.as_str();
                             let client = {
                                 let read = clients.read().await;
@@ -1563,13 +1584,14 @@ impl Russh {
                                 .unwrap();
                         }
                         Cmd::DeleteTbProfilerResults(uri, tb_config, result_tx) => {
-                            let remote_file = match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
-                                Ok(rf) => rf,
-                                Err(e) => {
-                                    let _ = result_tx.send(Err(anyhow::anyhow!(e)));
-                                    continue;
-                                }
-                            };
+                            let remote_file =
+                                match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
+                                    Ok(rf) => rf,
+                                    Err(e) => {
+                                        let _ = result_tx.send(Err(anyhow::anyhow!(e)));
+                                        continue;
+                                    }
+                                };
                             let host = remote_file.host.as_str();
                             let client = {
                                 let read = clients.read().await;
