@@ -1907,7 +1907,6 @@ impl Application for App {
                                                             &app.key_binds,
                                                             &app.modifiers,
                                                             false, // Paste not used in dialogs
-                                                            &app.config.tb_config,
                                                         )
                                                         .map(Message::TabMessage)
                                                         .map(cosmic::Action::App),

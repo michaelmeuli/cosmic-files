@@ -694,6 +694,16 @@ pub async fn run_tbprofiler(
             "Please configure paths under TB profiler settings..."
         ));
     }
+    if tb_config.pair1_suffix.is_empty() || tb_config.pair2_suffix.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Please configure both FASTQ suffixes under TB profiler settings"
+        ));
+    }
+    if tb_config.pair1_suffix == tb_config.pair2_suffix {
+        return Err(anyhow::anyhow!(
+            "TB profiler FASTQ suffixes must be different"
+        ));
+    }
     let mut sample_map: BTreeMap<String, BTreeSet<u8>> = BTreeMap::new();
     for path in paths.iter() {
         let filename = path

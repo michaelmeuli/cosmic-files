@@ -6744,13 +6744,8 @@ impl Tab {
         if let Some(point) = self.context_menu
             && (!cfg!(feature = "wayland") || !crate::is_wayland())
         {
-            let context_menu = menu::context_menu(
-                self,
-                key_binds,
-                modifiers,
-                clipboard_paste_available,
-                &self.tb_config,
-            );
+            let context_menu =
+                menu::context_menu(self, key_binds, modifiers, clipboard_paste_available);
             popover = popover
                 .popup(context_menu)
                 .position(widget::popover::Position::Point(point));
