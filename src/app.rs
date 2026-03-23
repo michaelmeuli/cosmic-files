@@ -4049,15 +4049,11 @@ impl Application for App {
                 let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                 let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
                 let tb_config = self.config.tb_config.clone();
-                return self.operation(Operation::RunTBProfiler {
-                    selected_paths,
-                    selected_uris,
-                    script_path: tb_config.script_path,
-                    out_dir: tb_config.out_dir,
-                    docx_template_path: tb_config.docx_template_path,
-                    pair1_suffix: tb_config.pair1_suffix,
-                    pair2_suffix: tb_config.pair2_suffix,
-                });
+                if let Some((_client_key, client)) = CLIENTS.iter().next() {
+                    return client
+                        .run_tb_profiler(selected_paths, selected_uris, tb_config)
+                        .map(|()| cosmic::action::none());
+                }
             }
             Message::DeleteRemoteFiles(entity_opt) => {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
@@ -4070,6 +4066,15 @@ impl Application for App {
             }
             Message::RunTbProfilerResult(client_key, uri, res) => match res {
                 Ok(result) => {
+                    self.state.tb_profiler_job_id = Some(result.clone());
+                    if let Some(state_handler) = self.state_handler.as_ref()
+                        && let Err(err) = state_handler.set::<&Option<String>>(
+                            "tb_profiler_job_id",
+                            &self.state.tb_profiler_job_id,
+                        )
+                    {
+                        log::warn!("Failed to save TB-Profiler job id: {err:?}");
+                    }
                     log::info!("TbProfiler started successfully for {uri:?}: {result}");
                     return self
                         .dialog_pages

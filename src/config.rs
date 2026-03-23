@@ -119,6 +119,7 @@ pub enum TypeToSearch {
 #[serde(default)]
 pub struct State {
     pub sort_names: FxOrderMap<String, (HeadingOptions, bool)>,
+    pub tb_profiler_job_id: Option<String>,
 }
 
 impl Default for State {
@@ -130,6 +131,7 @@ impl Default for State {
                     (HeadingOptions::Modified, false),
                 )
             })),
+            tb_profiler_job_id: None,
         }
     }
 }
@@ -244,7 +246,7 @@ impl Config {
         }
     }
 
-        /// Construct tab config for dialog
+    /// Construct tab config for dialog
     pub fn tb_config(&self) -> TBConfig {
         TBConfig {
             script_path: self.tb_config.script_path.clone(),

@@ -44,7 +44,10 @@ use crate::{
     app::{
         Action, ContextPage, Message as AppMessage, PreviewItem, PreviewKind, REPLACE_BUTTON_ID,
     },
-    config::{Config, DialogConfig, Favorite, TBConfig, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch},
+    config::{
+        Config, DialogConfig, Favorite, TBConfig, TIME_CONFIG_ID, ThumbCfg, TimeConfig,
+        TypeToSearch,
+    },
     fl, home_dir,
     key_bind::key_binds,
     localize::LANGUAGE_SORTER,
@@ -752,7 +755,9 @@ impl App {
         let show_as_samples = self.tab.config.show_as_samples;
         Task::future(async move {
             let location2 = location.clone();
-            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples)).await {
+            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples))
+                .await
+            {
                 Ok((parent_item_opt, mut items)) => {
                     #[cfg(feature = "gvfs")]
                     {

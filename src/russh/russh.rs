@@ -1745,26 +1745,6 @@ impl Connector for Russh {
         )
     }
 
-    fn run_tb_profiler_future(
-        &self,
-        paths: Box<[PathBuf]>,
-        uris: Vec<String>,
-        tb_config: TBConfig,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'static>>
-    {
-        let command_tx = self.command_tx.clone();
-        Box::pin(async move {
-            let (res_tx, res_rx) = tokio::sync::oneshot::channel::<anyhow::Result<String>>();
-            command_tx
-                .send(Cmd::RunTbProfiler(paths, uris, tb_config, res_tx))
-                .map_err(|e| e.to_string())?;
-            res_rx
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_string())
-        })
-    }
-
     fn delete_remote_files(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
