@@ -4068,6 +4068,7 @@ impl Application for App {
                 match res {
                     Ok(slurm_job_id) => {
                         log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}", slurm_job_id.array_id, slurm_job_id.tasks);
+                        self.state.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.tasks);
                         return self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
                             client_key,
                             uri,

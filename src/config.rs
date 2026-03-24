@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     FxOrderMap,
     app::App,
+    russh::SlurmJobId,
     tab::{HeadingOptions, Location, View},
 };
 
@@ -119,6 +120,7 @@ pub enum TypeToSearch {
 #[serde(default)]
 pub struct State {
     pub sort_names: FxOrderMap<String, (HeadingOptions, bool)>,
+    pub running_jobs: std::collections::HashMap<usize, usize>,
 }
 
 impl Default for State {
@@ -130,6 +132,7 @@ impl Default for State {
                     (HeadingOptions::Modified, false),
                 )
             })),
+            running_jobs: std::collections::HashMap::new(),
         }
     }
 }

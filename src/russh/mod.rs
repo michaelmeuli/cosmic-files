@@ -114,7 +114,7 @@ impl ClientItem {
 
 pub type ClientItems = Vec<ClientItem>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 pub struct SlurmJobId {
     pub array_id: usize,
     pub tasks: usize,
