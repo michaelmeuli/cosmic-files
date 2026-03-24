@@ -46,11 +46,7 @@ struct SampleFiles {
     size: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct SlurmJobId {
-    array_id: usize,
-    tasks: usize,
-}
+use super::SlurmJobId;
 
 fn get_key_files() -> Result<(PathBuf, PathBuf), String> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
@@ -783,7 +779,7 @@ pub async fn run_tbprofiler(
         log::warn!("tbprofiler stderr: {}", res.stderr);
     }
     log::info!("tbprofiler stdout: {}", res.stdout);
-    let job_id: usize = res.stdout.split(';').next().unwrap().parse()?;
+    let job_id: usize = res.stdout.split(';').next().unwrap().trim().parse()?;
     let tasks = array_end
         .checked_add(1)
         .ok_or_else(|| anyhow::anyhow!("Overflow when calculating tasks"))?;
@@ -973,7 +969,7 @@ enum Cmd {
         Box<[PathBuf]>,
         Vec<String>,
         TBConfig,
-        tokio::sync::oneshot::Sender<anyhow::Result<String>>,
+        tokio::sync::oneshot::Sender<anyhow::Result<SlurmJobId>>,
     ),
     DeleteRemoteFiles(
         Box<[PathBuf]>,
@@ -993,7 +989,7 @@ enum Event {
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
-    RunTbProfilerResult(String, Result<String, String>),
+    RunTbProfilerResult(String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(String, Result<String, String>),
 }
 
@@ -1517,9 +1513,9 @@ impl Russh {
                                 }
                             };
                             let result = run_tbprofiler(&client, paths, tb_config).await;
-                            let event_result: Result<String, String> = result
+                            let event_result: Result<SlurmJobId, String> = result
                                 .as_ref()
-                                .map(|s| s.clone())
+                                .copied()
                                 .map_err(|e| e.to_string());
                             let _ = result_tx.send(result);
                             event_tx
@@ -1755,7 +1751,7 @@ impl Connector for Russh {
                 res_rx.await
             },
             |x| match x {
-                Ok(Ok(msg)) => log::info!("TBProfiler started: {msg}"),
+                Ok(Ok(job)) => log::info!("TBProfiler started: job_id={}, tasks={}", job.array_id, job.tasks),
                 Ok(Err(err)) => log::error!("TBProfiler failed: {err}"),
                 Err(err) => log::error!("Channel error: {err}"),
             },

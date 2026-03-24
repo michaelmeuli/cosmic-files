@@ -93,7 +93,7 @@ use crate::{
         Controller, Operation, OperationError, OperationErrorType, OperationSelection,
         ReplaceResult, copy_unique_path,
     },
-    russh::{CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, same_uri},
+    russh::{CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, SlurmJobId, same_uri},
     spawn_detached::spawn_detached,
     tab::{
         self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
@@ -460,7 +460,7 @@ pub enum Message {
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
-    RunTbProfilerResult(ClientKey, String, Result<String, String>),
+    RunTbProfilerResult(ClientKey, String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(ClientKey, String, Result<String, String>),
     SaveSortNames,
     ScrollTab(i16),
@@ -612,7 +612,8 @@ pub enum DialogPage {
     RunTbProfilerStarted {
         client_key: ClientKey,
         uri: String,
-        result: String,
+        job_id: usize,
+        tasks: usize,
     },
     RunTbProfilerError {
         client_key: ClientKey,
@@ -3405,7 +3406,8 @@ impl Application for App {
                         DialogPage::RunTbProfilerStarted {
                             client_key: _,
                             uri: _,
-                            result: _,
+                            job_id: _,
+                            tasks: _,
                         } => {
                             tasks.push(Task::future(async move {
                                 cosmic::action::none()
@@ -4064,12 +4066,13 @@ impl Application for App {
             }
             Message::RunTbProfilerResult(client_key, uri, res) => {
                 match res {
-                    Ok(result) => {
-                        log::info!("TbProfiler started successfully for {uri:?}: {result}");
+                    Ok(slurm_job_id) => {
+                        log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}", slurm_job_id.array_id, slurm_job_id.tasks);
                         return self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
                             client_key,
                             uri,
-                            result,
+                            job_id: slurm_job_id.array_id,
+                            tasks: slurm_job_id.tasks,
                         });
                     }
                     Err(error) => {
@@ -6565,10 +6568,11 @@ impl Application for App {
             DialogPage::RunTbProfilerStarted {
                 client_key: _,
                 uri: _,
-                result,
+                job_id,
+                tasks,
             } => widget::dialog()
                 .title(fl!("tb-profiler-success"))
-                .body(result)
+                .body(format!("Job ID: {job_id}\nTasks: {tasks}"))
                 .icon(icon::from_name("dialog-success").size(64))
                 .primary_action(
                     widget::button::standard(fl!("ok")).on_press(Message::DialogCancel),

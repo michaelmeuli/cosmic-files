@@ -114,13 +114,19 @@ impl ClientItem {
 
 pub type ClientItems = Vec<ClientItem>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SlurmJobId {
+    pub array_id: usize,
+    pub tasks: usize,
+}
+
 #[derive(Clone, Debug)]
 pub enum ClientMessage {
     Items(ClientItems),
     ClientResult(ClientItem, Result<bool, String>),
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
-    RunTbProfilerResult(String, Result<String, String>),
+    RunTbProfilerResult(String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(String, Result<String, String>),
 }
 
