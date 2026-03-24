@@ -118,6 +118,7 @@ pub type ClientItems = Vec<ClientItem>;
 pub struct SlurmJobId {
     pub array_id: usize,
     pub tasks: usize,
+    pub running_tasks: usize,
 }
 
 #[derive(Clone, Debug)]

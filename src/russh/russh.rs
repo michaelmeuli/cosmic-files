@@ -784,6 +784,7 @@ pub async fn run_tbprofiler(
     let job_id = SlurmJobId {
         array_id: job_id,
         tasks,
+        running_tasks: tasks,
     };
     Ok(job_id)
 }
