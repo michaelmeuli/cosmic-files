@@ -5,9 +5,7 @@ use url::Url;
 
 use cosmic::{
     Task,
-    cosmic_theme::palette::white_point::A,
     iced::{Subscription, futures::SinkExt, stream},
-    iced_runtime::task,
     widget,
 };
 use std::{
