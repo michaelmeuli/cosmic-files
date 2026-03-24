@@ -462,6 +462,7 @@ pub enum Message {
     RunTbProfiler(Option<Entity>),
     RunTbProfilerResult(ClientKey, String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(ClientKey, String, Result<String, String>),
+    JobStatusUpdate(ClientKey, String, usize, usize),
     SaveSortNames,
     ScrollTab(i16),
     SearchActivate,
@@ -4069,12 +4070,17 @@ impl Application for App {
                     Ok(slurm_job_id) => {
                         log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}, running={}", slurm_job_id.array_id, slurm_job_id.tasks, slurm_job_id.running_tasks);
                         self.state.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.tasks);
-                        return self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
+                        let poll_task = CLIENTS
+                            .get(&client_key)
+                            .map(|c| c.poll_job_status(slurm_job_id.array_id, uri.clone()).map(|()| cosmic::action::none()))
+                            .unwrap_or_else(Task::none);
+                        let dialog_task = self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
                             client_key,
                             uri,
                             job_id: slurm_job_id.array_id,
                             tasks: slurm_job_id.tasks,
                         });
+                        return Task::batch([poll_task, dialog_task]);
                     }
                     Err(error) => {
                         log::warn!("failed to run TbProfiler for {uri:?}: {error}");
@@ -4105,6 +4111,15 @@ impl Application for App {
                         });
                     }
                 }
+            }
+            Message::JobStatusUpdate(_client_key, _uri, array_id, running_tasks) => {
+                log::info!("Job {array_id} running tasks: {running_tasks}");
+                if running_tasks == 0 {
+                    self.state.running_jobs.remove(&array_id);
+                } else {
+                    self.state.running_jobs.insert(array_id, running_tasks);
+                }
+                return Task::none();
             }
             Message::DeleteTbProfilerResults(uri, tb_config) => {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
@@ -7692,6 +7707,9 @@ impl Application for App {
                         }
                         ClientMessage::DeleteRemoteFilesResult(uri, res) => {
                             Message::DeleteRemoteFilesResult(key, uri, res)
+                        }
+                        ClientMessage::JobStatusUpdate(uri, array_id, running_tasks) => {
+                            Message::JobStatusUpdate(key, uri, array_id, running_tasks)
                         }
                     },
                 ),

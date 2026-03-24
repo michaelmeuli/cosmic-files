@@ -789,6 +789,19 @@ pub async fn run_tbprofiler(
     Ok(job_id)
 }
 
+async fn poll_running_tasks(
+    client: &Client,
+    array_id: usize,
+) -> Result<usize, anyhow::Error> {
+    let cmd = format!(
+        "squeue -j {} -r -h -o \"%T\" 2>/dev/null | grep -c RUNNING || true",
+        array_id
+    );
+    let res = client.execute(&cmd).await?;
+    let count: usize = res.stdout.trim().parse().unwrap_or(0);
+    Ok(count)
+}
+
 pub async fn delete_remote_files(
     client: &Client,
     paths: &[PathBuf],
@@ -980,6 +993,7 @@ enum Cmd {
         TBConfig,
         tokio::sync::oneshot::Sender<anyhow::Result<String>>,
     ),
+    PollJobStatus(usize, String),
 }
 
 enum Event {
@@ -990,6 +1004,7 @@ enum Event {
     RemoteResult(String, Result<bool, String>),
     RunTbProfilerResult(String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(String, Result<String, String>),
+    JobStatusUpdate(String, usize, usize),
 }
 
 #[derive(Clone, Debug)]
@@ -1603,6 +1618,48 @@ impl Russh {
                             let result = delete_tbprofiler_results(&client, tb_config).await;
                             let _ = result_tx.send(result);
                         }
+                        Cmd::PollJobStatus(array_id, uri) => {
+                            let remote_file = match uri.parse::<RemoteFile>() {
+                                Ok(rf) => rf,
+                                Err(e) => {
+                                    log::warn!("PollJobStatus: invalid URI {uri}: {e}");
+                                    continue;
+                                }
+                            };
+                            let client = {
+                                let read = clients.read().await;
+                                read.get(remote_file.host.as_str()).cloned()
+                            };
+                            let client = match client {
+                                Some(c) => c,
+                                None => {
+                                    log::warn!("PollJobStatus: no client for host {}", remote_file.host);
+                                    continue;
+                                }
+                            };
+                            let event_tx = event_tx.clone();
+                            tokio::spawn(async move {
+                                loop {
+                                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                                    let running = match poll_running_tasks(&client, array_id).await {
+                                        Ok(n) => n,
+                                        Err(e) => {
+                                            log::warn!("Failed to poll job {array_id}: {e}");
+                                            break;
+                                        }
+                                    };
+                                    if event_tx
+                                        .send(Event::JobStatusUpdate(uri.clone(), array_id, running))
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                    if running == 0 {
+                                        break;
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
             });
@@ -1777,6 +1834,13 @@ impl Connector for Russh {
         )
     }
 
+    fn poll_job_status(&self, job_id: usize, uri: String) -> Task<()> {
+        let command_tx = self.command_tx.clone();
+        Task::future(async move {
+            command_tx.send(Cmd::PollJobStatus(job_id, uri)).unwrap();
+        })
+    }
+
     fn delete_tb_profiler_results(&self, uri: String, tb_config: TBConfig) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
@@ -1850,6 +1914,10 @@ impl Connector for Russh {
                                     .unwrap(),
                                 Event::DeleteRemoteFilesResult(uri, res) => output
                                     .send(ClientMessage::DeleteRemoteFilesResult(uri, res))
+                                    .await
+                                    .unwrap(),
+                                Event::JobStatusUpdate(uri, array_id, running_tasks) => output
+                                    .send(ClientMessage::JobStatusUpdate(uri, array_id, running_tasks))
                                     .await
                                     .unwrap(),
                             }

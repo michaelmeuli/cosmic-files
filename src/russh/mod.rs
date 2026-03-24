@@ -129,6 +129,7 @@ pub enum ClientMessage {
     RemoteResult(String, Result<bool, String>),
     RunTbProfilerResult(String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(String, Result<String, String>),
+    JobStatusUpdate(String, usize, usize),
 }
 
 pub trait Connector: Send + Sync {
@@ -153,6 +154,7 @@ pub trait Connector: Send + Sync {
     ) -> Task<()>;
     fn delete_remote_files(&self, paths: Box<[PathBuf]>, uris: Vec<String>) -> Task<()>;
     fn delete_tb_profiler_results(&self, uri: String, tb_config: TBConfig) -> Task<()>;
+    fn poll_job_status(&self, job_id: usize, uri: String) -> Task<()>;
     fn subscription(&self) -> Subscription<ClientMessage>;
 }
 
