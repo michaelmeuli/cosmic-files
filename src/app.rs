@@ -4116,8 +4116,10 @@ impl Application for App {
             Message::JobStatusUpdate(_client_key, _uri, array_id, running_tasks) => {
                 log::info!("Job {array_id} running tasks: {running_tasks}");
                 if running_tasks == 0 {
-                    self.state.running_jobs.remove(&array_id);
-                    self.state.job_total_tasks.remove(&array_id);
+                    // self.state.running_jobs.remove(&array_id);
+                    // self.state.job_total_tasks.remove(&array_id);
+                    self.state.running_jobs.clear();
+                    self.state.job_total_tasks.clear();
                 } else {
                     self.state.running_jobs.insert(array_id, running_tasks);
                 }
