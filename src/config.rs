@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     FxOrderMap,
     app::App,
-    russh::SlurmJobId,
     tab::{HeadingOptions, Location, View},
 };
 
