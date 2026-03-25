@@ -1619,6 +1619,7 @@ impl Russh {
                             let _ = result_tx.send(result);
                         }
                         Cmd::PollJobStatus(array_id, uri) => {
+                            log::info!("PollJobStatus: received command for job_id={array_id} uri={uri}");
                             let remote_file = match uri.parse::<RemoteFile>() {
                                 Ok(rf) => rf,
                                 Err(e) => {
@@ -1626,6 +1627,7 @@ impl Russh {
                                     continue;
                                 }
                             };
+                            log::info!("PollJobStatus: resolved host={}", remote_file.host);
                             let client = {
                                 let read = clients.read().await;
                                 read.get(remote_file.host.as_str()).cloned()
@@ -1637,10 +1639,14 @@ impl Russh {
                                     continue;
                                 }
                             };
+                            log::info!("PollJobStatus: found client for host={}, spawning poll loop for job_id={array_id}", remote_file.host);
                             let event_tx = event_tx.clone();
                             tokio::spawn(async move {
+                                log::info!("PollJobStatus: poll loop started for job_id={array_id}");
                                 loop {
+                                    log::info!("PollJobStatus: sleeping 30s before next poll for job_id={array_id}");
                                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                                    log::info!("PollJobStatus: polling running tasks for job_id={array_id}");
                                     let running = match poll_running_tasks(&client, array_id).await {
                                         Ok(n) => n,
                                         Err(e) => {
@@ -1648,16 +1654,20 @@ impl Russh {
                                             break;
                                         }
                                     };
+                                    log::info!("PollJobStatus: job_id={array_id} has {running} running tasks");
                                     if event_tx
                                         .send(Event::JobStatusUpdate(uri.clone(), array_id, running))
                                         .is_err()
                                     {
+                                        log::warn!("PollJobStatus: event_tx send failed for job_id={array_id}, stopping poll loop");
                                         break;
                                     }
                                     if running == 0 {
+                                        log::info!("PollJobStatus: job_id={array_id} completed (0 running tasks), stopping poll loop");
                                         break;
                                     }
                                 }
+                                log::info!("PollJobStatus: poll loop exited for job_id={array_id}");
                             });
                         }
                     }
@@ -1835,9 +1845,12 @@ impl Connector for Russh {
     }
 
     fn poll_job_status(&self, job_id: usize, uri: String) -> Task<()> {
+        log::info!("poll_job_status: invoked with job_id={job_id} uri={uri}");
         let command_tx = self.command_tx.clone();
         Task::future(async move {
+            log::info!("poll_job_status: sending Cmd::PollJobStatus job_id={job_id} uri={uri}");
             command_tx.send(Cmd::PollJobStatus(job_id, uri)).unwrap();
+            log::info!("poll_job_status: Cmd::PollJobStatus sent successfully for job_id={job_id}");
         })
     }
 
