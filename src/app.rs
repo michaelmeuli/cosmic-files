@@ -855,7 +855,7 @@ pub struct App {
     file_dialog_opt: Option<Dialog<Message>>,
     clipboard_cache: ClipboardCache,
     /// Maps array_id -> current running task count (updated by poll)
-    running_jobs: std::collections::HashMap<usize, usize>,
+    running_tasks: std::collections::HashMap<usize, usize>,
     /// Maps array_id -> total task count (set once on job submission, never overwritten)
     job_total_tasks: std::collections::HashMap<usize, usize>,
 }
@@ -2609,7 +2609,7 @@ impl Application for App {
             auto_scroll_speed: None,
             file_dialog_opt: None,
             clipboard_cache: ClipboardCache::Empty,
-            running_jobs: std::collections::HashMap::new(),
+            running_tasks: std::collections::HashMap::new(),
             job_total_tasks: std::collections::HashMap::new(),
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             layer_sizes: FxHashMap::default(),
@@ -4075,7 +4075,7 @@ impl Application for App {
                 match res {
                     Ok(slurm_job_id) => {
                         log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}, running={}", slurm_job_id.array_id, slurm_job_id.tasks, slurm_job_id.running_tasks);
-                        self.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
+                        self.running_tasks.insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
                         self.job_total_tasks.insert(slurm_job_id.array_id, slurm_job_id.tasks);
                         let poll_task = CLIENTS
                             .get(&client_key)
@@ -4122,10 +4122,10 @@ impl Application for App {
             Message::JobStatusUpdate(_client_key, _uri, array_id, running_tasks) => {
                 log::info!("Job {array_id} running tasks: {running_tasks}");
                 if running_tasks == 0 {
-                    self.running_jobs.clear();
-                    self.job_total_tasks.clear();
+                    self.running_tasks.remove(&array_id);
+                    self.job_total_tasks.remove(&array_id);
                 } else {
-                    self.running_jobs.insert(array_id, running_tasks);
+                    self.running_tasks.insert(array_id, running_tasks);
                 }
                 return Task::none();
             }
@@ -7035,7 +7035,7 @@ impl Application for App {
     }
 
     fn footer(&self) -> Option<Element<'_, Message>> {
-        if self.progress_operations.is_empty() && self.running_jobs.is_empty() {
+        if self.progress_operations.is_empty() && self.running_tasks.is_empty() {
             return None;
         }
 
@@ -7149,11 +7149,11 @@ impl Application for App {
         }
 
         // Slurm job progress section
-        if !self.running_jobs.is_empty() {
+        if !self.running_tasks.is_empty() {
             if !children.is_empty() {
                 children.push(widget::space::vertical().height(space_s).into());
             }
-            let total_running: usize = self.running_jobs.values().sum();
+            let total_running: usize = self.running_tasks.values().sum();
             let total_tasks: usize = self.job_total_tasks.values().sum();
             let completed = total_tasks.saturating_sub(total_running);
             let progress = if total_tasks > 0 {
@@ -7161,9 +7161,9 @@ impl Application for App {
             } else {
                 0.0
             };
-            let job_count = self.running_jobs.len();
+            let job_count = self.running_tasks.len();
             let title = if job_count == 1 {
-                let array_id = self.running_jobs.keys().next().copied().unwrap_or(0);
+                let array_id = self.running_tasks.keys().next().copied().unwrap_or(0);
                 format!(
                     "Job {array_id}: {completed}/{total_tasks} tasks completed ({total_running} running)"
                 )
