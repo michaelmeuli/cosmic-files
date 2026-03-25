@@ -7035,7 +7035,7 @@ impl Application for App {
     }
 
     fn footer(&self) -> Option<Element<'_, Message>> {
-        if self.progress_operations.is_empty() {
+        if self.progress_operations.is_empty() && self.running_jobs.is_empty() {
             return None;
         }
 
@@ -7043,106 +7043,150 @@ impl Application for App {
             space_xs, space_s, ..
         } = theme::active().cosmic().spacing;
 
-        let mut title = String::new();
-        let mut total_progress = 0.0;
-        let mut count = 0;
-        let mut all_paused = true;
-        for (op, controller) in self.pending_operations.values() {
-            if !controller.is_paused() {
-                all_paused = false;
-            }
-            if op.show_progress_notification() {
-                let progress = controller.progress();
-                if title.is_empty() {
-                    title = op.pending_text(progress, controller.state());
-                }
-                total_progress += progress;
-                count += 1;
-            }
-        }
-        let running = count;
-        // Adjust the progress bar so it does not jump around when operations finish
-        for id in &self.progress_operations {
-            if self.complete_operations.contains_key(id) {
-                total_progress += 1.0;
-                count += 1;
-            }
-        }
-        let finished = count - running;
-        total_progress /= count as f32;
-        if running >= 1 && (running > 1 || finished > 0) {
-            if finished > 0 {
-                title = fl!(
-                    "operations-running-finished",
-                    running = running,
-                    finished = finished,
-                    percent = ((total_progress * 100.0) as i32)
-                );
-            } else {
-                title = fl!(
-                    "operations-running",
-                    running = running,
-                    percent = ((total_progress * 100.0) as i32)
-                );
-            }
-        }
-
-        //TODO: get height from theme?
         let progress_bar_height = Length::Fixed(4.0);
-        let progress_bar =
-            widget::progress_bar(0.0..=1.0, total_progress).girth(progress_bar_height);
+        let mut children: Vec<Element<'_, Message>> = Vec::new();
 
-        let container = widget::layer_container(widget::column::with_children([
-            widget::row::with_children([
-                progress_bar.into(),
-                if all_paused {
-                    widget::tooltip(
-                        widget::button::icon(icon::from_name("media-playback-start-symbolic"))
-                            .on_press(Message::PendingPauseAll(false))
-                            .padding(8),
-                        widget::text::body(fl!("resume")),
-                        widget::tooltip::Position::Top,
-                    )
-                    .into()
+        // File operations section
+        if !self.progress_operations.is_empty() {
+            let mut title = String::new();
+            let mut total_progress = 0.0;
+            let mut count = 0;
+            let mut all_paused = true;
+            for (op, controller) in self.pending_operations.values() {
+                if !controller.is_paused() {
+                    all_paused = false;
+                }
+                if op.show_progress_notification() {
+                    let progress = controller.progress();
+                    if title.is_empty() {
+                        title = op.pending_text(progress, controller.state());
+                    }
+                    total_progress += progress;
+                    count += 1;
+                }
+            }
+            let running = count;
+            // Adjust the progress bar so it does not jump around when operations finish
+            for id in &self.progress_operations {
+                if self.complete_operations.contains_key(id) {
+                    total_progress += 1.0;
+                    count += 1;
+                }
+            }
+            let finished = count - running;
+            total_progress /= count as f32;
+            if running >= 1 && (running > 1 || finished > 0) {
+                if finished > 0 {
+                    title = fl!(
+                        "operations-running-finished",
+                        running = running,
+                        finished = finished,
+                        percent = ((total_progress * 100.0) as i32)
+                    );
                 } else {
+                    title = fl!(
+                        "operations-running",
+                        running = running,
+                        percent = ((total_progress * 100.0) as i32)
+                    );
+                }
+            }
+
+            let progress_bar =
+                widget::progress_bar(0.0..=1.0, total_progress).girth(progress_bar_height);
+
+            children.push(
+                widget::row::with_children([
+                    progress_bar.into(),
+                    if all_paused {
+                        widget::tooltip(
+                            widget::button::icon(icon::from_name("media-playback-start-symbolic"))
+                                .on_press(Message::PendingPauseAll(false))
+                                .padding(8),
+                            widget::text::body(fl!("resume")),
+                            widget::tooltip::Position::Top,
+                        )
+                        .into()
+                    } else {
+                        widget::tooltip(
+                            widget::button::icon(icon::from_name("media-playback-pause-symbolic"))
+                                .on_press(Message::PendingPauseAll(true))
+                                .padding(8),
+                            widget::text::body(fl!("pause")),
+                            widget::tooltip::Position::Top,
+                        )
+                        .into()
+                    },
                     widget::tooltip(
-                        widget::button::icon(icon::from_name("media-playback-pause-symbolic"))
-                            .on_press(Message::PendingPauseAll(true))
+                        widget::button::icon(icon::from_name("window-close-symbolic"))
+                            .on_press(Message::PendingCancelAll)
                             .padding(8),
-                        widget::text::body(fl!("pause")),
+                        widget::text::body(fl!("cancel")),
                         widget::tooltip::Position::Top,
                     )
-                    .into()
-                },
-                widget::tooltip(
-                    widget::button::icon(icon::from_name("window-close-symbolic"))
-                        .on_press(Message::PendingCancelAll)
-                        .padding(8),
-                    widget::text::body(fl!("cancel")),
-                    widget::tooltip::Position::Top,
-                )
+                    .into(),
+                ])
+                .align_y(Alignment::Center)
                 .into(),
-            ])
-            .align_y(Alignment::Center)
-            .into(),
-            widget::text::body(title).into(),
-            widget::space::vertical().height(space_s).into(),
-            widget::row::with_children([
-                widget::button::link(fl!("details"))
-                    .on_press(Message::ToggleContextPage(ContextPage::EditHistory))
-                    .padding(0)
-                    .trailing_icon(true)
+            );
+            children.push(widget::text::body(title).into());
+            children.push(widget::space::vertical().height(space_s).into());
+            children.push(
+                widget::row::with_children([
+                    widget::button::link(fl!("details"))
+                        .on_press(Message::ToggleContextPage(ContextPage::EditHistory))
+                        .padding(0)
+                        .trailing_icon(true)
+                        .into(),
+                    widget::space::horizontal().into(),
+                    widget::button::standard(fl!("dismiss"))
+                        .on_press(Message::PendingDismiss)
+                        .into(),
+                ])
+                .align_y(Alignment::Center)
+                .into(),
+            );
+        }
+
+        // Slurm job progress section
+        if !self.running_jobs.is_empty() {
+            if !children.is_empty() {
+                children.push(widget::space::vertical().height(space_s).into());
+            }
+            let total_running: usize = self.running_jobs.values().sum();
+            let total_tasks: usize = self.job_total_tasks.values().sum();
+            let completed = total_tasks.saturating_sub(total_running);
+            let progress = if total_tasks > 0 {
+                completed as f32 / total_tasks as f32
+            } else {
+                0.0
+            };
+            let job_count = self.running_jobs.len();
+            let title = if job_count == 1 {
+                let array_id = self.running_jobs.keys().next().copied().unwrap_or(0);
+                format!(
+                    "Job {array_id}: {completed}/{total_tasks} tasks completed ({total_running} running)"
+                )
+            } else {
+                format!(
+                    "{job_count} jobs: {completed}/{total_tasks} tasks completed ({total_running} running)"
+                )
+            };
+
+            let progress_bar =
+                widget::progress_bar(0.0..=1.0, progress).girth(progress_bar_height);
+
+            children.push(
+                widget::row::with_children([progress_bar.into()])
+                    .align_y(Alignment::Center)
                     .into(),
-                widget::space::horizontal().into(),
-                widget::button::standard(fl!("dismiss"))
-                    .on_press(Message::PendingDismiss)
-                    .into(),
-            ])
-            .align_y(Alignment::Center)
-            .into(),
-        ]))
-        .padding([8, space_xs])
-        .layer(cosmic_theme::Layer::Primary);
+            );
+            children.push(widget::text::body(title).into());
+        }
+
+        let container = widget::layer_container(widget::column::with_children(children))
+            .padding([8, space_xs])
+            .layer(cosmic_theme::Layer::Primary);
 
         Some(container.into())
     }
