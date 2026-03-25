@@ -793,12 +793,19 @@ async fn poll_running_tasks(
     client: &Client,
     array_id: usize,
 ) -> Result<usize, anyhow::Error> {
+    log::info!("poll_running_tasks: querying squeue for job_id={array_id}");
     let cmd = format!(
         "squeue -j {} -r -h -o \"%T\" 2>/dev/null | grep -c RUNNING || true",
         array_id
     );
     let res = client.execute(&cmd).await?;
+    log::info!(
+        "poll_running_tasks: squeue exit_status={} stdout={:?} for job_id={array_id}",
+        res.exit_status,
+        res.stdout.trim()
+    );
     let count: usize = res.stdout.trim().parse().unwrap_or(0);
+    log::info!("poll_running_tasks: job_id={array_id} running_count={count}");
     Ok(count)
 }
 
