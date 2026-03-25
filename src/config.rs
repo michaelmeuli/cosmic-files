@@ -120,7 +120,10 @@ pub enum TypeToSearch {
 #[serde(default)]
 pub struct State {
     pub sort_names: FxOrderMap<String, (HeadingOptions, bool)>,
+    /// Maps array_id -> current running task count (updated by poll)
     pub running_jobs: std::collections::HashMap<usize, usize>,
+    /// Maps array_id -> total task count (set once on job submission, never overwritten)
+    pub job_total_tasks: std::collections::HashMap<usize, usize>,
 }
 
 impl Default for State {
@@ -133,6 +136,7 @@ impl Default for State {
                 )
             })),
             running_jobs: std::collections::HashMap::new(),
+            job_total_tasks: std::collections::HashMap::new(),
         }
     }
 }

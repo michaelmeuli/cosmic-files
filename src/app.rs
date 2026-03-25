@@ -4069,7 +4069,8 @@ impl Application for App {
                 match res {
                     Ok(slurm_job_id) => {
                         log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}, running={}", slurm_job_id.array_id, slurm_job_id.tasks, slurm_job_id.running_tasks);
-                        self.state.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.tasks);
+                        self.state.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
+                        self.state.job_total_tasks.insert(slurm_job_id.array_id, slurm_job_id.tasks);
                         let poll_task = CLIENTS
                             .get(&client_key)
                             .map(|c| c.poll_job_status(slurm_job_id.array_id, uri.clone()).map(|()| cosmic::action::none()))
@@ -4116,6 +4117,7 @@ impl Application for App {
                 log::info!("Job {array_id} running tasks: {running_tasks}");
                 if running_tasks == 0 {
                     self.state.running_jobs.remove(&array_id);
+                    self.state.job_total_tasks.remove(&array_id);
                 } else {
                     self.state.running_jobs.insert(array_id, running_tasks);
                 }
