@@ -854,6 +854,10 @@ pub struct App {
     auto_scroll_speed: Option<i16>,
     file_dialog_opt: Option<Dialog<Message>>,
     clipboard_cache: ClipboardCache,
+    /// Maps array_id -> current running task count (updated by poll)
+    running_jobs: std::collections::HashMap<usize, usize>,
+    /// Maps array_id -> total task count (set once on job submission, never overwritten)
+    job_total_tasks: std::collections::HashMap<usize, usize>,
 }
 
 impl App {
@@ -2605,6 +2609,8 @@ impl Application for App {
             auto_scroll_speed: None,
             file_dialog_opt: None,
             clipboard_cache: ClipboardCache::Empty,
+            running_jobs: std::collections::HashMap::new(),
+            job_total_tasks: std::collections::HashMap::new(),
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             layer_sizes: FxHashMap::default(),
         };
@@ -4069,8 +4075,8 @@ impl Application for App {
                 match res {
                     Ok(slurm_job_id) => {
                         log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}, running={}", slurm_job_id.array_id, slurm_job_id.tasks, slurm_job_id.running_tasks);
-                        self.state.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
-                        self.state.job_total_tasks.insert(slurm_job_id.array_id, slurm_job_id.tasks);
+                        self.running_jobs.insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
+                        self.job_total_tasks.insert(slurm_job_id.array_id, slurm_job_id.tasks);
                         let poll_task = CLIENTS
                             .get(&client_key)
                             .map(|c| c.poll_job_status(slurm_job_id.array_id, uri.clone()).map(|()| cosmic::action::none()))
@@ -4116,10 +4122,10 @@ impl Application for App {
             Message::JobStatusUpdate(_client_key, _uri, array_id, running_tasks) => {
                 log::info!("Job {array_id} running tasks: {running_tasks}");
                 if running_tasks == 0 {
-                    self.state.running_jobs.remove(&array_id);
-                    self.state.job_total_tasks.remove(&array_id);
+                    self.running_jobs.clear();
+                    self.job_total_tasks.clear();
                 } else {
-                    self.state.running_jobs.insert(array_id, running_tasks);
+                    self.running_jobs.insert(array_id, running_tasks);
                 }
                 return Task::none();
             }
