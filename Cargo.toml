@@ -8,9 +8,10 @@ rust-version = "1.90"
 
 [dependencies]
 anyhow = "1"
-chrono = { version = "0.4", features = ["unstable-locales"] }
+jiff = "0.2"
+jiff-icu = "0.2"
 icu = { version = "2.1.1", features = ["compiled_data"] }
-cctk = { git = "https://github.com/pop-os/cosmic-protocols", package = "cosmic-client-toolkit", rev = "d0e95be", optional = true }
+cctk = { git = "https://github.com/pop-os/cosmic-protocols", package = "cosmic-client-toolkit", rev = "160b086", optional = true }
 cosmic-mime-apps = { git = "https://github.com/pop-os/cosmic-mime-apps.git", optional = true }
 dirs = "6.0.0"
 env_logger = "0.11"
@@ -42,7 +43,7 @@ xdg-mime = { git = "https://github.com/ebassi/xdg-mime-rs" }
 bzip2 = { version = "0.6", optional = true }           #TODO: replace with pure Rust crate
 flate2 = "1.1"
 tar = "0.4.44"
-lzma-rust2 = { version = "0.15.7", optional = true }
+lzma-rust2 = { version = "0.16", optional = true }
 ordermap = { version = "1.1.0", features = ["serde"] }
 # Internationalization
 i18n-embed = { version = "0.16", features = [
@@ -133,7 +134,7 @@ inherits = "release"
 debug = true
 
 [target.'cfg(unix)'.dependencies]
-fork = "0.6"
+fork = "0.7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"

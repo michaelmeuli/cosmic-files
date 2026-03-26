@@ -818,7 +818,7 @@ impl App {
                 };
 
                 search_location.map(|search_location| {
-                    return (
+                    (
                         Location::Search(
                             search_location,
                             term,
@@ -826,7 +826,7 @@ impl App {
                             Instant::now(),
                         ),
                         true,
-                    );
+                    )
                 })
             }
             None => match &self.tab.location {
