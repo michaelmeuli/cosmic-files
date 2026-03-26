@@ -1,4 +1,3 @@
-use chrono::{Datelike, Timelike, Utc};
 #[cfg(not(windows))]
 use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use cosmic::{
