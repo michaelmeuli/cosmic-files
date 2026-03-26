@@ -1452,7 +1452,7 @@ impl App {
                     };
 
                     search_location.map(|search_location| {
-                        return (
+                        (
                             Location::Search(
                                 search_location,
                                 term,
@@ -1460,7 +1460,7 @@ impl App {
                                 Instant::now(),
                             ),
                             true,
-                        );
+                        )
                     })
                 }
                 None => match &tab.location {
@@ -2781,7 +2781,12 @@ impl Application for App {
                     tab.refresh_cut(&[]);
                 }
                 let paths = self.selected_paths(entity_opt);
-                let contents = ClipboardCopy::new(ClipboardKind::Copy, paths);
+                self.clipboard_cache = ClipboardCache::Files(ClipboardPaste {
+                    paths: paths.map(|p| p.to_path_buf()).collect(),
+                    kind: ClipboardKind::Copy,
+                });
+                let contents =
+                    ClipboardCopy::new(ClipboardKind::Copy, self.selected_paths(entity_opt));
                 return clipboard::write_data(contents);
             }
             Message::CopyPath(entity_opt) => {
@@ -2822,7 +2827,15 @@ impl Application for App {
             Message::Cut(entity_opt) => {
                 self.set_cut(entity_opt);
                 let paths = self.selected_paths(entity_opt);
-                let contents = ClipboardCopy::new(ClipboardKind::Cut { is_dnd: false }, paths);
+                self.clipboard_cache = ClipboardCache::Files(ClipboardPaste {
+                    paths: paths.map(|p| p.to_path_buf()).collect(),
+                    kind: ClipboardKind::Cut { is_dnd: false },
+                });
+                let contents = ClipboardCopy::new(
+                    ClipboardKind::Cut { is_dnd: false },
+                    self.selected_paths(entity_opt),
+                );
+
                 return clipboard::write_data(contents);
             }
             Message::CloseToast(id) => {
@@ -3827,10 +3840,10 @@ impl Application for App {
                 // Check if clipboard has any paste-able content and cache it
                 return clipboard::read_data::<ClipboardPaste>().map(|contents_opt| {
                     match contents_opt {
-                        Some(contents) => cosmic::action::app(Message::ClipboardCached(
-                            ClipboardCache::Files(contents),
-                        )),
-                        None => cosmic::action::app(Message::CheckClipboardImage),
+                        Some(contents) if !contents.paths.is_empty() => cosmic::action::app(
+                            Message::ClipboardCached(ClipboardCache::Files(contents)),
+                        ),
+                        _ => cosmic::action::app(Message::CheckClipboardImage),
                     }
                 });
             }
@@ -6194,11 +6207,11 @@ impl Application for App {
                         .button_height(32)
                         .button_spacing(space_xxs)
                         .enable_tab_drag(String::from("x-cosmic-files/tab-dnd"))
-                        .on_reorder(move |event| Message::ReorderTab(event))
+                        .on_reorder(Message::ReorderTab)
                         .tab_drag_threshold(25.)
                         .on_activate(Message::TabActivate)
                         .on_close(|entity| Message::TabClose(Some(entity)))
-                        .on_dnd_enter(|entity, mimes| Message::DndEnterTab(entity, mimes))
+                        .on_dnd_enter(Message::DndEnterTab)
                         .on_dnd_leave(|_| Message::DndExitTab)
                         .on_dnd_drop(|entity, data, action| {
                             Message::DndDropTab(entity, data, action)
