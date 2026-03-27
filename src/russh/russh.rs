@@ -159,7 +159,6 @@ async fn remote_sftp_list(
     client: &Client,
     uri: &str,
     sizes: IconSizes,
-    show_as_samples: bool,
 ) -> Result<Vec<tab::Item>, String> {
     log::info!("Listing remote directory: {}", uri);
     let mut remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
@@ -213,7 +212,11 @@ async fn remote_sftp_list(
         let child_uri = url.to_string();
         let location = Location::Remote(child_uri.clone(), name.clone(), Some(new_path.clone()));
 
-        if show_as_samples && file_type == FileType::File {
+        // Always register .results.* files in the samples map for grouped items,
+        // but also add them individually (is_raw_sample_file = true) so the
+        // display layer can toggle without a rescan.
+        let mut is_raw_sample_file = false;
+        if file_type == FileType::File {
             if let Some((sample_id, suffix)) = name.split_once(".results.") {
                 let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
                     json: None,
@@ -235,7 +238,7 @@ async fn remote_sftp_list(
                     _ => {}
                 }
 
-                continue;
+                is_raw_sample_file = true;
             }
         }
 
@@ -292,6 +295,7 @@ async fn remote_sftp_list(
                 is_json,
                 json_opt,
                 is_tb_result: false,
+                is_raw_sample_file,
                 sample_json_path_opt: None,
                 sample_csv_path_opt: None,
                 sample_docx_path_opt: None,
@@ -398,6 +402,7 @@ async fn remote_sftp_list(
             is_json: true,
             json_opt,
             is_tb_result: true,
+            is_raw_sample_file: false,
             sample_json_path_opt: files.json.clone(),
             sample_csv_path_opt: files.csv.clone(),
             sample_docx_path_opt: files.docx.clone(),
@@ -518,6 +523,7 @@ async fn remote_sftp_parent(
             is_json: false,
             json_opt: None,
             is_tb_result: false,
+            is_raw_sample_file: false,
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
@@ -969,7 +975,6 @@ enum Cmd {
     RemoteScan(
         String,
         IconSizes,
-        bool,
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
     RemoteParent(String, IconSizes, mpsc::Sender<Result<tab::Item, String>>),
@@ -1249,7 +1254,7 @@ impl Russh {
                                 }
                             }
                         }
-                        Cmd::RemoteScan(uri, sizes, show_as_samples, items_tx) => {
+                        Cmd::RemoteScan(uri, sizes, items_tx) => {
                             log::info!("RemoteScan for URI: {}", uri);
                             let remote_file =
                                 match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
@@ -1281,7 +1286,7 @@ impl Russh {
                             };
                             if let Some(client) = existing_client {
                                 let result =
-                                    remote_sftp_list(&client, &norm_uri, sizes, show_as_samples)
+                                    remote_sftp_list(&client, &norm_uri, sizes)
                                         .await;
                                 let _ = items_tx.send(result).await;
                             } else {
@@ -1316,7 +1321,6 @@ impl Russh {
                                             &client,
                                             &norm_uri,
                                             sizes,
-                                            show_as_samples,
                                         )
                                         .await;
                                         let _ = items_tx.send(result).await;
@@ -1752,14 +1756,12 @@ impl Connector for Russh {
         &self,
         uri: &str,
         sizes: IconSizes,
-        show_as_samples: bool,
     ) -> Option<Result<Vec<tab::Item>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
 
         if let Err(e) = self.command_tx.send(Cmd::RemoteScan(
             uri.to_string(),
             sizes,
-            show_as_samples,
             items_tx,
         )) {
             log::error!(

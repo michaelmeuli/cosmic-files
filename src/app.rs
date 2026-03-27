@@ -1463,11 +1463,10 @@ impl App {
         let icon_sizes = self.config.tab.icon_sizes;
         let mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
-        let show_as_samples = self.config.tab.show_as_samples;
 
         Task::future(async move {
             let location2 = location.clone();
-            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes, show_as_samples)).await {
+            match tokio::task::spawn_blocking(move || location2.scan(icon_sizes)).await {
                 Ok((parent_item_opt, mut items)) => {
                     #[cfg(feature = "gvfs")]
                     {
@@ -5356,10 +5355,9 @@ impl Application for App {
 
                 let mut paths = Vec::with_capacity(recently_trashed.len());
                 let icon_sizes = self.config.tab.icon_sizes;
-                let show_as_samples = self.config.tab.show_as_samples;
 
                 return cosmic::task::future(async move {
-                    match tokio::task::spawn_blocking(move || Location::Trash.scan(icon_sizes, show_as_samples))
+                    match tokio::task::spawn_blocking(move || Location::Trash.scan(icon_sizes))
                         .await
                     {
                         Ok((_parent_item_opt, items)) => {

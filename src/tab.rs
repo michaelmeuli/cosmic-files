@@ -1408,9 +1408,9 @@ pub fn scan_network(uri: &str, sizes: IconSizes) -> Vec<Item> {
     Vec::new()
 }
 
-pub fn scan_remote(uri: &str, sizes: IconSizes, show_as_samples: bool) -> Vec<Item> {
+pub fn scan_remote(uri: &str, sizes: IconSizes) -> Vec<Item> {
     for (_key, client) in CLIENTS.iter() {
-        match client.remote_scan(uri, sizes, show_as_samples) {
+        match client.remote_scan(uri, sizes) {
             Some(Ok(items)) => return items,
             Some(Err(err)) => {
                 log::warn!("failed to scan remote {:?}: {}", uri, err);
@@ -1791,7 +1791,7 @@ impl Location {
         }
     }
 
-    pub fn scan(&self, sizes: IconSizes, show_as_samples: bool) -> (Option<Item>, Vec<Item>) {
+    pub fn scan(&self, sizes: IconSizes) -> (Option<Item>, Vec<Item>) {
         let items = match self {
             Self::Desktop(path, display, desktop_config) => {
                 scan_desktop(path, display, *desktop_config, sizes)
@@ -1804,7 +1804,7 @@ impl Location {
             Self::Trash => trash_helpers::scan_trash(sizes),
             Self::Recents => scan_recents(sizes),
             Self::Network(uri, _, _) => scan_network(uri, sizes),
-            Self::Remote(uri, _, _) => scan_remote(uri, sizes, show_as_samples),
+            Self::Remote(uri, _, _) => scan_remote(uri, sizes),
         };
         let parent_item_opt = match self {
             Self::Remote(uri, _, path_opt) => {
@@ -2081,6 +2081,7 @@ pub enum ItemMetadata {
         is_json: bool,
         json_opt: Option<TbProfilerJson>,
         is_tb_result: bool,
+        is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
@@ -2172,6 +2173,16 @@ impl ItemMetadata {
         match self {
             #[cfg(feature = "russh")]
             Self::RusshPath { is_tb_result, .. } => *is_tb_result,
+            _ => false,
+        }
+    }
+
+    pub fn is_sample(&self) -> bool {
+        match self {
+            #[cfg(feature = "russh")]
+            Self::RusshPath {
+                is_raw_sample_file, ..
+            } => *is_raw_sample_file,
             _ => false,
         }
     }
@@ -5833,6 +5844,7 @@ impl Tab {
         let TabConfig {
             show_hidden,
             show_susceptible,
+            show_as_samples,
             mut icon_sizes,
             ..
         } = self.config;
@@ -5922,6 +5934,16 @@ impl Tab {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     susceptible_hidden += 1;
+                    continue;
+                }
+                if item.metadata.is_sample() && show_as_samples {
+                    item.pos_opt.set(None);
+                    item.rect_opt.set(None);
+                    continue;
+                }
+                if item.metadata.is_tb_result() && !show_as_samples {
+                    item.pos_opt.set(None);
+                    item.rect_opt.set(None);
                     continue;
                 }
                 item.pos_opt.set(Some((row, col)));
@@ -6191,6 +6213,7 @@ impl Tab {
         let TabConfig {
             show_hidden,
             show_susceptible,
+            show_as_samples,
             icon_sizes,
             ..
         } = self.config;
@@ -6249,6 +6272,19 @@ impl Tab {
                     susceptible_hidden += 1;
                     continue;
                 }
+                // When show_as_samples is on, hide raw .results.* files (shown as grouped items).
+                // When show_as_samples is off, hide grouped sample items.
+                if item.metadata.is_sample() && show_as_samples {
+                    item.pos_opt.set(None);
+                    item.rect_opt.set(None);
+                    continue;
+                }
+                if item.metadata.is_tb_result() && !show_as_samples {
+                    item.pos_opt.set(None);
+                    item.rect_opt.set(None);
+                    continue;
+                }
+
 
                 if count > 0 {
                     column = column

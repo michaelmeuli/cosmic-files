@@ -140,7 +140,6 @@ pub trait Connector: Send + Sync {
         &self,
         uri: &str,
         sizes: IconSizes,
-        show_as_samples: bool,
     ) -> Option<Result<Vec<tab::Item>, String>>;
     fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>>;
     fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)>;
