@@ -1776,6 +1776,20 @@ impl Location {
                 *show_hidden,
                 *time,
             ),
+            Self::Remote(uri, ..) => {
+                if let Ok(mut url) = url::Url::parse(uri) {
+                    if let Some(path_str) = path.to_str() {
+                        url.set_path(path_str);
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("/")
+                            .to_string();
+                        return Self::Remote(url.to_string(), name, Some(path));
+                    }
+                }
+                self.clone()
+            }
 
             other => other.clone(),
         }
@@ -5755,14 +5769,100 @@ impl Tab {
                         .into(),
                 );
             }
-            Location::Remote(uri, display_name, path) => {
+            Location::Remote(uri, display_name, Some(path)) => {
+                let excess_str = "...";
+                let excess_width = text_width_body(excess_str);
+
+                // Extract "user@host" label from URI for the root `/` entry.
+                let host_label = if let Ok(url) = url::Url::parse(uri) {
+                    let host = url.host_str().unwrap_or("");
+                    let username = url.username();
+                    if username.is_empty() {
+                        host.to_string()
+                    } else {
+                        format!("{}@{}", username, host)
+                    }
+                } else {
+                    display_name.clone()
+                };
+
+                for (index, ancestor) in path.ancestors().enumerate() {
+                    let name = if ancestor == Path::new("/") {
+                        host_label.clone()
+                    } else {
+                        ancestor
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+
+                    let (name_width, name_text) = if children.is_empty() {
+                        (
+                            text_width_heading(&name),
+                            widget::text::heading(name)
+                                .wrapping(text::Wrapping::None)
+                                .ellipsize(text::Ellipsize::End(
+                                    text::EllipsizeHeightLimit::Lines(1),
+                                )),
+                        )
+                    } else {
+                        children.push(
+                            widget::icon::from_name("go-next-symbolic")
+                                .size(16)
+                                .icon()
+                                .into(),
+                        );
+                        w += 16.0;
+                        (
+                            text_width_body(&name),
+                            widget::text::body(name).wrapping(text::Wrapping::None),
+                        )
+                    };
+
+                    w += 2.0 * f32::from(space_xxxs);
+
+                    let mut button_row = widget::row::with_capacity(2)
+                        .align_y(Alignment::Center)
+                        .spacing(space_xxxs);
+                    let overflow_offset = 64.0;
+                    let overflow =
+                        w + name_width + overflow_offset > size.width && index > 0;
+                    if overflow {
+                        button_row = button_row.push(widget::text::body(excess_str));
+                        w += excess_width;
+                    } else {
+                        button_row = button_row.push(name_text);
+                        w += name_width;
+                    }
+
+                    let location = self.location.with_path(ancestor.to_path_buf());
+                    children.push(
+                        widget::button::custom(button_row)
+                            .padding(space_xxxs)
+                            .class(theme::Button::Link)
+                            .on_press(if ancestor == path.as_path() {
+                                Message::EditLocation(Some(self.location.clone().into()))
+                            } else {
+                                Message::Location(location)
+                            })
+                            .into(),
+                    );
+
+                    if ancestor == Path::new("/") || overflow {
+                        break;
+                    }
+                }
+                children.reverse();
+            }
+            Location::Remote(uri, display_name, None) => {
                 children.push(
                     widget::button::custom(widget::text::heading(display_name))
                         .padding(space_xxxs)
                         .on_press(Message::Location(Location::Remote(
                             uri.clone(),
                             display_name.clone(),
-                            path.clone(),
+                            None,
                         )))
                         .class(theme::Button::Text)
                         .into(),
