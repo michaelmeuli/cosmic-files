@@ -600,6 +600,7 @@ async fn perform_download(
     client: &Client,
     paths: Box<[PathBuf]>,
     to: PathBuf,
+    zip_output: Option<PathBuf>,
 ) -> Result<(), anyhow::Error> {
     let mut reserved = HashSet::new();
 
@@ -674,20 +675,22 @@ async fn perform_download(
             ));
         }
 
-        // Choose a local name: single dir → "<dirname>.zip", multiple → "folders.zip"
-        let zip_name = if dirs.len() == 1 {
-            format!(
-                "{}.zip",
-                dirs[0].file_name().unwrap().to_string_lossy()
-            )
+        // Use the user-chosen path when provided (SaveFile dialog), otherwise derive a name.
+        let local_target = if let Some(ref out) = zip_output {
+            out.clone()
         } else {
-            "folders.zip".to_string()
+            let zip_name = if dirs.len() == 1 {
+                format!("{}.zip", dirs[0].file_name().unwrap().to_string_lossy())
+            } else {
+                "folders.zip".to_string()
+            };
+            let zip_stem_path = PathBuf::from(&zip_name);
+            let mut t = to.join(&zip_name);
+            if t.try_exists().unwrap_or(false) || reserved.contains(&t) {
+                t = download_unique_path(&zip_stem_path, &to, &mut reserved);
+            }
+            t
         };
-        let zip_stem_path = PathBuf::from(&zip_name);
-        let mut local_target = to.join(&zip_name);
-        if local_target.try_exists().unwrap_or(false) || reserved.contains(&local_target) {
-            local_target = download_unique_path(&zip_stem_path, &to, &mut reserved);
-        }
         reserved.insert(local_target.clone());
 
         let dl_result = client
@@ -1083,6 +1086,7 @@ enum Cmd {
         Box<[PathBuf]>,
         Vec<String>,
         PathBuf,
+        Option<PathBuf>,
         tokio::sync::oneshot::Sender<anyhow::Result<()>>,
     ),
     RunTbProfiler(
@@ -1557,7 +1561,7 @@ impl Russh {
                             let _ = event_tx.send(Event::Changed);
                             log::info!("Disconnected from {}", item.host);
                         }
-                        Cmd::Download(paths, uris, path, result_tx) => {
+                        Cmd::Download(paths, uris, path, zip_output, result_tx) => {
                             let result: Result<(), anyhow::Error> = async {
                                 let remote_files: Vec<_> = uris
                                     .iter()
@@ -1580,7 +1584,7 @@ impl Russh {
                                     read.get(&host).cloned()
                                 }
                                 .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
-                                perform_download(&client, paths.clone(), path.clone()).await?;
+                                perform_download(&client, paths.clone(), path.clone(), zip_output.clone()).await?;
                                 Ok(())
                             }
                             .await;
@@ -1829,14 +1833,14 @@ impl Connector for Russh {
         )
     }
 
-    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf) -> Task<()> {
+    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> Task<()> {
         let command_tx = self.command_tx.clone();
         Task::perform(
             async move {
                 let (res_tx, res_rx) = tokio::sync::oneshot::channel();
 
                 command_tx
-                    .send(Cmd::Download(paths, uris, to, res_tx))
+                    .send(Cmd::Download(paths, uris, to, zip_output, res_tx))
                     .unwrap();
                 res_rx.await
             },

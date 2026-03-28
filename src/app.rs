@@ -752,7 +752,7 @@ pub enum WindowKind {
     Desktop(Entity),
     DesktopViewOptions,
     Dialogs(widget::Id),
-    DownloadDialog(Option<(Box<[PathBuf]>, Vec<String>)>),
+    DownloadDialog(Option<(Box<[PathBuf]>, Vec<String>, bool)>),
     FileDialog(Option<Box<[PathBuf]>>),
     Preview(Option<Entity>, PreviewKind),
 }
@@ -1142,10 +1142,45 @@ impl App {
 
     fn download_to(&mut self, paths: &[impl AsRef<Path>], uris: &Vec<String>) -> Task<Message> {
         if let Some(destination) = dirs::download_dir() {
+            // Count how many selected items are remote directories so we can
+            // offer a SaveFile dialog (with an editable zip name) when needed.
+            let entity = self.tab_model.active();
+            let dir_count = self
+                .tab_model
+                .data::<Tab>(entity)
+                .and_then(|tab| tab.items_opt())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|item| item.selected && item.metadata.is_dir())
+                        .count()
+                })
+                .unwrap_or(0);
+
+            let save_as_zip = dir_count > 0;
+            let dialog_kind = if save_as_zip {
+                let default_name = if dir_count == 1 {
+                    paths
+                        .iter()
+                        .find(|p| {
+                            // pick the one path that is a dir (best-effort by metadata)
+                            true
+                        })
+                        .and_then(|p| p.as_ref().file_name())
+                        .map(|n| format!("{}.zip", n.to_string_lossy()))
+                        .unwrap_or_else(|| "folder.zip".to_string())
+                } else {
+                    "folders.zip".to_string()
+                };
+                DialogKind::SaveFile {
+                    filename: default_name,
+                }
+            } else {
+                DialogKind::OpenFolder
+            };
+
             let (mut dialog, dialog_task) = Dialog::new(
-                DialogSettings::new()
-                    .kind(DialogKind::OpenFolder)
-                    .path(destination),
+                DialogSettings::new().kind(dialog_kind).path(destination),
                 Message::FileDialogMessage,
                 Message::DownloadToResult,
             );
@@ -1156,6 +1191,7 @@ impl App {
                 Window::new(WindowKind::DownloadDialog(Some((
                     paths.iter().map(|x| x.as_ref().to_path_buf()).collect(),
                     uris.iter().map(|x| x.to_string()).collect(),
+                    save_as_zip,
                 )))),
             );
             self.file_dialog_opt = Some(dialog);
@@ -3612,16 +3648,31 @@ impl Application for App {
                                 }
                             }
                         }
-                        if let Some((download_paths, download_uris)) = from_paths_and_uris {
+                        if let Some((download_paths, download_uris, save_as_zip)) =
+                            from_paths_and_uris
+                        {
                             if !selected_paths.is_empty() {
                                 self.file_dialog_opt = None;
-                                let to = selected_paths[0].clone();
+                                // When save_as_zip, selected_paths[0] is the full
+                                // "dir/name.zip" path chosen by the user; otherwise
+                                // it is the destination directory.
+                                let (to, zip_output) = if save_as_zip {
+                                    let full = selected_paths[0].clone();
+                                    let dir = full
+                                        .parent()
+                                        .map(Path::to_path_buf)
+                                        .unwrap_or_else(|| full.clone());
+                                    (dir, Some(full))
+                                } else {
+                                    (selected_paths[0].clone(), None)
+                                };
                                 for (_key, client) in CLIENTS.iter() {
                                     return client
                                         .download_file(
                                             download_paths.clone(),
                                             download_uris.clone(),
                                             to.clone(),
+                                            zip_output.clone(),
                                         )
                                         .map(|_| cosmic::action::none());
                                 }
