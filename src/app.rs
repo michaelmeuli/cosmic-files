@@ -5763,6 +5763,9 @@ impl Application for App {
                                     Location::Recents => {
                                         command.arg("--recents");
                                     }
+                                    Location::Remote(uri, ..) => {
+                                        command.arg(uri);
+                                    }
                                     _ => {
                                         log::error!(
                                             "unsupported location for open in new window: {location:?}"
