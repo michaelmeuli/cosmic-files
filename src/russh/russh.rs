@@ -393,7 +393,7 @@ async fn remote_sftp_list(
             }
         }
 
-        let location = Location::Remote(uri.clone().to_string(), sample_id.clone(), None);
+        let location = Location::Remote(uri.to_string(), sample_id.clone(), None);
 
         let metadata = ItemMetadata::RusshPath {
             mtime: files.mtime,

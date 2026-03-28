@@ -868,6 +868,14 @@ pub fn item_from_entry(
         }
     }
 
+    let json_opt = if !remote && !metadata.is_dir() && mime == mime::APPLICATION_JSON {
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    } else {
+        None
+    };
+
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
     Item {
@@ -878,6 +886,7 @@ pub fn item_from_entry(
         metadata: ItemMetadata::Path {
             metadata,
             children_opt,
+            json_opt,
         },
         hidden,
         location_opt: Some(Location::Path(path)),
@@ -2070,6 +2079,7 @@ pub enum ItemMetadata {
     Path {
         metadata: Metadata,
         children_opt: Option<usize>,
+        json_opt: Option<TbProfilerJson>,
     },
     Trash {
         metadata: trash::TrashItemMetadata,
@@ -2163,6 +2173,7 @@ impl ItemMetadata {
 
     pub fn is_json(&self) -> bool {
         match self {
+            Self::Path { json_opt, .. } => json_opt.is_some(),
             #[cfg(feature = "russh")]
             Self::RusshPath { is_json, .. } => *is_json,
             _ => false,
@@ -2170,13 +2181,17 @@ impl ItemMetadata {
     }
 
     pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
-        if let Self::RusshPath { json_opt, .. } = self {
-            *json_opt = json;
+        match self {
+            Self::Path { json_opt, .. } => *json_opt = json,
+            #[cfg(feature = "russh")]
+            Self::RusshPath { json_opt, .. } => *json_opt = json,
+            _ => {}
         }
     }
 
     pub fn is_json_opt(&self) -> bool {
         match self {
+            Self::Path { json_opt, .. } => json_opt.is_some(),
             #[cfg(feature = "russh")]
             Self::RusshPath { json_opt, .. } => json_opt.is_some(),
             _ => false,
@@ -2954,6 +2969,34 @@ impl Item {
         _mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
         _military_time: bool,
     ) -> Element<'a, Message> {
+        fn tb_variant_widget(v: &crate::russh::jsondata::DrVariant) -> Element<'static, Message> {
+            widget::container(
+                widget::column()
+                    .push({
+                        let mut drug_col = widget::column();
+                        for drug in &v.drugs {
+                            drug_col = drug_col
+                                .push(widget::text::body(format!("{}: {}", drug.drug, drug.confidence)));
+                        }
+                        drug_col
+                    })
+                    .push(widget::text::body(format!(
+                        "{} ({}): {}",
+                        v.gene_name, v.gene_id, v.change
+                    )))
+                    .push({
+                        let mut ecoli_col = widget::column();
+                        if let Some(ecoli_value) =
+                            TB_ECOLI_MAPPING.get(&(v.gene_name.clone(), v.change.clone()))
+                        {
+                            ecoli_col = ecoli_col
+                                .push(widget::text::body(format!("E. coli: {}", ecoli_value)));
+                        }
+                        ecoli_col
+                    }),
+            )
+            .into()
+        }
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -2963,102 +3006,60 @@ impl Item {
         let mut details = widget::column().spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        match &self.metadata {
+        let json_opt = match &self.metadata {
+            ItemMetadata::Path { json_opt, .. } => json_opt.as_ref(),
             #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { json_opt, .. } => {
-                column = column.push(details);
+            ItemMetadata::RusshPath { json_opt, .. } => json_opt.as_ref(),
+            _ => None,
+        };
 
-                if self.metadata.is_dir() {
-                    if let Some(_path) = self.path_opt() {
-                        if self.selected {
-                            column = column.push(
-                                widget::button::standard(fl!("open")).on_press(Message::Open(None)),
-                            );
-                        }
-                    }
-                } else {
-                    if let Some(json) = json_opt.clone() {
-                        column = column.push(widget::text::heading(format!(
-                            "DB: {} ({})",
-                            json.pipeline.db_version.name, json.pipeline.db_version.commit
-                        )));
-                        let mut dr_variants = json.dr_variants.clone();
-                        dr_variants.sort_by_key(|v| v.highest_confidence_rank());
-                        for v in &dr_variants {
-                            column = column.push(widget::container(
-                                widget::column()
-                                    .push({
-                                        let mut drug_col = widget::column();
-                                        for drug in &v.drugs {
-                                            drug_col = drug_col.push(widget::text::body(format!(
-                                                "{}: {}",
-                                                drug.drug, drug.confidence
-                                            )));
-                                        }
-                                        drug_col
-                                    })
-                                    .push(widget::text::body(format!(
-                                        "{} ({}): {}",
-                                        v.gene_name, v.gene_id, v.change
-                                    )))
-                                    .push({
-                                        let mut ecoli_col = widget::column();
-                                        if let Some(ecoli_value) = TB_ECOLI_MAPPING
-                                            .get(&(v.gene_name.clone(), v.change.clone()))
-                                        {
-                                            ecoli_col = ecoli_col.push(widget::text::body(
-                                                format!("E. coli: {}", ecoli_value),
-                                            ));
-                                        }
-                                        ecoli_col
-                                    }),
-                            ));
-                        }
-                    }
-                    if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
-                        log::info!(
-                            "item is remote, showing download button: {}",
-                            path.display()
-                        );
-                        if !self.metadata.is_tb_result() {
-                            column = column
-                                .push(widget::button::standard(fl!("download")).on_press(
-                                    Message::Download(Some((path.clone(), uri.clone()))),
-                                ));
-                        }
-                    }
-                    if let Some(Location::Remote(uri, _, _)) = &self.location_opt {
-                        if self.metadata.is_tb_result() {
-                            for (label, opt_path) in [
-                                ("Download .results.csv", self.metadata.csv_path()),
-                                ("Download .results.json", self.metadata.json_path()),
-                                ("Download .results.docx", self.metadata.docx_path()),
-                            ] {
-                                if let Some(p) = opt_path {
-                                    column = column.push(widget::button::standard(label).on_press(
-                                        Message::Download(Some((p.to_path_buf(), uri.clone()))),
-                                    ));
-                                }
-                            }
-                        }
-                    }
+        column = column.push(details);
+
+        #[cfg(feature = "russh")]
+        if let ItemMetadata::RusshPath { .. } = &self.metadata {
+            if self.metadata.is_dir() {
+                if self.selected {
+                    column = column
+                        .push(widget::button::standard(fl!("open")).on_press(Message::Open(None)));
+                }
+                return column.into();
+            }
+        }
+
+        if let Some(json) = json_opt {
+            column = column.push(widget::text::heading(format!(
+                "DB: {} ({})",
+                json.pipeline.db_version.name, json.pipeline.db_version.commit
+            )));
+            let mut dr_variants = json.dr_variants.clone();
+            dr_variants.sort_by_key(|v| v.highest_confidence_rank());
+            for v in &dr_variants {
+                column = column.push(tb_variant_widget(v));
+            }
+        }
+
+        #[cfg(feature = "russh")]
+        if let ItemMetadata::RusshPath { .. } = &self.metadata {
+            if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
+                log::info!("item is remote, showing download button: {}", path.display());
+                if !self.metadata.is_tb_result() {
+                    column = column.push(widget::button::standard(fl!("download")).on_press(
+                        Message::Download(Some((path.clone(), uri.clone()))),
+                    ));
                 }
             }
-            _ => {
-                if let Some(path) = self.path_opt()
-                    && let Ok(img) = image::image_dimensions(path)
-                {
-                    let (width, height) = img;
-                    details = details.push(widget::text::body(format!("{width}x{height}")));
-                }
-                column = column.push(details);
-
-                if let Some(path) = self.path_opt() {
-                    if self.selected {
-                        column = column.push(
-                            widget::button::standard(fl!("open"))
-                                .on_press(Message::Open(Some(path.clone()))),
-                        );
+            if let Some(Location::Remote(uri, _, _)) = &self.location_opt {
+                if self.metadata.is_tb_result() {
+                    for (label, opt_path) in [
+                        ("Download .results.csv", self.metadata.csv_path()),
+                        ("Download .results.json", self.metadata.json_path()),
+                        ("Download .results.docx", self.metadata.docx_path()),
+                    ] {
+                        if let Some(p) = opt_path {
+                            column = column.push(widget::button::standard(label).on_press(
+                                Message::Download(Some((p.to_path_buf(), uri.clone()))),
+                            ));
+                        }
                     }
                 }
             }
@@ -3081,6 +3082,7 @@ impl Item {
         if let ItemMetadata::Path {
             metadata,
             children_opt,
+            ..
         } = &self.metadata
         {
             if metadata.is_dir() {
@@ -5101,6 +5103,7 @@ impl Tab {
                         ItemMetadata::Path {
                             metadata,
                             children_opt,
+                            ..
                         } => {
                             if metadata.is_dir() {
                                 (true, children_opt.unwrap_or_default() as u64)
@@ -6429,6 +6432,7 @@ impl Tab {
                         ItemMetadata::Path {
                             metadata,
                             children_opt,
+                            ..
                         } => {
                             if metadata.is_dir() {
                                 //TODO: translate
