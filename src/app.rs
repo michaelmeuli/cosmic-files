@@ -5729,6 +5729,12 @@ impl Application for App {
                         }
                         Some(Location::Recents) => self.open_tab(Location::Recents, false, None),
                         Some(Location::Trash) => self.open_tab(Location::Trash, false, None),
+                        #[cfg(feature = "russh")]
+                        Some(Location::Remote(uri, name, path)) => self.open_tab(
+                            Location::Remote(uri.clone(), name.clone(), path.clone()),
+                            false,
+                            None,
+                        ),
                         _ => Task::none(),
                     };
 
