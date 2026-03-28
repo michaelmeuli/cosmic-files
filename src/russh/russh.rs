@@ -603,89 +603,119 @@ async fn perform_download(
 ) -> Result<(), anyhow::Error> {
     let mut reserved = HashSet::new();
 
+    // Shell-safe single-quote escaping: replace ' with '\''
+    let sq = |s: &str| s.replace('\'', "'\\''");
+
     // Open one SFTP session to check whether each path is a directory.
     let channel = client.get_channel().await?;
     channel.request_subsystem(true, "sftp").await?;
     let sftp = SftpSession::new(channel.into_stream()).await?;
 
+    // Partition into directories and plain files.
+    let mut dirs: Vec<&PathBuf> = Vec::new();
+    let mut files: Vec<&PathBuf> = Vec::new();
     for from in paths.iter() {
-        let Some(name) = from.file_name() else {
+        if from.file_name().is_none() {
             continue;
-        };
+        }
         let remote = from.to_string_lossy().replace('\\', "/");
         let is_dir = sftp
             .metadata(&remote)
             .await
             .map(|m| m.is_dir())
             .unwrap_or(false);
-
         if is_dir {
-            // Zip the directory on the remote server, download the archive.
-            let dir_name = name.to_string_lossy();
-            let zip_stem = format!("{}.zip", dir_name);
-            let zip_stem_path = PathBuf::from(&zip_stem);
-            let mut local_target = to.join(&zip_stem);
-            if local_target.try_exists().unwrap_or(false) || reserved.contains(&local_target) {
-                local_target = download_unique_path(&zip_stem_path, &to, &mut reserved);
-            }
-            reserved.insert(local_target.clone());
+            dirs.push(from);
+        } else {
+            files.push(from);
+        }
+    }
 
-            let parent = from
-                .parent()
-                .unwrap_or_else(|| Path::new("/"))
-                .to_string_lossy()
-                .replace('\\', "/");
-            let remote_zip = format!(
-                "/tmp/cosmic_files_{}.zip",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()
-            );
+    // --- Multiple (or single) directories → one combined zip ---
+    if !dirs.is_empty() {
+        let remote_zip = format!(
+            "/tmp/cosmic_files_{}.zip",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
 
-            // Shell-safe single-quote escaping: replace ' with '\''
-            let sq = |s: &str| s.replace('\'', "'\\''");
-            let zip_cmd = format!(
-                "cd '{}' && zip -r '{}' '{}'",
-                sq(&parent),
-                sq(&remote_zip),
-                sq(&dir_name),
-            );
-            let res = client.execute(&zip_cmd).await?;
-            if res.exit_status != 0 {
-                return Err(anyhow::anyhow!(
-                    "zip failed for {}: stdout: {} stderr: {}",
-                    remote,
-                    res.stdout,
-                    res.stderr
-                ));
-            }
+        // Each dir may live in a different parent, so cd into the right parent
+        // per entry and append to the same archive with `zip -r`.
+        let parts: Vec<String> = dirs
+            .iter()
+            .map(|dir| {
+                let parent = dir
+                    .parent()
+                    .unwrap_or_else(|| Path::new("/"))
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let dir_name = dir.file_name().unwrap().to_string_lossy();
+                format!(
+                    "(cd '{}' && zip -r '{}' '{}')",
+                    sq(&parent),
+                    sq(&remote_zip),
+                    sq(&dir_name),
+                )
+            })
+            .collect();
+        let zip_cmd = parts.join(" && ");
 
-            if let Err(err) = client
-                .download_file(remote_zip.clone(), local_target.clone())
-                .await
-            {
-                let _ = client
-                    .execute(&format!("rm -f '{}'", sq(&remote_zip)))
-                    .await;
-                return Err(anyhow::anyhow!("Download failed for {}: {}", remote, err));
-            }
-
+        let res = client.execute(&zip_cmd).await?;
+        if res.exit_status != 0 {
             let _ = client
                 .execute(&format!("rm -f '{}'", sq(&remote_zip)))
                 .await;
-        } else {
-            let mut target = to.join(name);
-            if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
-                target = download_unique_path(from, &to, &mut reserved);
-            }
-            reserved.insert(target.clone());
+            return Err(anyhow::anyhow!(
+                "zip failed: stdout: {} stderr: {}",
+                res.stdout,
+                res.stderr
+            ));
+        }
 
-            if let Err(err) = client.download_file(remote.clone(), target.clone()).await {
-                return Err(anyhow::anyhow!("Download failed for {}: {}", remote, err));
-            }
+        // Choose a local name: single dir → "<dirname>.zip", multiple → "folders.zip"
+        let zip_name = if dirs.len() == 1 {
+            format!(
+                "{}.zip",
+                dirs[0].file_name().unwrap().to_string_lossy()
+            )
+        } else {
+            "folders.zip".to_string()
+        };
+        let zip_stem_path = PathBuf::from(&zip_name);
+        let mut local_target = to.join(&zip_name);
+        if local_target.try_exists().unwrap_or(false) || reserved.contains(&local_target) {
+            local_target = download_unique_path(&zip_stem_path, &to, &mut reserved);
+        }
+        reserved.insert(local_target.clone());
+
+        let dl_result = client
+            .download_file(remote_zip.clone(), local_target.clone())
+            .await;
+        let _ = client
+            .execute(&format!("rm -f '{}'", sq(&remote_zip)))
+            .await;
+        if let Err(err) = dl_result {
+            return Err(anyhow::anyhow!("Download failed for zip: {}", err));
         }
     }
+
+    // --- Plain files downloaded individually ---
+    for from in files {
+        let name = from.file_name().unwrap();
+        let remote = from.to_string_lossy().replace('\\', "/");
+        let mut target = to.join(name);
+        if target.try_exists().unwrap_or(false) || reserved.contains(&target) {
+            target = download_unique_path(from, &to, &mut reserved);
+        }
+        reserved.insert(target.clone());
+
+        if let Err(err) = client.download_file(remote.clone(), target.clone()).await {
+            return Err(anyhow::anyhow!("Download failed for {}: {}", remote, err));
+        }
+    }
+
     Ok(())
 }
 
