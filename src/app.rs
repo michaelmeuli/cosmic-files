@@ -1164,7 +1164,7 @@ impl App {
             Task::none()
         }
     }
-
+    
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     fn handle_overlap(&mut self) {
         let mut overlaps: FxHashMap<_, _> = self
