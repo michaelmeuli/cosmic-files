@@ -2084,6 +2084,7 @@ pub enum Message {
     LocationContextMenuIndex(Option<Point>, Option<usize>),
     LocationMenuAction(LocationMenuAction),
     Download(Option<(PathBuf, String)>),
+    DownloadMany(Vec<PathBuf>, Vec<String>),
     Drag(Option<Rectangle>),
     DragEnd,
     EditLocation(Option<EditLocation>),
@@ -4162,6 +4163,9 @@ impl Tab {
                 }
                 None => {}
             },
+            Message::DownloadMany(paths, uris) => {
+                commands.push(Command::DownloadFile(paths, uris));
+            }
             Message::LocationContextMenuPoint(point_opt) => {
                 self.context_menu = None;
                 self.location_context_menu_point = point_opt;
@@ -7219,7 +7223,39 @@ impl Tab {
 
         column = column.push(details);
 
-        column = column.push(widget::button::standard(fl!("open")).on_press(Message::Open(None)));
+        let action_button = {
+            #[cfg(feature = "russh")]
+            {
+                let remote_paths_uris: Vec<(PathBuf, String)> = selected_items
+                    .iter()
+                    .filter_map(|item| {
+                        if let ItemMetadata::RusshPath { .. } = &item.metadata {
+                            if let Some(Location::Remote(uri, _, Some(path))) = &item.location_opt
+                            {
+                                return Some((path.clone(), uri.clone()));
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+
+                if !remote_paths_uris.is_empty() {
+                    let (paths, uris) = remote_paths_uris.into_iter().unzip();
+                    Some(
+                        widget::button::standard(fl!("download"))
+                            .on_press(Message::DownloadMany(paths, uris)),
+                    )
+                } else {
+                    Some(widget::button::standard(fl!("open")).on_press(Message::Open(None)))
+                }
+            }
+            #[cfg(not(feature = "russh"))]
+            Some(widget::button::standard(fl!("open")).on_press(Message::Open(None)))
+        };
+
+        if let Some(btn) = action_button {
+            column = column.push(btn);
+        }
 
         column.into()
     }
