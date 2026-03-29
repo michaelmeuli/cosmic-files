@@ -7127,14 +7127,21 @@ impl Tab {
             items
                 .iter()
                 .filter(|item| {
-                    if item.selected {
-                        item.location_opt
-                            .as_ref()
-                            .and_then(Location::path_opt)
-                            .is_some()
-                    } else {
-                        false
+                    if !item.selected {
+                        return false;
                     }
+                    // Include remote TB result items even though their location path is None
+                    // (they carry their downloadable paths in sample_*_path_opt fields)
+                    #[cfg(feature = "russh")]
+                    if item.metadata.is_tb_result() {
+                        if let Some(Location::Remote(..)) = &item.location_opt {
+                            return true;
+                        }
+                    }
+                    item.location_opt
+                        .as_ref()
+                        .and_then(Location::path_opt)
+                        .is_some()
                 })
                 .collect()
         });
@@ -7226,18 +7233,38 @@ impl Tab {
         let action_button = {
             #[cfg(feature = "russh")]
             {
-                let remote_paths_uris: Vec<(PathBuf, String)> = selected_items
-                    .iter()
-                    .filter_map(|item| {
-                        if let ItemMetadata::RusshPath { .. } = &item.metadata {
-                            if let Some(Location::Remote(uri, _, Some(path))) = &item.location_opt
-                            {
-                                return Some((path.clone(), uri.clone()));
+                let remote_paths_uris: Vec<(PathBuf, String)> = {
+                    let mut seen = std::collections::HashSet::new();
+                    selected_items
+                        .iter()
+                        .flat_map(|item| {
+                            if let ItemMetadata::RusshPath { .. } = &item.metadata {
+                                if let Some(Location::Remote(uri, _, path_opt)) =
+                                    &item.location_opt
+                                {
+                                    if item.metadata.is_tb_result() {
+                                        // Expand sample items into their individual file paths
+                                        let mut result = Vec::new();
+                                        if let Some(p) = item.metadata.json_path() {
+                                            result.push((p.clone(), uri.clone()));
+                                        }
+                                        if let Some(p) = item.metadata.csv_path() {
+                                            result.push((p.clone(), uri.clone()));
+                                        }
+                                        if let Some(p) = item.metadata.docx_path() {
+                                            result.push((p.clone(), uri.clone()));
+                                        }
+                                        return result;
+                                    } else if let Some(path) = path_opt {
+                                        return vec![(path.clone(), uri.clone())];
+                                    }
+                                }
                             }
-                        }
-                        None
-                    })
-                    .collect();
+                            vec![]
+                        })
+                        .filter(|(path, _)| seen.insert(path.clone()))
+                        .collect()
+                };
 
                 if !remote_paths_uris.is_empty() {
                     let (paths, uris) = remote_paths_uris.into_iter().unzip();
