@@ -132,6 +132,15 @@ pub enum ClientMessage {
     JobStatusUpdate(String, usize, usize),
 }
 
+/// Events emitted during a download operation.
+#[derive(Clone, Debug)]
+pub enum DownloadEvent {
+    /// One file has finished downloading.
+    FileCompleted,
+    /// The entire download batch is done.
+    Complete(Result<(), String>),
+}
+
 pub trait Connector: Send + Sync {
     fn items(&self, sizes: IconSizes) -> Option<ClientItems>;
     fn connect(&self, item: ClientItem) -> Task<()>;
@@ -144,7 +153,7 @@ pub trait Connector: Send + Sync {
     fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>>;
     fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)>;
     fn disconnect(&self, item: ClientItem) -> Task<()>;
-    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> Task<()>;
+    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> Task<DownloadEvent>;
     fn run_tb_profiler(
         &self,
         paths: Box<[PathBuf]>,

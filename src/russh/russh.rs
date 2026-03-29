@@ -601,6 +601,7 @@ async fn perform_download(
     paths: Box<[PathBuf]>,
     to: PathBuf,
     zip_output: Option<PathBuf>,
+    progress_tx: &tokio::sync::mpsc::UnboundedSender<()>,
 ) -> Result<(), anyhow::Error> {
     let mut reserved = HashSet::new();
 
@@ -702,6 +703,10 @@ async fn perform_download(
         if let Err(err) = dl_result {
             return Err(anyhow::anyhow!("Download failed for zip: {}", err));
         }
+        // Each directory in dirs counts as one completed item
+        for _ in dirs.iter() {
+            let _ = progress_tx.send(());
+        }
     }
 
     // --- Plain files downloaded individually ---
@@ -717,6 +722,7 @@ async fn perform_download(
         if let Err(err) = client.download_file(remote.clone(), target.clone()).await {
             return Err(anyhow::anyhow!("Download failed for {}: {}", remote, err));
         }
+        let _ = progress_tx.send(());
     }
 
     Ok(())
@@ -1088,6 +1094,7 @@ enum Cmd {
         PathBuf,
         Option<PathBuf>,
         tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+        tokio::sync::mpsc::UnboundedSender<()>,
     ),
     RunTbProfiler(
         Box<[PathBuf]>,
@@ -1561,7 +1568,7 @@ impl Russh {
                             let _ = event_tx.send(Event::Changed);
                             log::info!("Disconnected from {}", item.host);
                         }
-                        Cmd::Download(paths, uris, path, zip_output, result_tx) => {
+                        Cmd::Download(paths, uris, path, zip_output, result_tx, progress_tx) => {
                             let result: Result<(), anyhow::Error> = async {
                                 let remote_files: Vec<_> = uris
                                     .iter()
@@ -1584,7 +1591,7 @@ impl Russh {
                                     read.get(&host).cloned()
                                 }
                                 .ok_or_else(|| anyhow::anyhow!("No client for host {host}"))?;
-                                perform_download(&client, paths.clone(), path.clone(), zip_output.clone()).await?;
+                                perform_download(&client, paths.clone(), path.clone(), zip_output.clone(), &progress_tx).await?;
                                 Ok(())
                             }
                             .await;
@@ -1833,23 +1840,39 @@ impl Connector for Russh {
         )
     }
 
-    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> Task<()> {
+    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> cosmic::Task<super::DownloadEvent> {
         let command_tx = self.command_tx.clone();
-        Task::perform(
-            async move {
-                let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+        cosmic::Task::stream(cosmic::iced::stream::channel(
+            16,
+            move |mut event_tx: cosmic::iced::futures::channel::mpsc::Sender<super::DownloadEvent>| async move {
+                use cosmic::iced::futures::SinkExt;
+                let (res_tx, mut res_rx) = tokio::sync::oneshot::channel();
+                let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
                 command_tx
-                    .send(Cmd::Download(paths, uris, to, zip_output, res_tx))
+                    .send(Cmd::Download(paths, uris, to, zip_output, res_tx, progress_tx))
                     .unwrap();
-                res_rx.await
+
+                let result = loop {
+                    tokio::select! {
+                        Some(()) = progress_rx.recv() => {
+                            let _ = event_tx.send(super::DownloadEvent::FileCompleted).await;
+                        }
+                        result = &mut res_rx => {
+                            while let Ok(()) = progress_rx.try_recv() {
+                                let _ = event_tx.send(super::DownloadEvent::FileCompleted).await;
+                            }
+                            break result;
+                        }
+                    }
+                };
+
+                let result = result
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("channel closed")))
+                    .map_err(|e| e.to_string());
+                let _ = event_tx.send(super::DownloadEvent::Complete(result)).await;
             },
-            |x| {
-                if let Err(err) = x {
-                    log::error!("{err:?}");
-                }
-            },
-        )
+        ))
     }
 
     fn remote_scan(

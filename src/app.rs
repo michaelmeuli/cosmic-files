@@ -374,6 +374,8 @@ pub enum Message {
     DesktopDialogs(bool),
     DownloadTo(Option<Entity>),
     DownloadToResult(DialogResult),
+    DownloadFileProgress,
+    DownloadComplete(Result<(), String>),
     DialogCancel,
     DialogComplete,
     Eject,
@@ -858,6 +860,10 @@ pub struct App {
     running_tasks: std::collections::HashMap<usize, usize>,
     /// Maps array_id -> total task count (set once on job submission, never overwritten)
     job_total_tasks: std::collections::HashMap<usize, usize>,
+    /// Total files queued across all active download batches
+    download_files_total: usize,
+    /// Files completed so far across all active download batches
+    download_files_done: usize,
 }
 
 impl App {
@@ -2646,6 +2652,8 @@ impl Application for App {
             clipboard_cache: ClipboardCache::Empty,
             running_tasks: std::collections::HashMap::new(),
             job_total_tasks: std::collections::HashMap::new(),
+            download_files_total: 0,
+            download_files_done: 0,
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             layer_sizes: FxHashMap::default(),
         };
@@ -3667,6 +3675,7 @@ impl Application for App {
                                     (selected_paths[0].clone(), None)
                                 };
                                 for (_key, client) in CLIENTS.iter() {
+                                    self.download_files_total += download_paths.len();
                                     return client
                                         .download_file(
                                             download_paths.clone(),
@@ -3674,7 +3683,14 @@ impl Application for App {
                                             to.clone(),
                                             zip_output.clone(),
                                         )
-                                        .map(|_| cosmic::action::none());
+                                        .map(|event| match event {
+                                            crate::russh::DownloadEvent::FileCompleted => {
+                                                cosmic::action::app(Message::DownloadFileProgress)
+                                            }
+                                            crate::russh::DownloadEvent::Complete(r) => {
+                                                cosmic::action::app(Message::DownloadComplete(r))
+                                            }
+                                        });
                                 }
                             }
                         }
@@ -3682,6 +3698,19 @@ impl Application for App {
                 }
                 self.file_dialog_opt = None;
                 return Task::perform(async {}, |_| cosmic::action::none());
+            }
+            Message::DownloadFileProgress => {
+                self.download_files_done += 1;
+            }
+            Message::DownloadComplete(result) => {
+                if let Err(err) = result {
+                    log::error!("Download failed: {}", err);
+                }
+                // Reset counters when all files are done
+                if self.download_files_done >= self.download_files_total {
+                    self.download_files_total = 0;
+                    self.download_files_done = 0;
+                }
             }
             Message::FileDialogMessage(dialog_message) => {
                 if let Some(dialog) = &mut self.file_dialog_opt {
@@ -7106,7 +7135,7 @@ impl Application for App {
     }
 
     fn footer(&self) -> Option<Element<'_, Message>> {
-        if self.progress_operations.is_empty() && self.running_tasks.is_empty() {
+        if self.progress_operations.is_empty() && self.running_tasks.is_empty() && self.download_files_total == 0 {
             return None;
         }
 
@@ -7247,6 +7276,29 @@ impl Application for App {
             let progress_bar =
                 widget::progress_bar(0.0..=1.0, progress).girth(progress_bar_height);
 
+            children.push(
+                widget::row::with_children([progress_bar.into()])
+                    .align_y(Alignment::Center)
+                    .into(),
+            );
+            children.push(widget::text::body(title).into());
+        }
+
+        // Active downloads section
+        if self.download_files_total > 0 {
+            if !children.is_empty() {
+                children.push(widget::space::vertical().height(space_s).into());
+            }
+            let done = self.download_files_done;
+            let total = self.download_files_total;
+            let progress = done as f32 / total as f32;
+            let title = if total == 1 {
+                format!("Downloading file... ({done}/{total})")
+            } else {
+                format!("Downloading {total} files... ({done}/{total})")
+            };
+            let progress_bar =
+                widget::progress_bar(0.0..=1.0, progress).girth(progress_bar_height);
             children.push(
                 widget::row::with_children([progress_bar.into()])
                     .align_y(Alignment::Center)
