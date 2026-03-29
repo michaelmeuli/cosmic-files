@@ -160,7 +160,6 @@ async fn remote_sftp_list(
     uri: &str,
     sizes: IconSizes,
 ) -> Result<Vec<tab::Item>, String> {
-    log::info!("Listing remote directory: {}", uri);
     let mut remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let force_dir = uri.starts_with("ssh:///");
     let path = remote_file.path.clone();
@@ -887,7 +886,6 @@ pub async fn run_tbprofiler(
     if !res.stderr.is_empty() {
         log::warn!("tbprofiler stderr: {}", res.stderr);
     }
-    log::info!("tbprofiler stdout: {}", res.stdout);
     let job_id: usize = res.stdout.split(';').next().unwrap().trim().parse()?;
     let tasks = array_end
         .checked_add(1)
@@ -904,19 +902,12 @@ async fn poll_running_tasks(
     client: &Client,
     array_id: usize,
 ) -> Result<usize, anyhow::Error> {
-    log::info!("poll_running_tasks: querying squeue for job_id={array_id}");
     let cmd = format!(
         "squeue -j {} -r -h -o \"%T\" 2>/dev/null | grep -c RUNNING || true",
         array_id
     );
     let res = client.execute(&cmd).await?;
-    log::info!(
-        "poll_running_tasks: squeue exit_status={} stdout={:?} for job_id={array_id}",
-        res.exit_status,
-        res.stdout.trim()
-    );
     let count: usize = res.stdout.trim().parse().unwrap_or(0);
-    log::info!("poll_running_tasks: job_id={array_id} running_count={count}");
     Ok(count)
 }
 
@@ -1362,7 +1353,6 @@ impl Russh {
                             }
                         }
                         Cmd::RemoteScan(uri, sizes, items_tx) => {
-                            log::info!("RemoteScan for URI: {}", uri);
                             let remote_file =
                                 match uri.parse::<RemoteFile>().map_err(|e| e.to_string()) {
                                     Ok(rf) => rf,
@@ -1549,7 +1539,6 @@ impl Russh {
                             result_tx.send(result).await.unwrap();
                         }
                         Cmd::Disconnect(client_item) => {
-                            log::info!("Disconnect command received");
                             let ClientItem::Russh(item) = client_item else {
                                 continue;
                             };
@@ -1566,7 +1555,6 @@ impl Russh {
                             });
                             let event_tx = event_tx.clone();
                             let _ = event_tx.send(Event::Changed);
-                            log::info!("Disconnected from {}", item.host);
                         }
                         Cmd::Download(paths, uris, path, zip_output, result_tx, progress_tx) => {
                             let result: Result<(), anyhow::Error> = async {
@@ -1737,7 +1725,6 @@ impl Russh {
                             let _ = result_tx.send(result);
                         }
                         Cmd::PollJobStatus(array_id, uri) => {
-                            log::info!("PollJobStatus: received command for job_id={array_id} uri={uri}");
                             let remote_file = match uri.parse::<RemoteFile>() {
                                 Ok(rf) => rf,
                                 Err(e) => {
@@ -1745,7 +1732,6 @@ impl Russh {
                                     continue;
                                 }
                             };
-                            log::info!("PollJobStatus: resolved host={}", remote_file.host);
                             let client = {
                                 let read = clients.read().await;
                                 read.get(remote_file.host.as_str()).cloned()
@@ -1757,14 +1743,10 @@ impl Russh {
                                     continue;
                                 }
                             };
-                            log::info!("PollJobStatus: found client for host={}, spawning poll loop for job_id={array_id}", remote_file.host);
                             let event_tx = event_tx.clone();
                             tokio::spawn(async move {
-                                log::info!("PollJobStatus: poll loop started for job_id={array_id}");
                                 loop {
-                                    log::info!("PollJobStatus: sleeping 30s before next poll for job_id={array_id}");
                                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                                    log::info!("PollJobStatus: polling running tasks for job_id={array_id}");
                                     let running = match poll_running_tasks(&client, array_id).await {
                                         Ok(n) => n,
                                         Err(e) => {
@@ -1772,7 +1754,6 @@ impl Russh {
                                             break;
                                         }
                                     };
-                                    log::info!("PollJobStatus: job_id={array_id} has {running} running tasks");
                                     if event_tx
                                         .send(Event::JobStatusUpdate(uri.clone(), array_id, running))
                                         .is_err()
@@ -1781,11 +1762,9 @@ impl Russh {
                                         break;
                                     }
                                     if running == 0 {
-                                        log::info!("PollJobStatus: job_id={array_id} completed (0 running tasks), stopping poll loop");
                                         break;
                                     }
                                 }
-                                log::info!("PollJobStatus: poll loop exited for job_id={array_id}");
                             });
                         }
                     }
@@ -1977,12 +1956,9 @@ impl Connector for Russh {
     }
 
     fn poll_job_status(&self, job_id: usize, uri: String) -> Task<()> {
-        log::info!("poll_job_status: invoked with job_id={job_id} uri={uri}");
         let command_tx = self.command_tx.clone();
         Task::future(async move {
-            log::info!("poll_job_status: sending Cmd::PollJobStatus job_id={job_id} uri={uri}");
             command_tx.send(Cmd::PollJobStatus(job_id, uri)).unwrap();
-            log::info!("poll_job_status: Cmd::PollJobStatus sent successfully for job_id={job_id}");
         })
     }
 
