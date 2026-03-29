@@ -3536,6 +3536,39 @@ impl Tab {
         }
     }
 
+    /// Returns the actual file paths to delete for selected items.
+    /// TB result items are virtual groupings — expand them to their component files.
+    pub fn selected_delete_paths(&self) -> Vec<PathBuf> {
+        let Some(ref items) = self.items_opt else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .filter(|item| item.selected)
+            .flat_map(|item| {
+                if item.metadata.is_tb_result() {
+                    let mut paths = Vec::new();
+                    if let Some(p) = item.metadata.json_path() {
+                        paths.push(p.clone());
+                    }
+                    if let Some(p) = item.metadata.csv_path() {
+                        paths.push(p.clone());
+                    }
+                    if let Some(p) = item.metadata.docx_path() {
+                        paths.push(p.clone());
+                    }
+                    paths
+                } else {
+                    item.location_opt
+                        .as_ref()
+                        .and_then(Location::path_opt)
+                        .map(|p| vec![p.clone()])
+                        .unwrap_or_default()
+                }
+            })
+            .collect()
+    }
+
     pub fn select_all(&mut self) {
         if let Some(ref mut items) = self.items_opt {
             for item in items.iter_mut() {

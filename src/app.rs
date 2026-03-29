@@ -1684,6 +1684,17 @@ impl App {
             })
     }
 
+    fn selected_delete_paths(
+        &self,
+        entity_opt: Option<Entity>,
+    ) -> impl Iterator<Item = PathBuf> + use<'_> {
+        let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
+        self.tab_model
+            .data::<Tab>(entity)
+            .into_iter()
+            .flat_map(|tab| tab.selected_delete_paths().into_iter())
+    }
+
     fn selected_uris(&self, entity_opt: Option<Entity>) -> impl Iterator<Item = String> + use<'_> {
         let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
         self.tab_model
@@ -3293,7 +3304,7 @@ impl Application for App {
                             }
                         }
                     } else {
-                        let paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                        let paths: Box<[_]> = self.selected_delete_paths(entity_opt).collect();
                         if !paths.is_empty() {
                             return self.delete(paths);
                         }
@@ -4791,7 +4802,7 @@ impl Application for App {
                 }
             }
             Message::PermanentlyDelete(entity_opt) => {
-                let paths: Box<[_]> = self.selected_paths(entity_opt).collect();
+                let paths: Box<[_]> = self.selected_delete_paths(entity_opt).collect();
                 if !paths.is_empty() {
                     return self.push_dialog(
                         DialogPage::PermanentlyDelete { paths },
