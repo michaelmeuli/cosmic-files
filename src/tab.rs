@@ -1113,7 +1113,13 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         let name = item.name.clone();
         let path = item.path_opt().cloned();
         if let ItemMetadata::Path { is_raw_sample_file, .. } = &mut item.metadata {
-            if let Some((sample_id, suffix)) = name.split_once(".results.") {
+            let maybe_split = (|| -> Option<(&str, &str)> {
+                    let first = name.find('.')?;
+                    let rest = &name[first + 1..];
+                    let second = rest.find('.')?;
+                    Some((&name[..first], &rest[second + 1..]))
+                })();
+            if let Some((sample_id, suffix)) = maybe_split {
                 let entry = samples.entry(sample_id.to_string()).or_insert(LocalSampleFiles {
                     json: None,
                     csv: None,

@@ -39,6 +39,8 @@ pub struct DbVersion {
     pub commit: String,
     #[serde(rename = "db-schema-version", default)]
     pub db_schema_version: Option<String>,
+    #[serde(rename = "tb-profiler-version")]
+    pub tb_profiler_version: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

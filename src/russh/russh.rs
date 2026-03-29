@@ -147,14 +147,6 @@ pub async fn resolve_symlink(
     }
 }
 
-fn sample_key(name: &str) -> &str {
-    if let Some((sample, _)) = name.split_once(".results.") {
-        sample
-    } else {
-        name
-    }
-}
-
 async fn remote_sftp_list(
     client: &Client,
     uri: &str,
@@ -216,7 +208,13 @@ async fn remote_sftp_list(
         // display layer can toggle without a rescan.
         let mut is_raw_sample_file = false;
         if file_type == FileType::File {
-            if let Some((sample_id, suffix)) = name.split_once(".results.") {
+            let maybe_split = (|| -> Option<(&str, &str)> {
+                let first = name.find('.')?;
+                let rest = &name[first + 1..];
+                let second = rest.find('.')?;
+                Some((&name[..first], &rest[second + 1..]))
+            })();
+            if let Some((sample_id, suffix)) = maybe_split {
                 let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
                     json: None,
                     csv: None,
@@ -287,13 +285,14 @@ async fn remote_sftp_list(
                 }
                 children_opt = Some(count);
             }
+            let is_tb_result = json_opt.is_some();
             ItemMetadata::RusshPath {
                 mtime,
                 size_opt,
                 children_opt,
                 is_json,
                 json_opt,
-                is_tb_result: false,
+                is_tb_result,
                 is_raw_sample_file,
                 sample_json_path_opt: None,
                 sample_csv_path_opt: None,
