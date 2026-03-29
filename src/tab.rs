@@ -3130,6 +3130,22 @@ impl Item {
             }
         }
 
+        if let ItemMetadata::Path { .. } = &self.metadata {
+            if self.metadata.is_tb_result() {
+                for (label, opt_path) in [
+                    ("Open .results.csv", self.metadata.csv_path()),
+                    ("Open .results.json", self.metadata.json_path()),
+                    ("Open .results.docx", self.metadata.docx_path()),
+                ] {
+                    if let Some(p) = opt_path {
+                        column = column.push(widget::button::standard(label).on_press(
+                            Message::Open(Some(p.to_path_buf())),
+                        ));
+                    }
+                }
+            }
+        }
+
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata {
             if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
