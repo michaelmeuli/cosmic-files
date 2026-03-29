@@ -887,6 +887,12 @@ pub fn item_from_entry(
             metadata,
             children_opt,
             json_opt,
+            is_tb_result: false,
+            is_raw_sample_file: false,
+            sample_json_path_opt: None,
+            sample_csv_path_opt: None,
+            sample_docx_path_opt: None,
+            is_susceptible: false,
         },
         hidden,
         location_opt: Some(Location::Path(path)),
@@ -1094,6 +1100,90 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             item.hidden = true;
         }
     }
+
+    // Two-pass grouping: collect .results.* files into virtual sample items,
+    // mirroring the remote scan behaviour so ToggleShowAsSamples works locally.
+    struct LocalSampleFiles {
+        json: Option<PathBuf>,
+        csv: Option<PathBuf>,
+        docx: Option<PathBuf>,
+    }
+    let mut samples: HashMap<String, LocalSampleFiles> = HashMap::new();
+    for item in &mut items {
+        let name = item.name.clone();
+        let path = item.path_opt().cloned();
+        if let ItemMetadata::Path { is_raw_sample_file, .. } = &mut item.metadata {
+            if let Some((sample_id, suffix)) = name.split_once(".results.") {
+                let entry = samples.entry(sample_id.to_string()).or_insert(LocalSampleFiles {
+                    json: None,
+                    csv: None,
+                    docx: None,
+                });
+                match suffix {
+                    "json" => entry.json = path,
+                    "csv" => entry.csv = path,
+                    "docx" => entry.docx = path,
+                    _ => {}
+                }
+                *is_raw_sample_file = true;
+            }
+        }
+    }
+    for (sample_id, files) in samples {
+        let representative = files
+            .json
+            .as_deref()
+            .or(files.csv.as_deref())
+            .or(files.docx.as_deref())
+            .unwrap_or(tab_path);
+        let Ok(fs_meta) = fs::metadata(representative) else {
+            continue;
+        };
+        let json_opt: Option<TbProfilerJson> = files.json.as_ref().and_then(|p| {
+            fs::read_to_string(p)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+        });
+        let is_susceptible = json_opt
+            .as_ref()
+            .map(|j| j.dr_variants.iter().all(|v| v.is_susceptible()))
+            .unwrap_or(false);
+        let location = Location::Path(tab_path.join(&sample_id));
+        let metadata = ItemMetadata::Path {
+            metadata: fs_meta,
+            children_opt: None,
+            json_opt,
+            is_tb_result: true,
+            is_raw_sample_file: false,
+            sample_json_path_opt: files.json,
+            sample_csv_path_opt: files.csv,
+            sample_docx_path_opt: files.docx,
+            is_susceptible,
+        };
+        items.push(Item {
+            name: sample_id.clone(),
+            display_name: sample_id,
+            metadata,
+            hidden: false,
+            location_opt: Some(location),
+            mime: mime::APPLICATION_JSON,
+            icon_handle_grid: mime_icon(mime::APPLICATION_JSON, sizes.grid()),
+            icon_handle_list: mime_icon(mime::APPLICATION_JSON, sizes.list()),
+            icon_handle_list_condensed: mime_icon(mime::APPLICATION_JSON, sizes.list_condensed()),
+            thumbnail_opt: Some(ItemThumbnail::NotImage),
+            button_id: widget::Id::unique(),
+            pos_opt: Cell::new(None),
+            rect_opt: Cell::new(None),
+            selected: false,
+            highlighted: false,
+            overlaps_drag_rect: false,
+            dir_size: DirSize::NotDirectory,
+            cut: false,
+            is_mount_point: false,
+            is_client_point: false,
+        });
+    }
+
     items
 }
 
@@ -2080,6 +2170,12 @@ pub enum ItemMetadata {
         metadata: Metadata,
         children_opt: Option<usize>,
         json_opt: Option<TbProfilerJson>,
+        is_tb_result: bool,
+        is_raw_sample_file: bool,
+        sample_json_path_opt: Option<PathBuf>,
+        sample_csv_path_opt: Option<PathBuf>,
+        sample_docx_path_opt: Option<PathBuf>,
+        is_susceptible: bool,
     },
     Trash {
         metadata: trash::TrashItemMetadata,
@@ -2200,6 +2296,7 @@ impl ItemMetadata {
 
     pub fn is_tb_result(&self) -> bool {
         match self {
+            Self::Path { is_tb_result, .. } => *is_tb_result,
             #[cfg(feature = "russh")]
             Self::RusshPath { is_tb_result, .. } => *is_tb_result,
             _ => false,
@@ -2208,48 +2305,43 @@ impl ItemMetadata {
 
     pub fn is_sample(&self) -> bool {
         match self {
+            Self::Path { is_raw_sample_file, .. } => *is_raw_sample_file,
             #[cfg(feature = "russh")]
-            Self::RusshPath {
-                is_raw_sample_file, ..
-            } => *is_raw_sample_file,
+            Self::RusshPath { is_raw_sample_file, .. } => *is_raw_sample_file,
             _ => false,
         }
     }
 
     pub fn json_path(&self) -> Option<&PathBuf> {
         match self {
+            Self::Path { sample_json_path_opt, .. } => sample_json_path_opt.as_ref(),
             #[cfg(feature = "russh")]
-            Self::RusshPath {
-                sample_json_path_opt,
-                ..
-            } => sample_json_path_opt.as_ref(),
+            Self::RusshPath { sample_json_path_opt, .. } => sample_json_path_opt.as_ref(),
             _ => None,
         }
     }
 
     pub fn csv_path(&self) -> Option<&PathBuf> {
         match self {
+            Self::Path { sample_csv_path_opt, .. } => sample_csv_path_opt.as_ref(),
             #[cfg(feature = "russh")]
-            Self::RusshPath {
-                sample_csv_path_opt,
-                ..
-            } => sample_csv_path_opt.as_ref(),
+            Self::RusshPath { sample_csv_path_opt, .. } => sample_csv_path_opt.as_ref(),
             _ => None,
         }
     }
 
     pub fn docx_path(&self) -> Option<&PathBuf> {
         match self {
+            Self::Path { sample_docx_path_opt, .. } => sample_docx_path_opt.as_ref(),
             #[cfg(feature = "russh")]
-            Self::RusshPath {
-                sample_docx_path_opt,
-                ..
-            } => sample_docx_path_opt.as_ref(),
+            Self::RusshPath { sample_docx_path_opt, .. } => sample_docx_path_opt.as_ref(),
             _ => None,
         }
     }
+
     pub fn is_susceptible(&self) -> bool {
         match self {
+            Self::Path { is_susceptible, .. } => *is_susceptible,
             #[cfg(feature = "russh")]
             Self::RusshPath { is_susceptible, .. } => *is_susceptible,
             _ => false,
