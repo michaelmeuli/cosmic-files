@@ -7245,6 +7245,8 @@ impl Tab {
                         widget::button::standard(fl!("download"))
                             .on_press(Message::DownloadMany(paths, uris)),
                     )
+                } else if matches!(self.location, Location::Remote(..)) {
+                    None
                 } else {
                     Some(widget::button::standard(fl!("open")).on_press(Message::Open(None)))
                 }
