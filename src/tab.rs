@@ -1150,12 +1150,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         if files.json.is_none() {
             continue;
         }
-        let representative = files
-            .json
-            .as_deref()
-            .or(files.csv.as_deref())
-            .or(files.docx.as_deref())
-            .unwrap_or(tab_path);
+        let representative = files.json.as_deref().unwrap_or(tab_path);
         let Ok(fs_meta) = fs::metadata(representative) else {
             continue;
         };
