@@ -4236,7 +4236,7 @@ impl Application for App {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
                     return client
                         .delete_tb_profiler_results(uri, tb_config)
-                        .map(|()| cosmic::action::none()); 
+                        .map(|()| cosmic::action::app(Message::TabMessage(None, tab::Message::Reload)));
                 }
             }
             Message::NewItem(entity_opt, dir) => {
