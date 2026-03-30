@@ -359,10 +359,25 @@ async fn remote_sftp_list(
         });
     }
 
+    // Reset is_raw_sample_file for items whose sample group has no JSON
+    for item in &mut items {
+        if let ItemMetadata::RusshPath { is_raw_sample_file, .. } = &mut item.metadata {
+            if *is_raw_sample_file {
+                let sample_id = item.name.find('.').map(|i| &item.name[..i]);
+                if sample_id.map_or(true, |id| samples.get(id).map_or(true, |f| f.json.is_none())) {
+                    *is_raw_sample_file = false;
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------
     // Second pass — build grouped sample items
     // ------------------------------------------------------------
     for (sample_id, files) in samples {
+        if files.json.is_none() {
+            continue;
+        }
         let mut json_opt = None;
         let mut is_susceptible = false;
 
