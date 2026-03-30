@@ -1135,7 +1135,21 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             }
         }
     }
+    for item in &mut items {
+        let name = item.name.clone();
+        if let ItemMetadata::Path { is_raw_sample_file, .. } = &mut item.metadata {
+            if *is_raw_sample_file {
+                let sample_id = name.find('.').map(|i| &name[..i]);
+                if sample_id.map_or(true, |id| samples.get(id).map_or(true, |f| f.json.is_none())) {
+                    *is_raw_sample_file = false;
+                }
+            }
+        }
+    }
     for (sample_id, files) in samples {
+        if files.json.is_none() {
+            continue;
+        }
         let representative = files
             .json
             .as_deref()
