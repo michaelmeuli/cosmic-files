@@ -91,6 +91,7 @@ use crate::{
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
+    sequencing::{Erm41Position28, erm41_from_single_read, parse_ab1_sequence},
 };
 #[cfg(unix)]
 use uzers::{get_group_by_gid, get_user_by_uid};
@@ -3213,6 +3214,43 @@ impl Item {
             }
         }
 
+        column.into()
+    }
+
+    pub fn is_ab1(&self) -> bool {
+        self.path_opt()
+            .and_then(|p| p.extension())
+            .map(|ext| ext.eq_ignore_ascii_case("ab1"))
+            .unwrap_or(false)
+    }
+
+    pub fn preview_ab1(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column().spacing(space_m);
+        let mut details = widget::column().spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        let call = self
+            .path_opt()
+            .and_then(|p| fs::read(p).ok())
+            .and_then(|bytes| parse_ab1_sequence(&bytes))
+            .map(|seq| erm41_from_single_read(&seq))
+            .unwrap_or(Erm41Position28::Undetermined);
+
+        let label = match &call {
+            Erm41Position28::C28 => "erm(41) C28",
+            Erm41Position28::T28 => "erm(41) T28",
+            _ => "erm(41) Undetermined",
+        };
+        details = details.push(widget::text::heading(label));
+        details = details.push(widget::text::body(call.to_string()));
+
+        column = column.push(details);
         column.into()
     }
 
