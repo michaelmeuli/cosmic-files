@@ -359,13 +359,37 @@ async fn remote_sftp_list(
         });
     }
 
-    // Reset is_raw_sample_file for items whose sample group has no JSON
+    // Build susceptibility map from JSON items (already loaded via load_remote_json)
+    let sample_susceptibility: HashMap<String, bool> = items
+        .iter()
+        .filter_map(|item| {
+            if let ItemMetadata::RusshPath { is_raw_sample_file: true, is_susceptible: true, .. } =
+                &item.metadata
+            {
+                let id = item.name.find('.').map(|i| item.name[..i].to_string())?;
+                Some((id, true))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Reset is_raw_sample_file for items whose sample group has no JSON,
+    // and propagate susceptibility to non-JSON raw files
     for item in &mut items {
-        if let ItemMetadata::RusshPath { is_raw_sample_file, .. } = &mut item.metadata {
+        let name = item.name.clone();
+        if let ItemMetadata::RusshPath { is_raw_sample_file, is_susceptible, .. } =
+            &mut item.metadata
+        {
             if *is_raw_sample_file {
-                let sample_id = item.name.find('.').map(|i| &item.name[..i]);
-                if sample_id.map_or(true, |id| samples.get(id).map_or(true, |f| f.json.is_none())) {
+                let sample_id = name.find('.').map(|i| &name[..i]);
+                if sample_id.map_or(true, |id| samples.get(id).map_or(true, |f| f.json.is_none()))
+                {
                     *is_raw_sample_file = false;
+                } else if let Some(id) = sample_id {
+                    if let Some(&sus) = sample_susceptibility.get(id) {
+                        *is_susceptible = sus;
+                    }
                 }
             }
         }

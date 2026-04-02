@@ -1146,6 +1146,30 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             }
         }
     }
+    // Propagate susceptibility to raw sample files so filtering works in file view too
+    let sample_susceptibility: HashMap<String, bool> = samples
+        .iter()
+        .filter_map(|(id, files)| {
+            let p = files.json.as_ref()?;
+            let json: TbProfilerJson = fs::read_to_string(p)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())?;
+            Some((id.clone(), json.dr_variants.iter().all(|v| v.is_susceptible())))
+        })
+        .collect();
+    for item in &mut items {
+        let name = item.name.clone();
+        if let ItemMetadata::Path { is_raw_sample_file, is_susceptible, .. } = &mut item.metadata {
+            if *is_raw_sample_file {
+                if let Some(id) = name.find('.').map(|i| &name[..i]) {
+                    if let Some(&sus) = sample_susceptibility.get(id) {
+                        *is_susceptible = sus;
+                    }
+                }
+            }
+        }
+    }
+
     for (sample_id, files) in samples {
         if files.json.is_none() {
             continue;
@@ -6204,7 +6228,7 @@ impl Tab {
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tb_result() && !show_as_samples {
+                if item.metadata.is_tb_result() && !item.metadata.is_sample() && !show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
@@ -6542,7 +6566,7 @@ impl Tab {
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tb_result() && !show_as_samples {
+                if item.metadata.is_tb_result() && !item.metadata.is_sample() && !show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
