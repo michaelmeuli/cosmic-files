@@ -8190,7 +8190,7 @@ pub(crate) mod test_utils {
 
         // New tab with items
         let location = Location::Path(path.to_owned());
-        let (parent_item_opt, items) = location.scan(IconSizes::default(), false);
+        let (parent_item_opt, items) = location.scan(IconSizes::default());
         let mut tab = Tab::new(
             location,
             TabConfig::default(),

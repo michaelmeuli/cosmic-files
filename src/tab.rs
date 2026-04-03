@@ -91,7 +91,7 @@ use crate::{
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
-    sequencing::{Erm41Position28, erm41_from_single_read, parse_ab1_sequence},
+    sequencing::erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_sequence},
 };
 #[cfg(unix)]
 use uzers::{get_group_by_gid, get_user_by_uid};

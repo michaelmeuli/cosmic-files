@@ -8,6 +8,8 @@ const ERM41_ANCHOR_R: &[u8] = b"GGGGCTGGTATCCGCTCACT";
 pub enum Erm41Position28 {
     C28,          // Cytosine — reference allele in some strains
     T28,          // Thymine  — inducible macrolide resistance (ATCC 19977 type)
+    G28,          // Guanine
+    A28,          // Adenine
     Ambiguous,    // Fwd/rev disagree
     Undetermined, // Anchor not found in read
 }
@@ -17,6 +19,8 @@ impl std::fmt::Display for Erm41Position28 {
         match self {
             Self::C28          => write!(f, "C28"),
             Self::T28          => write!(f, "T28 — inducible macrolide resistance"),
+            Self::G28          => write!(f, "G28"),
+            Self::A28          => write!(f, "A28"),
             Self::Ambiguous    => write!(f, "Ambiguous (strand disagreement)"),
             Self::Undetermined => write!(f, "Undetermined (anchor not found)"),
         }
@@ -55,6 +59,8 @@ fn base_to_call(base: Option<u8>) -> Option<Erm41Position28> {
     match base {
         Some(b'C') => Some(Erm41Position28::C28),
         Some(b'T') => Some(Erm41Position28::T28),
+        Some(b'G') => Some(Erm41Position28::G28),
+        Some(b'A') => Some(Erm41Position28::A28), 
         _          => None,
     }
 }

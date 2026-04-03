@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator::Jemalloc;
 
