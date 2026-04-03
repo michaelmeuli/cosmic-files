@@ -163,9 +163,9 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<crate::sequencing::Ab1Chann
     let base_order = fwo.unwrap_or(*b"ACGT");
 
     let window_result = find_display_window(&bases, &peak_locs);
-    let (display_window, is_reverse) = match window_result {
-        Some((start, end, rev)) => (Some((start, end)), rev),
-        None                    => (None, false),
+    let (display_window, is_reverse, pos28_base_idx) = match window_result {
+        Some((start, end, rev, idx)) => (Some((start, end)), rev, Some(idx)),
+        None                         => (None, false, None),
     };
 
     Some(crate::sequencing::Ab1Channels {
@@ -175,16 +175,17 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<crate::sequencing::Ab1Chann
         base_order,
         display_window,
         is_reverse,
+        pos28_base_idx,
     })
 }
 
 /// Find the scan-index window covering "cgacgccag[pos28]ggggctggtat":
 /// 9 bases before position 28 and 11 bases after (including pos28 itself).
 ///
-/// Returns `(start_scan, end_scan, is_reverse)`.
+/// Returns `(start_scan, end_scan, is_reverse, pos28_base_idx)`.
 /// For reverse reads the window scan indices are returned in the same
 /// (start < end) order as for forward reads; the caller flips the x-axis.
-fn find_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize, bool)> {
+fn find_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize, bool, usize)> {
     // Flanking bases to show: 9 before pos28, 11 after (pos28 is the first of the 11)
     const LEFT: usize  = 9;
     const RIGHT: usize = 11;
@@ -198,7 +199,7 @@ fn find_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize,
     {
         let pos28 = hit + anchor_len;
         if let Some(window) = scan_window(pos28, LEFT, RIGHT, peak_locs) {
-            return Some((window.0, window.1, false));
+            return Some((window.0, window.1, false, pos28));
         }
     }
 
@@ -214,7 +215,7 @@ fn find_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize,
     {
         let pos28_comp = hit + rc_anchor_r.len();
         if let Some(window) = scan_window(pos28_comp, RIGHT, LEFT, peak_locs) {
-            return Some((window.0, window.1, true));
+            return Some((window.0, window.1, true, pos28_comp));
         }
     }
 

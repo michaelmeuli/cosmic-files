@@ -3289,7 +3289,7 @@ impl Item {
             _ => "erm(41) Undetermined",
         };
         details = details.push(widget::text::heading(label));
-        details = details.push(widget::text::body(call.to_string()));
+        details = details.push(widget::text::body("Shown are bases 19-39, with position 28 in bold."));
 
         column = column.push(details);
 
@@ -3482,9 +3482,15 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             );
         }
 
+        // Scan index of position 28 — used to select the bold font below.
+        let pos28_scan = chrom.pos28_base_idx
+            .and_then(|idx| chrom.peak_locs.get(idx).copied())
+            .map(|v| v as usize);
+
         // Draw base call letters only for bases whose peak falls in the window.
         // For reverse reads show the complement letter so the label matches the
         // plus-strand base at each position.
+        // Position 28 is drawn in bold.
         for (base, &peak) in chrom.bases.iter().zip(chrom.peak_locs.iter()) {
             let scan = peak as usize;
             if scan < scan_start || scan > scan_end {
@@ -3493,12 +3499,13 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             let display_base = if is_rev { dna_complement(*base) } else { *base };
             let x = scan_to_x(scan);
             let color = base_color(display_base);
+            let is_pos28 = pos28_scan.map_or(false, |s| s == scan);
             frame.fill_text(widget::canvas::Text {
                 content: String::from(display_base as char),
                 position: Point { x, y: 2.0 },
                 max_width: f32::INFINITY,
                 color,
-                size: cosmic::iced::Pixels(11.0),
+                size: cosmic::iced::Pixels(if is_pos28 { 20.0 } else { 11.0 }),
                 line_height: cosmic::iced::advanced::text::LineHeight::default(),
                 font: cosmic::iced::Font::default(),
                 align_x: cosmic::iced::advanced::text::Alignment::Center,

@@ -23,6 +23,9 @@ pub struct Ab1Channels {
     /// The canvas flips the x-axis and complements bases/colors so the display
     /// always reads 5′→3′ on the plus strand (same frame as a forward read).
     pub is_reverse: bool,
+    /// Index into `bases` / `peak_locs` of erm41 position 28 (the variant base).
+    /// `None` when the anchor was not found.
+    pub pos28_base_idx: Option<usize>,
 }
 
 impl Ab1Channels {
