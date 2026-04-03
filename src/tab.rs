@@ -876,6 +876,7 @@ pub fn item_from_entry(
     } else {
         None
     };
+    let is_ab1 = path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
@@ -888,6 +889,7 @@ pub fn item_from_entry(
             metadata,
             children_opt,
             json_opt,
+            is_ab1,
             is_tb_result: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
@@ -1193,6 +1195,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             metadata: fs_meta,
             children_opt: None,
             json_opt,
+            is_ab1: false,
             is_tb_result: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json,
@@ -2211,6 +2214,7 @@ pub enum ItemMetadata {
         metadata: Metadata,
         children_opt: Option<usize>,
         json_opt: Option<TbProfilerJson>,
+        is_ab1: bool,
         is_tb_result: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
@@ -2240,6 +2244,7 @@ pub enum ItemMetadata {
         size_opt: Option<u64>,
         children_opt: Option<usize>,
         is_json: bool,
+        is_ab1: bool,
         json_opt: Option<TbProfilerJson>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
@@ -2313,6 +2318,15 @@ impl ItemMetadata {
             Self::Path { json_opt, .. } => json_opt.is_some(),
             #[cfg(feature = "russh")]
             Self::RusshPath { is_json, .. } => *is_json,
+            _ => false,
+        }
+    }
+
+    pub fn is_ab1(&self) -> bool {
+        match self {
+            Self::Path { is_ab1, .. } => *is_ab1,
+            #[cfg(feature = "russh")]
+            Self::RusshPath { is_ab1, .. } => *is_ab1,
             _ => false,
         }
     }
@@ -3215,13 +3229,6 @@ impl Item {
         }
 
         column.into()
-    }
-
-    pub fn is_ab1(&self) -> bool {
-        self.path_opt()
-            .and_then(|p| p.extension())
-            .map(|ext| ext.eq_ignore_ascii_case("ab1"))
-            .unwrap_or(false)
     }
 
     pub fn preview_ab1(&self) -> Element<'_, Message> {

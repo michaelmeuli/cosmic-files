@@ -44,12 +44,13 @@ pub fn call_position28(read: &[u8]) -> Option<u8> {
     // Validate right anchor is also present for confidence
     let right_start = pos28 + 1;
     let right_end   = right_start + ERM41_ANCHOR_R.len();
-    if right_end <= read.len() {
-        let right_ok = read[right_start..right_end]
-            .eq_ignore_ascii_case(ERM41_ANCHOR_R);
-        if !right_ok {
-            return None; // context doesn't match — spurious hit
-        }
+    if right_end > read.len() {
+        return None;
+    }
+    let right_ok = read[right_start..right_end]
+        .eq_ignore_ascii_case(ERM41_ANCHOR_R);
+    if !right_ok {
+        return None;
     }
 
     Some(base)

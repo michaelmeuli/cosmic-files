@@ -251,6 +251,7 @@ async fn remote_sftp_list(
             let mut children_opt = None;
             let is_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
+            let is_ab1 = new_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
             let mut json_opt = None;
             let mut is_susceptible = false;
             if is_json {
@@ -291,6 +292,7 @@ async fn remote_sftp_list(
                 size_opt,
                 children_opt,
                 is_json,
+                is_ab1,
                 json_opt,
                 is_tb_result,
                 is_raw_sample_file,
@@ -437,6 +439,7 @@ async fn remote_sftp_list(
             size_opt: None,
             children_opt: None,
             is_json: true,
+            is_ab1: false,
             json_opt,
             is_tb_result: true,
             is_raw_sample_file: false,
@@ -558,6 +561,7 @@ async fn remote_sftp_parent(
             size_opt,
             children_opt,
             is_json: false,
+            is_ab1: child_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false),
             json_opt: None,
             is_tb_result: false,
             is_raw_sample_file: false,

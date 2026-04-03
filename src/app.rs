@@ -2303,7 +2303,7 @@ impl App {
                                 (Some(_), Some(_)) => Some(tab.multi_preview_view()),
                                 // Exactly one selected item
                                 (Some(item), None) => {
-                                    if item.is_ab1() {
+                                    if item.metadata.is_ab1() {
                                         Some(item.preview_ab1())
                                     } else if item.metadata.is_json() {
                                         Some(item.preview_json(
