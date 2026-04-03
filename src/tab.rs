@@ -85,13 +85,14 @@ use crate::{
     mounter::MOUNTERS,
     mouse_area,
     operation::{Controller, OperationError},
-    russh::{
-        CLIENTS,
-        jsondata::{TB_ECOLI_MAPPING, TbProfilerJson},
+    russh::CLIENTS,
+    sequencing::{
+        erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_sequence},
+        jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
+        SeqData,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
-    sequencing::{erm41::Erm41Position28, erm41::erm41_from_single_read, erm41::parse_ab1_sequence, SeqData},
 };
 #[cfg(unix)]
 use uzers::{get_group_by_gid, get_user_by_uid};
@@ -3142,7 +3143,7 @@ impl Item {
         _mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
         _military_time: bool,
     ) -> Element<'a, Message> {
-        fn tb_variant_widget(v: &crate::russh::jsondata::DrVariant) -> Element<'static, Message> {
+        fn tb_variant_widget(v: &DrVariant) -> Element<'static, Message> {
             widget::container(
                 widget::column()
                     .push({

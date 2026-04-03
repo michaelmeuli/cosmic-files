@@ -1,4 +1,5 @@
 pub mod erm41;
+pub mod jsondata;
 
 use erm41::Erm41Position28;
 

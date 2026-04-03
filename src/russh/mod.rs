@@ -9,7 +9,6 @@ use tokio::sync::mpsc;
 
 use crate::{config::IconSizes, config::TBConfig, russh::russh::RemoteFile, tab};
 
-pub(crate) mod jsondata;
 #[cfg(feature = "russh")]
 mod russh;
 

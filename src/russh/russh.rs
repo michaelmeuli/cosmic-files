@@ -26,7 +26,7 @@ use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
     config::IconSizes,
     fl,
-    russh::jsondata::TbProfilerJson,
+    sequencing::jsondata::TbProfilerJson,
     tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 use mime_guess::MimeGuess;
