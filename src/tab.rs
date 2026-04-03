@@ -3294,6 +3294,9 @@ impl Item {
         column = column.push(details);
 
         if let Some(chrom) = self.metadata.ab1_chromatogram() {
+            if chrom.is_reverse {
+                column = column.push(widget::text::body("reverse complement"));
+            }
             let canvas = widget::Canvas::new(ChromatogramProgram { chrom })
                 .width(Length::Fill)
                 .height(Length::Fixed(200.0));
@@ -3391,7 +3394,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             match base.to_ascii_uppercase() {
                 b'A' => Color::from_rgb(0.0, 0.7, 0.0),
                 b'C' => Color::from_rgb(0.0, 0.0, 1.0),
-                b'G' => Color::from_rgb(0.1, 0.1, 0.1),
+                b'G' => Color::from_rgb(0.8, 0.55, 0.0),
                 b'T' => Color::from_rgb(1.0, 0.0, 0.0),
                 _    => Color::from_rgb(0.5, 0.5, 0.5),
             }
@@ -3499,22 +3502,6 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
                 line_height: cosmic::iced::advanced::text::LineHeight::default(),
                 font: cosmic::iced::Font::default(),
                 align_x: cosmic::iced::advanced::text::Alignment::Center,
-                align_y: alignment::Vertical::Top,
-                shaping: cosmic::iced::advanced::text::Shaping::Basic,
-            });
-        }
-
-        // "(reverse complement)" indicator in the bottom-right corner
-        if is_rev {
-            frame.fill_text(widget::canvas::Text {
-                content: String::from("reverse complement"),
-                position: Point { x: plot_w - 4.0, y: bounds.height - 14.0 },
-                max_width: f32::INFINITY,
-                color: Color::from_rgba(0.4, 0.4, 0.4, 0.9),
-                size: cosmic::iced::Pixels(10.0),
-                line_height: cosmic::iced::advanced::text::LineHeight::default(),
-                font: cosmic::iced::Font::default(),
-                align_x: cosmic::iced::advanced::text::Alignment::Right,
                 align_y: alignment::Vertical::Top,
                 shaping: cosmic::iced::advanced::text::Shaping::Basic,
             });
