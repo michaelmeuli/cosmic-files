@@ -877,6 +877,13 @@ pub fn item_from_entry(
         None
     };
     let is_ab1 = path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
+    let ab1_call_opt = if is_ab1 && !remote {
+        fs::read(&path).ok()
+            .and_then(|bytes| parse_ab1_sequence(&bytes))
+            .map(|seq| erm41_from_single_read(&seq))
+    } else {
+        None
+    };
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
@@ -890,6 +897,7 @@ pub fn item_from_entry(
             children_opt,
             json_opt,
             is_ab1,
+            ab1_call_opt,
             is_tb_result: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
@@ -1196,6 +1204,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             children_opt: None,
             json_opt,
             is_ab1: false,
+            ab1_call_opt: None,
             is_tb_result: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json,
@@ -2215,6 +2224,7 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         json_opt: Option<TbProfilerJson>,
         is_ab1: bool,
+        ab1_call_opt: Option<Erm41Position28>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
@@ -2245,6 +2255,7 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         is_json: bool,
         is_ab1: bool,
+        ab1_call_opt: Option<Erm41Position28>,
         json_opt: Option<TbProfilerJson>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
@@ -2328,6 +2339,19 @@ impl ItemMetadata {
             #[cfg(feature = "russh")]
             Self::RusshPath { is_ab1, .. } => *is_ab1,
             _ => false,
+        }
+    }
+
+    pub fn ab1_call(&self) -> Erm41Position28 {
+        match self {
+            Self::Path { ab1_call_opt, .. } => ab1_call_opt
+                .clone()
+                .unwrap_or(Erm41Position28::Undetermined),
+            #[cfg(feature = "russh")]
+            Self::RusshPath { ab1_call_opt, .. } => ab1_call_opt
+                .clone()
+                .unwrap_or(Erm41Position28::Undetermined),
+            _ => Erm41Position28::Undetermined,
         }
     }
 
@@ -3242,12 +3266,7 @@ impl Item {
         let mut details = widget::column().spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let call = self
-            .path_opt()
-            .and_then(|p| fs::read(p).ok())
-            .and_then(|bytes| parse_ab1_sequence(&bytes))
-            .map(|seq| erm41_from_single_read(&seq))
-            .unwrap_or(Erm41Position28::Undetermined);
+        let call = self.metadata.ab1_call();
 
         let label = match &call {
             Erm41Position28::C28 => "erm(41) C28",

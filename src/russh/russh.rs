@@ -286,6 +286,11 @@ async fn remote_sftp_list(
                 }
                 children_opt = Some(count);
             }
+            let ab1_call_opt = if is_ab1 {
+                load_remote_ab1(client, &child_uri).await
+            } else {
+                None
+            };
             let is_tb_result = json_opt.is_some();
             ItemMetadata::RusshPath {
                 mtime,
@@ -293,6 +298,7 @@ async fn remote_sftp_list(
                 children_opt,
                 is_json,
                 is_ab1,
+                ab1_call_opt,
                 json_opt,
                 is_tb_result,
                 is_raw_sample_file,
@@ -440,6 +446,7 @@ async fn remote_sftp_list(
             children_opt: None,
             is_json: true,
             is_ab1: false,
+            ab1_call_opt: None,
             json_opt,
             is_tb_result: true,
             is_raw_sample_file: false,
@@ -521,7 +528,7 @@ async fn remote_sftp_parent(
     );
 
     let location = Location::Remote(
-        child_uri,
+        child_uri.clone(),
         name.clone(),
         Some(PathBuf::from(remote_file.path.clone())),
     );
@@ -556,12 +563,19 @@ async fn remote_sftp_parent(
             }
             children_opt = Some(count);
         }
+        let is_ab1 = child_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
+        let ab1_call_opt = if is_ab1 {
+            load_remote_ab1(client, &child_uri).await
+        } else {
+            None
+        };
         ItemMetadata::RusshPath {
             mtime,
             size_opt,
             children_opt,
             is_json: false,
-            is_ab1: child_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false),
+            is_ab1,
+            ab1_call_opt,
             json_opt: None,
             is_tb_result: false,
             is_raw_sample_file: false,
@@ -612,6 +626,21 @@ async fn remote_sftp_parent(
         cut: false,
     };
     Ok(item)
+}
+
+async fn load_remote_ab1(
+    client: &Client,
+    uri: &str,
+) -> Option<crate::sequencing::erm41::Erm41Position28> {
+    let remote_file = uri.parse::<RemoteFile>().ok()?;
+    let channel = client.get_channel().await.ok()?;
+    channel.request_subsystem(true, "sftp").await.ok()?;
+    let sftp = SftpSession::new(channel.into_stream()).await.ok()?;
+    let mut file = sftp.open(remote_file.path.clone()).await.ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).await.ok()?;
+    let seq = crate::sequencing::erm41::parse_ab1_sequence(&bytes)?;
+    Some(crate::sequencing::erm41::erm41_from_single_read(&seq))
 }
 
 async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, String> {
