@@ -87,7 +87,7 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_sequence},
+        erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram, parse_ab1_sequence},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         SeqData,
     },
@@ -879,9 +879,12 @@ pub fn item_from_entry(
     };
     let is_ab1 = path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
     let sequence = if is_ab1 && !remote {
-        fs::read(&path).ok()
-            .and_then(|bytes| parse_ab1_sequence(&bytes))
-            .map(|seq| SeqData { ab1_call_opt: Some(erm41_from_single_read(&seq)) })
+        fs::read(&path).ok().map(|bytes| {
+            let call = parse_ab1_sequence(&bytes)
+                .map(|seq| erm41_from_single_read(&seq));
+            let chromatogram = parse_ab1_chromatogram(&bytes);
+            SeqData { ab1_call_opt: call, chromatogram }
+        })
     } else {
         None
     };
@@ -2358,6 +2361,15 @@ impl ItemMetadata {
         }
     }
 
+    pub fn ab1_chromatogram(&self) -> Option<&crate::sequencing::Ab1Channels> {
+        match self {
+            Self::Path { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
+            #[cfg(feature = "russh")]
+            Self::RusshPath { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
         match self {
             Self::Path { json_opt, .. } => *json_opt = json,
@@ -3280,6 +3292,14 @@ impl Item {
         details = details.push(widget::text::body(call.to_string()));
 
         column = column.push(details);
+
+        if let Some(chrom) = self.metadata.ab1_chromatogram() {
+            let canvas = widget::Canvas::new(ChromatogramProgram { chrom })
+                .width(Length::Fill)
+                .height(Length::Fixed(200.0));
+            column = column.push(canvas);
+        }
+
         column.into()
     }
 
@@ -3325,6 +3345,182 @@ impl Item {
 
         row = row.push(column);
         row.into()
+    }
+}
+
+/// Canvas program that renders an AB1 Sanger chromatogram.
+///
+/// Draws the four channel intensity curves in standard colors:
+/// A = green, C = blue, G = black, T = red.
+/// Base call letters are drawn at their peak scan positions along the top.
+struct ChromatogramProgram<'a> {
+    chrom: &'a crate::sequencing::Ab1Channels,
+}
+
+impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
+    for ChromatogramProgram<'a>
+{
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &cosmic::Renderer,
+        _theme: &cosmic::Theme,
+        bounds: Rectangle,
+        _cursor: cosmic::iced::mouse::Cursor,
+    ) -> Vec<widget::canvas::Geometry<cosmic::Renderer>> {
+        use widget::canvas::{Frame, Path, Stroke};
+        use cosmic::iced::alignment;
+
+        let chrom = self.chrom;
+        let is_rev = chrom.is_reverse;
+
+        // Standard Sanger palette: colour by the base the dye represents.
+        // For a reverse read the channel physically contains the complement base,
+        // so we complement the channel's base before looking up the colour —
+        // that way the displayed colour always matches the plus-strand base.
+        let dna_complement = |b: u8| -> u8 {
+            match b.to_ascii_uppercase() {
+                b'A' => b'T', b'T' => b'A',
+                b'C' => b'G', b'G' => b'C',
+                _    => b'N',
+            }
+        };
+        let base_color = |base: u8| -> Color {
+            match base.to_ascii_uppercase() {
+                b'A' => Color::from_rgb(0.0, 0.7, 0.0),
+                b'C' => Color::from_rgb(0.0, 0.0, 1.0),
+                b'G' => Color::from_rgb(0.1, 0.1, 0.1),
+                b'T' => Color::from_rgb(1.0, 0.0, 0.0),
+                _    => Color::from_rgb(0.5, 0.5, 0.5),
+            }
+        };
+
+        // Restrict to the display window (region around erm41 position 28).
+        // Fall back to the full scan range if the anchor was not found.
+        let total_scans = chrom.channels.iter().map(|c| c.len()).max().unwrap_or(1);
+        if total_scans == 0 {
+            return vec![];
+        }
+        let (scan_start, scan_end) = chrom
+            .display_window
+            .unwrap_or((0, total_scans.saturating_sub(1)));
+        let scan_end = scan_end.min(total_scans.saturating_sub(1));
+        let window_len = (scan_end + 1).saturating_sub(scan_start).max(1);
+
+        // Y range: only over the visible window for better contrast
+        let mut y_min = i16::MAX;
+        let mut y_max = i16::MIN;
+        for channel in &chrom.channels {
+            for &v in &channel[scan_start.min(channel.len())..scan_end.min(channel.len())] {
+                if v < y_min { y_min = v; }
+                if v > y_max { y_max = v; }
+            }
+        }
+        if y_min == i16::MAX { y_min = 0; y_max = 1; }
+        if y_max == y_min { y_max = y_min + 1; }
+        let y_range = (y_max - y_min) as f32;
+
+        // Leave a small margin at the top for base letters
+        let top_margin = 18.0_f32;
+        let plot_h = (bounds.height - top_margin).max(1.0);
+        let plot_w = bounds.width;
+
+        // Map scan index to canvas x.
+        // For reverse reads we flip the x-axis so the plus-strand 5′→3′ direction
+        // always runs left to right, identical to a forward read.
+        let scan_to_x = |scan: usize| -> f32 {
+            let t = (scan.saturating_sub(scan_start)) as f32 / (window_len - 1).max(1) as f32;
+            if is_rev { (1.0 - t) * plot_w } else { t * plot_w }
+        };
+        let intensity_to_y = |v: i16| -> f32 {
+            top_margin + (1.0 - (v - y_min) as f32 / y_range) * plot_h
+        };
+
+        let mut frame = Frame::new(renderer, bounds.size());
+
+        // Draw each channel, restricted to [scan_start, scan_end].
+        // For reverse reads the channel base is the complement of the plus-strand base,
+        // so we complement it before resolving the display colour.
+        for (ch_idx, channel) in chrom.channels.iter().enumerate() {
+            if channel.is_empty() {
+                continue;
+            }
+            let raw_base    = chrom.base_order[ch_idx];
+            let display_base = if is_rev { dna_complement(raw_base) } else { raw_base };
+            let color = base_color(display_base);
+
+            let slice_end   = (scan_end + 1).min(channel.len());
+            let slice_start = scan_start.min(slice_end);
+            if slice_start >= slice_end {
+                continue;
+            }
+            let window_slice = &channel[slice_start..slice_end];
+
+            let path = Path::new(|builder| {
+                builder.move_to(Point {
+                    x: scan_to_x(slice_start),
+                    y: intensity_to_y(window_slice[0]),
+                });
+                for (i, &v) in window_slice.iter().enumerate().skip(1) {
+                    builder.line_to(Point {
+                        x: scan_to_x(slice_start + i),
+                        y: intensity_to_y(v),
+                    });
+                }
+            });
+
+            frame.stroke(
+                &path,
+                Stroke::default()
+                    .with_color(color)
+                    .with_width(1.2),
+            );
+        }
+
+        // Draw base call letters only for bases whose peak falls in the window.
+        // For reverse reads show the complement letter so the label matches the
+        // plus-strand base at each position.
+        for (base, &peak) in chrom.bases.iter().zip(chrom.peak_locs.iter()) {
+            let scan = peak as usize;
+            if scan < scan_start || scan > scan_end {
+                continue;
+            }
+            let display_base = if is_rev { dna_complement(*base) } else { *base };
+            let x = scan_to_x(scan);
+            let color = base_color(display_base);
+            frame.fill_text(widget::canvas::Text {
+                content: String::from(display_base as char),
+                position: Point { x, y: 2.0 },
+                max_width: f32::INFINITY,
+                color,
+                size: cosmic::iced::Pixels(11.0),
+                line_height: cosmic::iced::advanced::text::LineHeight::default(),
+                font: cosmic::iced::Font::default(),
+                align_x: cosmic::iced::advanced::text::Alignment::Center,
+                align_y: alignment::Vertical::Top,
+                shaping: cosmic::iced::advanced::text::Shaping::Basic,
+            });
+        }
+
+        // "(reverse complement)" indicator in the bottom-right corner
+        if is_rev {
+            frame.fill_text(widget::canvas::Text {
+                content: String::from("reverse complement"),
+                position: Point { x: plot_w - 4.0, y: bounds.height - 14.0 },
+                max_width: f32::INFINITY,
+                color: Color::from_rgba(0.4, 0.4, 0.4, 0.9),
+                size: cosmic::iced::Pixels(10.0),
+                line_height: cosmic::iced::advanced::text::LineHeight::default(),
+                font: cosmic::iced::Font::default(),
+                align_x: cosmic::iced::advanced::text::Alignment::Right,
+                align_y: alignment::Vertical::Top,
+                shaping: cosmic::iced::advanced::text::Shaping::Basic,
+            });
+        }
+
+        vec![frame.into_geometry()]
     }
 }
 

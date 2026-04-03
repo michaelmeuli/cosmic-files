@@ -74,6 +74,174 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     }).collect()
 }
 
+/// Parse an AB1 file and return chromatogram channel data plus basecalls.
+///
+/// Collects DATA tags 9-12 (analyzed, preferred) or 1-4 (raw fallback),
+/// PBAS tag 2/1 (basecalls), PLOC tag 2/1 (peak locations), and FWO_ tag 1
+/// (filter wheel order mapping channel index → base letter).
+pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<crate::sequencing::Ab1Channels> {
+    if data.len() < 34 || &data[0..4] != b"ABIF" {
+        return None;
+    }
+
+    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
+    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
+
+    // Collect all tag entries we care about
+    let mut data_tags: std::collections::HashMap<i32, Vec<i16>> = std::collections::HashMap::new();
+    let mut pbas1: Option<Vec<u8>>  = None;
+    let mut pbas2: Option<Vec<u8>>  = None;
+    let mut ploc1: Option<Vec<u16>> = None;
+    let mut ploc2: Option<Vec<u16>> = None;
+    let mut fwo: Option<[u8; 4]>    = None;
+
+    for i in 0..dir_count {
+        let e = dir_offset + i * 28;
+        if e + 28 > data.len() {
+            break;
+        }
+        let tag_name   = &data[e..e + 4];
+        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
+        let num_elems  = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
+        let data_size  = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
+        let data_off   = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
+
+        let offset = if data_size <= 4 { e + 20 } else { data_off };
+
+        if tag_name == b"DATA" && (1..=12).contains(&tag_number) {
+            // Each element is an i16 BE (2 bytes)
+            if offset + num_elems * 2 <= data.len() {
+                let values: Vec<i16> = (0..num_elems)
+                    .map(|j| i16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]]))
+                    .collect();
+                data_tags.insert(tag_number, values);
+            }
+        } else if tag_name == b"PBAS" {
+            if offset + num_elems <= data.len() {
+                let seq = data[offset..offset + num_elems].to_vec();
+                match tag_number {
+                    2 => pbas2 = Some(seq),
+                    1 => pbas1 = Some(seq),
+                    _ => {}
+                }
+            }
+        } else if tag_name == b"PLOC" {
+            // i16 BE peak scan positions
+            if offset + num_elems * 2 <= data.len() {
+                let locs: Vec<u16> = (0..num_elems)
+                    .map(|j| u16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]]))
+                    .collect();
+                match tag_number {
+                    2 => ploc2 = Some(locs),
+                    1 => ploc1 = Some(locs),
+                    _ => {}
+                }
+            }
+        } else if tag_name == b"FWO_" && tag_number == 1 {
+            // 4 bytes: base letter for each channel in order
+            if offset + 4 <= data.len() {
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&data[offset..offset + 4]);
+                fwo = Some(arr);
+            }
+        }
+    }
+
+    // Prefer analyzed channels (9-12), fall back to raw (1-4)
+    let channel_indices: [(i32, i32); 4] = [(9, 1), (10, 2), (11, 3), (12, 4)];
+    let channels: [Vec<i16>; 4] = channel_indices.map(|(preferred, fallback)| {
+        data_tags
+            .remove(&preferred)
+            .or_else(|| data_tags.remove(&fallback))
+            .unwrap_or_default()
+    });
+
+    let bases     = pbas2.or(pbas1)?;
+    let peak_locs = ploc2
+        .or(ploc1)
+        .unwrap_or_else(|| vec![0u16; bases.len()]);
+    let base_order = fwo.unwrap_or(*b"ACGT");
+
+    let window_result = find_display_window(&bases, &peak_locs);
+    let (display_window, is_reverse) = match window_result {
+        Some((start, end, rev)) => (Some((start, end)), rev),
+        None                    => (None, false),
+    };
+
+    Some(crate::sequencing::Ab1Channels {
+        channels,
+        bases,
+        peak_locs,
+        base_order,
+        display_window,
+        is_reverse,
+    })
+}
+
+/// Find the scan-index window covering "cgacgccag[pos28]ggggctggtat":
+/// 9 bases before position 28 and 11 bases after (including pos28 itself).
+///
+/// Returns `(start_scan, end_scan, is_reverse)`.
+/// For reverse reads the window scan indices are returned in the same
+/// (start < end) order as for forward reads; the caller flips the x-axis.
+fn find_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize, bool)> {
+    // Flanking bases to show: 9 before pos28, 11 after (pos28 is the first of the 11)
+    const LEFT: usize  = 9;
+    const RIGHT: usize = 11;
+
+    let anchor_len = ERM41_ANCHOR_L.len();
+
+    // --- Forward orientation: ANCHOR_L directly in PBAS ---
+    if let Some(hit) = bases
+        .windows(anchor_len)
+        .position(|w| w.eq_ignore_ascii_case(ERM41_ANCHOR_L))
+    {
+        let pos28 = hit + anchor_len;
+        if let Some(window) = scan_window(pos28, LEFT, RIGHT, peak_locs) {
+            return Some((window.0, window.1, false));
+        }
+    }
+
+    // --- Reverse orientation: RC(ANCHOR_R) appears before comp(pos28) in PBAS ---
+    // On the minus strand the read is: RC(ANCHOR_R) · comp(pos28) · RC(ANCHOR_L)
+    // We use LEFT=11, RIGHT=9 here because in the RC world the flanks swap sides:
+    // the 11-base ANCHOR_R flank sits to the LEFT of comp(pos28) in scan space,
+    // and the 9-base ANCHOR_L flank sits to the RIGHT.
+    let rc_anchor_r: Vec<u8> = reverse_complement(ERM41_ANCHOR_R);
+    if let Some(hit) = bases
+        .windows(rc_anchor_r.len())
+        .position(|w| w.eq_ignore_ascii_case(&rc_anchor_r))
+    {
+        let pos28_comp = hit + rc_anchor_r.len();
+        if let Some(window) = scan_window(pos28_comp, RIGHT, LEFT, peak_locs) {
+            return Some((window.0, window.1, true));
+        }
+    }
+
+    None
+}
+
+/// Convert a base-array position + left/right flank counts to a scan-index range.
+/// Returns `None` if the indices would go out of bounds or produce an empty range.
+fn scan_window(
+    center: usize,
+    left: usize,
+    right: usize,
+    peak_locs: &[u16],
+) -> Option<(usize, usize)> {
+    let base_start = center.checked_sub(left)?;
+    let base_end   = center + right;
+    if base_end >= peak_locs.len() {
+        return None;
+    }
+    let start_scan = peak_locs[base_start] as usize;
+    let end_scan   = peak_locs[base_end]   as usize;
+    if start_scan >= end_scan {
+        return None;
+    }
+    Some((start_scan, end_scan))
+}
+
 /// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
 ///
 /// Tries the edited basecalls (PBAS tag 2) first, falling back to raw basecalls (PBAS tag 1).

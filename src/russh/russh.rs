@@ -288,7 +288,6 @@ async fn remote_sftp_list(
             }
             let sequence = if is_ab1 {
                 load_remote_ab1(client, &child_uri).await
-                    .map(|call| crate::sequencing::SeqData { ab1_call_opt: Some(call) })
             } else {
                 None
             };
@@ -567,7 +566,6 @@ async fn remote_sftp_parent(
         let is_ab1 = child_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
         let sequence = if is_ab1 {
             load_remote_ab1(client, &child_uri).await
-                .map(|call| crate::sequencing::SeqData { ab1_call_opt: Some(call) })
         } else {
             None
         };
@@ -633,7 +631,7 @@ async fn remote_sftp_parent(
 async fn load_remote_ab1(
     client: &Client,
     uri: &str,
-) -> Option<crate::sequencing::erm41::Erm41Position28> {
+) -> Option<crate::sequencing::SeqData> {
     let remote_file = uri.parse::<RemoteFile>().ok()?;
     let channel = client.get_channel().await.ok()?;
     channel.request_subsystem(true, "sftp").await.ok()?;
@@ -641,8 +639,10 @@ async fn load_remote_ab1(
     let mut file = sftp.open(remote_file.path.clone()).await.ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).await.ok()?;
-    let seq = crate::sequencing::erm41::parse_ab1_sequence(&bytes)?;
-    Some(crate::sequencing::erm41::erm41_from_single_read(&seq))
+    let call = crate::sequencing::erm41::parse_ab1_sequence(&bytes)
+        .map(|seq| crate::sequencing::erm41::erm41_from_single_read(&seq));
+    let chromatogram = crate::sequencing::erm41::parse_ab1_chromatogram(&bytes);
+    Some(crate::sequencing::SeqData { ab1_call_opt: call, chromatogram })
 }
 
 async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, String> {
