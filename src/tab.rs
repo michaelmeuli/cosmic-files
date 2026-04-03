@@ -91,7 +91,7 @@ use crate::{
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
-    sequencing::erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_sequence},
+    sequencing::{erm41::Erm41Position28, erm41::erm41_from_single_read, erm41::parse_ab1_sequence, SeqData},
 };
 #[cfg(unix)]
 use uzers::{get_group_by_gid, get_user_by_uid};
@@ -877,10 +877,10 @@ pub fn item_from_entry(
         None
     };
     let is_ab1 = path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
-    let ab1_call_opt = if is_ab1 && !remote {
+    let sequence = if is_ab1 && !remote {
         fs::read(&path).ok()
             .and_then(|bytes| parse_ab1_sequence(&bytes))
-            .map(|seq| erm41_from_single_read(&seq))
+            .map(|seq| SeqData { ab1_call_opt: Some(erm41_from_single_read(&seq)) })
     } else {
         None
     };
@@ -897,7 +897,7 @@ pub fn item_from_entry(
             children_opt,
             json_opt,
             is_ab1,
-            ab1_call_opt,
+            sequence,
             is_tb_result: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
@@ -1204,7 +1204,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             children_opt: None,
             json_opt,
             is_ab1: false,
-            ab1_call_opt: None,
+            sequence: None,
             is_tb_result: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json,
@@ -2224,7 +2224,7 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         json_opt: Option<TbProfilerJson>,
         is_ab1: bool,
-        ab1_call_opt: Option<Erm41Position28>,
+        sequence: Option<SeqData>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
@@ -2255,7 +2255,7 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         is_json: bool,
         is_ab1: bool,
-        ab1_call_opt: Option<Erm41Position28>,
+        sequence: Option<SeqData>,
         json_opt: Option<TbProfilerJson>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
@@ -2344,12 +2344,14 @@ impl ItemMetadata {
 
     pub fn ab1_call(&self) -> Erm41Position28 {
         match self {
-            Self::Path { ab1_call_opt, .. } => ab1_call_opt
-                .clone()
+            Self::Path { sequence, .. } => sequence
+                .as_ref()
+                .and_then(|s| s.ab1_call_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             #[cfg(feature = "russh")]
-            Self::RusshPath { ab1_call_opt, .. } => ab1_call_opt
-                .clone()
+            Self::RusshPath { sequence, .. } => sequence
+                .as_ref()
+                .and_then(|s| s.ab1_call_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             _ => Erm41Position28::Undetermined,
         }

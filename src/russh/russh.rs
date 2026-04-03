@@ -286,8 +286,9 @@ async fn remote_sftp_list(
                 }
                 children_opt = Some(count);
             }
-            let ab1_call_opt = if is_ab1 {
+            let sequence = if is_ab1 {
                 load_remote_ab1(client, &child_uri).await
+                    .map(|call| crate::sequencing::SeqData { ab1_call_opt: Some(call) })
             } else {
                 None
             };
@@ -298,7 +299,7 @@ async fn remote_sftp_list(
                 children_opt,
                 is_json,
                 is_ab1,
-                ab1_call_opt,
+                sequence,
                 json_opt,
                 is_tb_result,
                 is_raw_sample_file,
@@ -446,7 +447,7 @@ async fn remote_sftp_list(
             children_opt: None,
             is_json: true,
             is_ab1: false,
-            ab1_call_opt: None,
+            sequence: None,
             json_opt,
             is_tb_result: true,
             is_raw_sample_file: false,
@@ -564,8 +565,9 @@ async fn remote_sftp_parent(
             children_opt = Some(count);
         }
         let is_ab1 = child_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
-        let ab1_call_opt = if is_ab1 {
+        let sequence = if is_ab1 {
             load_remote_ab1(client, &child_uri).await
+                .map(|call| crate::sequencing::SeqData { ab1_call_opt: Some(call) })
         } else {
             None
         };
@@ -575,7 +577,7 @@ async fn remote_sftp_parent(
             children_opt,
             is_json: false,
             is_ab1,
-            ab1_call_opt,
+            sequence,
             json_opt: None,
             is_tb_result: false,
             is_raw_sample_file: false,
