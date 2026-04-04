@@ -90,7 +90,7 @@ use crate::{
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         seqid::identify_sequence,
-        parse_ab1_sequence, SeqData, SeqIdHit, Ab1Channels,
+        parse_ab1_quality, parse_ab1_sequence, trim_to_min_quality, SeqData, SeqIdHit, Ab1Channels,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
@@ -882,8 +882,15 @@ pub fn item_from_entry(
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
+            let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            let seq_id = ab1_seq.as_ref().and_then(|seq| identify_sequence(seq));
+            let seq_id = ab1_seq.as_ref().and_then(|seq| {
+                let trimmed = match &ab1_qual {
+                    Some(qual) => trim_to_min_quality(seq, qual, 20),
+                    None => seq.as_slice(),
+                };
+                identify_sequence(trimmed)
+            });
             let chromatogram = parse_ab1_chromatogram(&bytes);
             SeqData { 
                 erm41position28_opt, 

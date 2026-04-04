@@ -52,6 +52,72 @@ pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
     pbas1
 }
 
+/// Parse an AB1 (ABIF) file and return the quality scores (PCON tag).
+///
+/// Tries edited quality scores (PCON tag 2) first, falling back to raw (PCON tag 1).
+/// Each byte is a Phred quality score corresponding to the base at the same index in PBAS.
+/// Returns `None` if the file is invalid or no PCON tag is found.
+pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() < 34 || &data[0..4] != b"ABIF" {
+        return None;
+    }
+
+    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
+    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
+
+    let mut pcon1: Option<Vec<u8>> = None;
+
+    for i in 0..dir_count {
+        let e = dir_offset + i * 28;
+        if e + 28 > data.len() {
+            break;
+        }
+        let tag_name   = &data[e..e + 4];
+        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
+        let num_elems  = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
+        let data_size  = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
+        let data_off   = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
+
+        if tag_name == b"PCON" {
+            let offset = if data_size <= 4 { e + 20 } else { data_off };
+            if offset + num_elems <= data.len() {
+                let qual = data[offset..offset + num_elems].to_vec();
+                if tag_number == 2 {
+                    return Some(qual); // edited quality — best
+                } else if tag_number == 1 {
+                    pcon1 = Some(qual); // raw quality — keep as fallback
+                }
+            }
+        }
+    }
+
+    pcon1
+}
+
+/// Trim a basecall sequence to the high-quality region.
+///
+/// Removes leading and trailing bases whose Phred quality score is below
+/// `min_q`.  If `qual` is shorter than `seq` the excess bases are treated as
+/// quality 0.  Returns an empty slice when no base meets the threshold.
+pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8] {
+    let start = seq
+        .iter()
+        .enumerate()
+        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
+        .map(|(i, _)| i)
+        .unwrap_or(seq.len());
+
+    let end = seq
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
+        .map(|(i, _)| i + 1)
+        .unwrap_or(0);
+
+    if start >= end { &[] } else { &seq[start..end] }
+}
+
 /// Parsed channel intensity data from an AB1 chromatogram.
 #[derive(Clone, Debug)]
 pub struct Ab1Channels {
