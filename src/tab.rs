@@ -884,13 +884,13 @@ pub fn item_from_entry(
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            let seq_id = ab1_seq.as_ref().and_then(|seq| {
+            let seq_id = ab1_seq.as_ref().map(|seq| {
                 let trimmed = match &ab1_qual {
                     Some(qual) => trim_to_min_quality(seq, qual, 20),
                     None => seq.as_slice(),
                 };
                 identify_sequence(trimmed)
-            });
+            }).unwrap_or_default();
             let chromatogram = parse_ab1_chromatogram(&bytes);
             SeqData { 
                 erm41position28_opt, 
@@ -2387,17 +2387,21 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_seq_id(&self) -> Option<&SeqIdHit> {
+    pub fn ab1_seq_id(&self) -> &[SeqIdHit] {
         match self {
-            Self::Path { sequence, .. } => sequence.as_ref()?.seq_id.as_ref(),
+            Self::Path { sequence, .. } => {
+                sequence.as_ref().map(|s| s.seq_id.as_slice()).unwrap_or(&[])
+            }
             #[cfg(feature = "russh")]
-            Self::RusshPath { sequence, .. } => sequence.as_ref()?.seq_id.as_ref(),
-            _ => None,
+            Self::RusshPath { sequence, .. } => {
+                sequence.as_ref().map(|s| s.seq_id.as_slice()).unwrap_or(&[])
+            }
+            _ => &[],
         }
     }
 
     pub fn is_seq_id(&self) -> bool {
-        self.ab1_seq_id().is_some_and(|h| h.identity >= 2.0)
+        self.ab1_seq_id().first().is_some_and(|h| h.identity >= 2.0)
     }
 
     pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
@@ -3343,29 +3347,38 @@ impl Item {
         let mut details = widget::column().spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        if let Some(hit) = self.metadata.ab1_seq_id() {
-            let label = format!(
-                "Best match: {} ({:.1}%{})",
-                hit.accession,
-                hit.identity,
-                if hit.is_reverse { ", reverse complement" } else { "" },
-            );
-            details = details.push(widget::text::heading(label));
-        } else {
+        let hits = self.metadata.ab1_seq_id();
+        if hits.is_empty() {
             details = details.push(widget::text::heading("No sequence match found"));
+        } else {
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading("Best match:"));
+
+            for (i, hit) in hits.iter().enumerate() {
+                let label = if i == 0 {
+                    format!(
+                        "{} ({:.1}%)",
+                        hit.description,
+                        hit.identity,
+                    )
+                } else {
+                    format!(
+                        "{} ({:.1}%)",
+                        hit.description,
+                        hit.identity,
+                    )
+                };
+                if i == 0 {
+                    details = details.push(widget::text::heading(label));
+                    details = details.push(widget::text::heading(""));
+                    details = details.push(widget::text::body("Other matches:"));
+                } else {
+                    details = details.push(widget::text::body(label));
+                }
+            }
         }
 
         column = column.push(details);
-
-        if let Some(chrom) = self.metadata.ab1_chromatogram() {
-            if chrom.is_reverse {
-                column = column.push(widget::text::body("reverse complement"));
-            }
-            let canvas = widget::Canvas::new(ChromatogramProgram { chrom })
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0));
-            column = column.push(canvas);
-        }
 
         column.into()
     }
