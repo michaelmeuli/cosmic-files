@@ -249,16 +249,16 @@ async fn remote_sftp_list(
             let is_dir = info.is_dir();
             let size_opt = (!is_dir).then_some(info.size).flatten();
             let mut children_opt = None;
-            let is_json =
+            let is_tbprofiler_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             let is_ab1 = new_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
-            let mut json_opt = None;
+            let mut tbprofilerjson_opt = None;
             let mut is_susceptible = false;
-            if is_json {
+            if is_tbprofiler_json {
                 match load_remote_json(client, &child_uri).await {
                     Ok(json) => {
                         let sus = json.dr_variants.iter().all(|v| v.is_susceptible());
-                        json_opt = Some(json);
+                        tbprofilerjson_opt = Some(json);
                         is_susceptible = sus;
                     }
                     Err(e) => {
@@ -291,15 +291,15 @@ async fn remote_sftp_list(
             } else {
                 None
             };
-            let is_tb_result = json_opt.is_some();
+            let is_tb_result = tbprofilerjson_opt.is_some();
             ItemMetadata::RusshPath {
                 mtime,
                 size_opt,
                 children_opt,
-                is_json,
+                is_tbprofiler_json,
                 is_ab1,
                 sequence,
-                json_opt,
+                tbprofilerjson_opt,
                 is_tb_result,
                 is_raw_sample_file,
                 sample_json_path_opt: None,
@@ -410,7 +410,7 @@ async fn remote_sftp_list(
         if files.json.is_none() {
             continue;
         }
-        let mut json_opt = None;
+        let mut tbprofilerjson_opt = None;
         let mut is_susceptible = false;
 
         if let Some(json_path) = &files.json {
@@ -431,7 +431,7 @@ async fn remote_sftp_list(
             match load_remote_json(client, url.as_str()).await {
                 Ok(json) => {
                     let sus = json.dr_variants.iter().all(|v| v.is_susceptible());
-                    json_opt = Some(json);
+                    tbprofilerjson_opt = Some(json);
                     is_susceptible = sus;
                 }
                 Err(e) => log::warn!("Failed to load sample JSON: {}", e),
@@ -444,10 +444,10 @@ async fn remote_sftp_list(
             mtime: files.mtime,
             size_opt: None,
             children_opt: None,
-            is_json: true,
+            is_tbprofiler_json: true,
             is_ab1: false,
             sequence: None,
-            json_opt,
+            tbprofilerjson_opt,
             is_tb_result: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json.clone(),
@@ -573,10 +573,10 @@ async fn remote_sftp_parent(
             mtime,
             size_opt,
             children_opt,
-            is_json: false,
+            is_tbprofiler_json: false,
             is_ab1,
             sequence,
-            json_opt: None,
+            tbprofilerjson_opt: None,
             is_tb_result: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
@@ -643,7 +643,7 @@ async fn load_remote_ab1(
     let call = ab1_seq.as_ref().map(|seq| crate::sequencing::erm41::erm41_from_single_read(seq));
     let seq_id = ab1_seq.as_ref().and_then(|seq| crate::sequencing::erm41::identify_sequence(seq));
     let chromatogram = crate::sequencing::erm41::parse_ab1_chromatogram(&bytes);
-    Some(crate::sequencing::SeqData { ab1_call_opt: call, chromatogram, seq_id })
+    Some(crate::sequencing::SeqData { erm41position28_opt: call, chromatogram, seq_id })
 }
 
 async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, String> {

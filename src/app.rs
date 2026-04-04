@@ -2305,13 +2305,10 @@ impl App {
                                 (Some(item), None) => {
                                     if item.metadata.is_erm41() {
                                         Some(item.preview_erm41())
-                                    } else if item.metadata.is_ab1() {
+                                    } else if item.metadata.is_seq_id() {
                                         Some(item.preview_seq_id())
-                                    } else if item.metadata.is_json() {
-                                        Some(item.preview_json(
-                                            Some(&self.mime_app_cache),
-                                            military_time,
-                                        ))
+                                    } else if item.metadata.is_tbprofiler_json() {
+                                        Some(item.preview_tbprofiler_json())
                                     } else {
                                         Some(item.preview_view(
                                             Some(&self.mime_app_cache),

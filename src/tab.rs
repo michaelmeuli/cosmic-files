@@ -870,7 +870,7 @@ pub fn item_from_entry(
         }
     }
 
-    let json_opt = if !remote && !metadata.is_dir() && mime == mime::APPLICATION_JSON {
+    let tbprofilerjson_opt = if !remote && !metadata.is_dir() && mime == mime::APPLICATION_JSON {
         fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -881,10 +881,14 @@ pub fn item_from_entry(
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
-            let call = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
+            let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
             let seq_id = ab1_seq.as_ref().and_then(|seq| identify_sequence(seq));
             let chromatogram = parse_ab1_chromatogram(&bytes);
-            SeqData { ab1_call_opt: call, chromatogram, seq_id }
+            SeqData { 
+                erm41position28_opt, 
+                chromatogram, 
+                seq_id 
+            }
         })
     } else {
         None
@@ -900,7 +904,7 @@ pub fn item_from_entry(
         metadata: ItemMetadata::Path {
             metadata,
             children_opt,
-            json_opt,
+            tbprofilerjson_opt,
             is_ab1,
             sequence,
             is_tb_result: false,
@@ -1194,12 +1198,12 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         let Ok(fs_meta) = fs::metadata(representative) else {
             continue;
         };
-        let json_opt: Option<TbProfilerJson> = files.json.as_ref().and_then(|p| {
+        let tbprofilerjson_opt: Option<TbProfilerJson> = files.json.as_ref().and_then(|p| {
             fs::read_to_string(p)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
         });
-        let is_susceptible = json_opt
+        let is_susceptible = tbprofilerjson_opt
             .as_ref()
             .map(|j| j.dr_variants.iter().all(|v| v.is_susceptible()))
             .unwrap_or(false);
@@ -1207,7 +1211,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         let metadata = ItemMetadata::Path {
             metadata: fs_meta,
             children_opt: None,
-            json_opt,
+            tbprofilerjson_opt,
             is_ab1: false,
             sequence: None,
             is_tb_result: true,
@@ -2227,7 +2231,7 @@ pub enum ItemMetadata {
     Path {
         metadata: Metadata,
         children_opt: Option<usize>,
-        json_opt: Option<TbProfilerJson>,
+        tbprofilerjson_opt: Option<TbProfilerJson>,
         is_ab1: bool,
         sequence: Option<SeqData>,
         is_tb_result: bool,
@@ -2258,10 +2262,10 @@ pub enum ItemMetadata {
         mtime: u64,
         size_opt: Option<u64>,
         children_opt: Option<usize>,
-        is_json: bool,
+        is_tbprofiler_json: bool,
         is_ab1: bool,
         sequence: Option<SeqData>,
-        json_opt: Option<TbProfilerJson>,
+        tbprofilerjson_opt: Option<TbProfilerJson>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
@@ -2329,11 +2333,11 @@ impl ItemMetadata {
         }
     }
 
-    pub fn is_json(&self) -> bool {
+    pub fn is_tbprofiler_json(&self) -> bool {
         match self {
-            Self::Path { json_opt, .. } => json_opt.is_some(),
+            Self::Path { tbprofilerjson_opt, .. } => tbprofilerjson_opt.is_some(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { is_json, .. } => *is_json,
+            Self::RusshPath { is_tbprofiler_json, .. } => *is_tbprofiler_json,
             _ => false,
         }
     }
@@ -2351,12 +2355,12 @@ impl ItemMetadata {
         match self {
             Self::Path { sequence, .. } => sequence
                 .as_ref()
-                .and_then(|s| s.ab1_call_opt.clone())
+                .and_then(|s| s.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             #[cfg(feature = "russh")]
             Self::RusshPath { sequence, .. } => sequence
                 .as_ref()
-                .and_then(|s| s.ab1_call_opt.clone())
+                .and_then(|s| s.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             _ => Erm41Position28::Undetermined,
         }
@@ -2384,20 +2388,24 @@ impl ItemMetadata {
         }
     }
 
+    pub fn is_seq_id(&self) -> bool {
+        self.ab1_seq_id().is_some_and(|h| h.identity >= 2.0)
+    }
+
     pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
         match self {
-            Self::Path { json_opt, .. } => *json_opt = json,
+            Self::Path { tbprofilerjson_opt, .. } => *tbprofilerjson_opt = json,
             #[cfg(feature = "russh")]
-            Self::RusshPath { json_opt, .. } => *json_opt = json,
+            Self::RusshPath { tbprofilerjson_opt, .. } => *tbprofilerjson_opt = json,
             _ => {}
         }
     }
 
-    pub fn is_json_opt(&self) -> bool {
+    pub fn is_tbprofilerjson_opt(&self) -> bool {
         match self {
-            Self::Path { json_opt, .. } => json_opt.is_some(),
+            Self::Path { tbprofilerjson_opt, .. } => tbprofilerjson_opt.is_some(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { json_opt, .. } => json_opt.is_some(),
+            Self::RusshPath { tbprofilerjson_opt, .. } => tbprofilerjson_opt.is_some(),
             _ => false,
         }
     }
@@ -3164,11 +3172,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_json<'a>(
-        &'a self,
-        _mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
-        _military_time: bool,
-    ) -> Element<'a, Message> {
+    pub fn preview_tbprofiler_json(&self) -> Element<'_, Message> {
         fn tb_variant_widget(v: &DrVariant) -> Element<'static, Message> {
             widget::container(
                 widget::column()
@@ -3206,10 +3210,10 @@ impl Item {
         let mut details = widget::column().spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let json_opt = match &self.metadata {
-            ItemMetadata::Path { json_opt, .. } => json_opt.as_ref(),
+        let tbprofilerjson_opt = match &self.metadata {
+            ItemMetadata::Path { tbprofilerjson_opt, .. } => tbprofilerjson_opt.as_ref(),
             #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { json_opt, .. } => json_opt.as_ref(),
+            ItemMetadata::RusshPath { tbprofilerjson_opt, .. } => tbprofilerjson_opt.as_ref(),
             _ => None,
         };
 
@@ -3226,7 +3230,7 @@ impl Item {
             }
         }
 
-        if let Some(json) = json_opt {
+        if let Some(json) = tbprofilerjson_opt {
             column = column.push(widget::text::heading(format!(
                 "DB: {} ({})",
                 json.pipeline.db_version.name, json.pipeline.db_version.commit
