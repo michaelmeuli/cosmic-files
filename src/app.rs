@@ -5307,6 +5307,25 @@ impl Application for App {
                                 commands.push(window::toggle_maximize(window_id));
                             }
                         }
+                        tab::Command::OpenSeqAlignment(hit) => {
+                            let text = hit.format_pairwise_alignment();
+                            match tempfile::Builder::new()
+                                .prefix("alignment_")
+                                .suffix(".txt")
+                                .tempfile()
+                            {
+                                Ok(mut f) => {
+                                    use std::io::Write as _;
+                                    let _ = f.write_all(text.as_bytes());
+                                    let path = f.into_temp_path();
+                                    let path = path.keep().unwrap_or_default();
+                                    if let Err(err) = open::that_detached(&path) {
+                                        log::warn!("failed to open alignment viewer: {err}");
+                                    }
+                                }
+                                Err(err) => log::warn!("failed to create temp file for alignment: {err}"),
+                            }
+                        }
                         tab::Command::SetSort(location, heading_options, direction) => {
                             let default_sort = tab::SORT_OPTION_FALLBACK
                                 .get(&location)

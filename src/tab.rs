@@ -2151,6 +2151,7 @@ pub enum Command {
     ExecEntryAction(cosmic::desktop::DesktopEntryData, usize),
     Iced(TaskWrapper),
     OpenFile(Vec<PathBuf>),
+    OpenSeqAlignment(Box<SeqIdHit>),
     OpenInNewTab(PathBuf),
     OpenUriInNewTab(String, String, Option<PathBuf>),
     OpenInNewWindow(PathBuf),
@@ -2234,6 +2235,7 @@ pub enum Message {
     HighlightActivate(usize),
     DirectorySize(PathBuf, DirSize),
     ImageDecoded(PathBuf, u32, u32, Vec<u8>, Option<(u32, u32)>, u64), // path, width, height, pixels, display_size, generation
+    OpenSeqAlignment(Box<SeqIdHit>),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -3461,8 +3463,14 @@ impl Item {
                 details = details.push(widget::text::body(""));
             }
 
+            details = details.push(
+                widget::button::standard("View alignment")
+                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
+            );
+
             // ── Other matches ──
             if hits.len() > 1 {
+                details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body("Other matches:".to_string()));
                 for hit in &hits[1..] {
                     let orient = if hit.is_reverse { ", RC" } else { "" };
@@ -5628,6 +5636,9 @@ impl Tab {
                         }
                     }
                 }
+            }
+            Message::OpenSeqAlignment(hit) => {
+                commands.push(Command::OpenSeqAlignment(hit));
             }
         }
 
