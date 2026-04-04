@@ -1,7 +1,9 @@
 pub mod erm41;
 pub mod jsondata;
+pub mod seqid;
 
 use erm41::Erm41Position28;
+pub use seqid::SeqIdHit;
 
 /// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
 ///
@@ -84,16 +86,6 @@ impl Ab1Channels {
     }
 }
 
-/// Best-hit result from aligning an AB1 read against the reference sequences.
-#[derive(Clone, Debug)]
-pub struct SeqIdHit {
-    /// Accession of the best-matching reference (e.g. "AF547836").
-    pub accession: String,
-    /// Percent identity of the best local alignment window (0.0–100.0).
-    pub identity: f32,
-    /// `true` when the reverse complement of the query was the better match.
-    pub is_reverse: bool,
-}
 
 #[derive(Clone, Debug)]
 pub struct SeqData {

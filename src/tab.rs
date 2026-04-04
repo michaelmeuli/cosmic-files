@@ -87,8 +87,9 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        erm41::{Erm41Position28, erm41_from_single_read, identify_sequence, parse_ab1_chromatogram},
+        erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
+        seqid::identify_sequence,
         parse_ab1_sequence, SeqData, SeqIdHit, Ab1Channels,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},

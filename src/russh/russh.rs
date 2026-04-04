@@ -641,7 +641,7 @@ async fn load_remote_ab1(
     file.read_to_end(&mut bytes).await.ok()?;
     let ab1_seq = crate::sequencing::parse_ab1_sequence(&bytes);
     let call = ab1_seq.as_ref().map(|seq| crate::sequencing::erm41::erm41_from_single_read(seq));
-    let seq_id = ab1_seq.as_ref().and_then(|seq| crate::sequencing::erm41::identify_sequence(seq));
+    let seq_id = ab1_seq.as_ref().and_then(|seq| crate::sequencing::seqid::identify_sequence(seq));
     let chromatogram = crate::sequencing::erm41::parse_ab1_chromatogram(&bytes);
     Some(crate::sequencing::SeqData { erm41position28_opt: call, chromatogram, seq_id })
 }
