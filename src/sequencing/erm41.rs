@@ -243,53 +243,6 @@ fn scan_window(
     Some((start_scan, end_scan))
 }
 
-/// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
-///
-/// Tries the edited basecalls (PBAS tag 2) first, falling back to raw basecalls (PBAS tag 1).
-/// Returns `None` if the magic bytes are missing or no PBAS tag is found.
-pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
-    // Validate ABIF magic and minimum header size
-    if data.len() < 34 || &data[0..4] != b"ABIF" {
-        return None;
-    }
-
-    // Root directory entry sits at byte 6 (28 bytes long).
-    // num_elements (i32 BE) at root+12 = byte 18
-    // data_offset  (i32 BE) at root+20 = byte 26
-    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
-    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
-
-    let mut pbas1: Option<Vec<u8>> = None;
-
-    for i in 0..dir_count {
-        let e = dir_offset + i * 28;
-        if e + 28 > data.len() {
-            break;
-        }
-        let tag_name   = &data[e..e + 4];
-        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
-        // num_elements at e+12, data_size at e+16, data_offset at e+20
-        let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
-        let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-        let data_off  = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
-
-        if tag_name == b"PBAS" {
-            // When data fits in 4 bytes it is stored inline at the data_offset field position
-            let offset = if data_size <= 4 { e + 20 } else { data_off };
-            if offset + num_elems <= data.len() {
-                let seq = data[offset..offset + num_elems].to_vec();
-                if tag_number == 2 {
-                    return Some(seq); // edited basecalls — best quality
-                } else if tag_number == 1 {
-                    pbas1 = Some(seq); // raw basecalls — keep as fallback
-                }
-            }
-        }
-    }
-
-    pbas1
-}
-
 /// Call erm41 position 28 from a single sequencing read.
 ///
 /// Tries the read in forward orientation first; if the anchor is not found,
@@ -317,4 +270,76 @@ pub fn erm41_call(fwd_read: &[u8], rev_read: &[u8]) -> Erm41Position28 {
         (Some(_), Some(_))           => Erm41Position28::Ambiguous,
         (None,    None)              => Erm41Position28::Undetermined,
     }
+}
+
+// ── Sequence identification against embedded reference sequences ─────────────
+
+const REF_AF547836: &str = include_str!("../../res/sequences/AF547836.fasta");
+const REF_AF547849: &str = include_str!("../../res/sequences/AF547849.fasta");
+
+/// Parse a FASTA string into `(accession, sequence_bytes)`.
+/// Accession is taken from the second pipe-delimited field of the header
+/// (e.g. `>ENA|AF547836|…` → `"AF547836"`), falling back to the full header.
+fn parse_fasta(fasta: &str) -> (String, Vec<u8>) {
+    let mut accession = String::new();
+    let mut seq: Vec<u8> = Vec::new();
+    for line in fasta.lines() {
+        if let Some(rest) = line.strip_prefix('>') {
+            accession = rest
+                .split('|')
+                .nth(1)
+                .unwrap_or(rest)
+                .to_string();
+        } else {
+            seq.extend(line.bytes().filter(|b| b.is_ascii_alphabetic()));
+        }
+    }
+    (accession, seq)
+}
+
+/// Compute the best percent identity of `query` against `reference` using a
+/// sliding-window local alignment (no gaps).  Returns a value in `0.0..=100.0`.
+fn sliding_identity(query: &[u8], reference: &[u8]) -> f32 {
+    if query.is_empty() || reference.len() < query.len() {
+        return 0.0;
+    }
+    let best = reference
+        .windows(query.len())
+        .map(|window| {
+            query
+                .iter()
+                .zip(window.iter())
+                .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+                .count()
+        })
+        .max()
+        .unwrap_or(0);
+    best as f32 / query.len() as f32 * 100.0
+}
+
+/// Identify the closest reference sequence for an AB1 basecall read.
+///
+/// Aligns `query` (and its reverse complement) against each embedded reference
+/// sequence using a gapless sliding-window approach and returns the best hit.
+pub fn identify_sequence(query: &[u8]) -> Option<super::SeqIdHit> {
+    let refs = [
+        parse_fasta(REF_AF547836),
+        parse_fasta(REF_AF547849),
+    ];
+    let rc = reverse_complement(query);
+
+    let mut best: Option<super::SeqIdHit> = None;
+    for (accession, refseq) in &refs {
+        let fwd_score = sliding_identity(query, refseq);
+        let rev_score = sliding_identity(&rc, refseq);
+        let (identity, is_reverse) = if rev_score > fwd_score {
+            (rev_score, true)
+        } else {
+            (fwd_score, false)
+        };
+        if best.as_ref().map(|h| identity > h.identity).unwrap_or(true) {
+            best = Some(super::SeqIdHit { accession: accession.clone(), identity, is_reverse });
+        }
+    }
+    best
 }

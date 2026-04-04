@@ -37,8 +37,67 @@ impl Ab1Channels {
     }
 }
 
+/// Best-hit result from aligning an AB1 read against the reference sequences.
+#[derive(Clone, Debug)]
+pub struct SeqIdHit {
+    /// Accession of the best-matching reference (e.g. "AF547836").
+    pub accession: String,
+    /// Percent identity of the best local alignment window (0.0–100.0).
+    pub identity: f32,
+    /// `true` when the reverse complement of the query was the better match.
+    pub is_reverse: bool,
+}
+
+/// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
+///
+/// Tries the edited basecalls (PBAS tag 2) first, falling back to raw basecalls (PBAS tag 1).
+/// Returns `None` if the magic bytes are missing or no PBAS tag is found.
+pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
+    // Validate ABIF magic and minimum header size
+    if data.len() < 34 || &data[0..4] != b"ABIF" {
+        return None;
+    }
+
+    // Root directory entry sits at byte 6 (28 bytes long).
+    // num_elements (i32 BE) at root+12 = byte 18
+    // data_offset  (i32 BE) at root+20 = byte 26
+    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
+    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
+
+    let mut pbas1: Option<Vec<u8>> = None;
+
+    for i in 0..dir_count {
+        let e = dir_offset + i * 28;
+        if e + 28 > data.len() {
+            break;
+        }
+        let tag_name   = &data[e..e + 4];
+        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?) as i32;
+        // num_elements at e+12, data_size at e+16, data_offset at e+20
+        let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
+        let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
+        let data_off  = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
+
+        if tag_name == b"PBAS" {
+            // When data fits in 4 bytes it is stored inline at the data_offset field position
+            let offset = if data_size <= 4 { e + 20 } else { data_off };
+            if offset + num_elems <= data.len() {
+                let seq = data[offset..offset + num_elems].to_vec();
+                if tag_number == 2 {
+                    return Some(seq); // edited basecalls — best quality
+                } else if tag_number == 1 {
+                    pbas1 = Some(seq); // raw basecalls — keep as fallback
+                }
+            }
+        }
+    }
+
+    pbas1
+}
+
 #[derive(Clone, Debug)]
 pub struct SeqData {
     pub ab1_call_opt: Option<Erm41Position28>,
     pub chromatogram: Option<Ab1Channels>,
+    pub seq_id: Option<SeqIdHit>,
 }

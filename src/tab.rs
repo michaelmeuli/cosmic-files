@@ -87,9 +87,9 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram, parse_ab1_sequence},
+        erm41::{Erm41Position28, erm41_from_single_read, identify_sequence, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
-        SeqData,
+        parse_ab1_sequence, SeqData, SeqIdHit, Ab1Channels,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
@@ -880,10 +880,11 @@ pub fn item_from_entry(
     let is_ab1 = path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
-            let call = parse_ab1_sequence(&bytes)
-                .map(|seq| erm41_from_single_read(&seq));
+            let ab1_seq = parse_ab1_sequence(&bytes);
+            let call = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
+            let seq_id = ab1_seq.as_ref().and_then(|seq| identify_sequence(seq));
             let chromatogram = parse_ab1_chromatogram(&bytes);
-            SeqData { ab1_call_opt: call, chromatogram }
+            SeqData { ab1_call_opt: call, chromatogram, seq_id }
         })
     } else {
         None
@@ -2361,11 +2362,24 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_chromatogram(&self) -> Option<&crate::sequencing::Ab1Channels> {
+    pub fn is_erm41(&self) -> bool {
+        !matches!(self.ab1_call(), Erm41Position28::Undetermined)
+    }
+
+    pub fn ab1_chromatogram(&self) -> Option<&Ab1Channels> {
         match self {
             Self::Path { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
             #[cfg(feature = "russh")]
             Self::RusshPath { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn ab1_seq_id(&self) -> Option<&SeqIdHit> {
+        match self {
+            Self::Path { sequence, .. } => sequence.as_ref()?.seq_id.as_ref(),
+            #[cfg(feature = "russh")]
+            Self::RusshPath { sequence, .. } => sequence.as_ref()?.seq_id.as_ref(),
             _ => None,
         }
     }
@@ -3270,7 +3284,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_ab1(&self) -> Element<'_, Message> {
+    pub fn preview_erm41(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -3290,6 +3304,44 @@ impl Item {
         };
         details = details.push(widget::text::heading(label));
         details = details.push(widget::text::body("Shown are bases 19-39, with position 28 in bold."));
+
+        column = column.push(details);
+
+        if let Some(chrom) = self.metadata.ab1_chromatogram() {
+            if chrom.is_reverse {
+                column = column.push(widget::text::body("reverse complement"));
+            }
+            let canvas = widget::Canvas::new(ChromatogramProgram { chrom })
+                .width(Length::Fill)
+                .height(Length::Fixed(200.0));
+            column = column.push(canvas);
+        }
+
+        column.into()
+    }
+
+    pub fn preview_seq_id(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column().spacing(space_m);
+        let mut details = widget::column().spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        if let Some(hit) = self.metadata.ab1_seq_id() {
+            let label = format!(
+                "Best match: {} ({:.1}%{})",
+                hit.accession,
+                hit.identity,
+                if hit.is_reverse { ", reverse complement" } else { "" },
+            );
+            details = details.push(widget::text::heading(label));
+        } else {
+            details = details.push(widget::text::heading("No sequence match found"));
+        }
 
         column = column.push(details);
 

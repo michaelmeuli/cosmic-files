@@ -2303,8 +2303,10 @@ impl App {
                                 (Some(_), Some(_)) => Some(tab.multi_preview_view()),
                                 // Exactly one selected item
                                 (Some(item), None) => {
-                                    if item.metadata.is_ab1() {
-                                        Some(item.preview_ab1())
+                                    if item.metadata.is_erm41() {
+                                        Some(item.preview_erm41())
+                                    } else if item.metadata.is_ab1() {
+                                        Some(item.preview_seq_id())
                                     } else if item.metadata.is_json() {
                                         Some(item.preview_json(
                                             Some(&self.mime_app_cache),
