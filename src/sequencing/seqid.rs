@@ -5,24 +5,81 @@ use super::erm41::reverse_complement;
 pub struct SeqIdHit {
     /// Accession of the best-matching reference (e.g. "AF547836").
     pub accession: String,
-    /// Species / strain description taken from the FASTA header
-    /// (e.g. "Mycobacterium gastri strain CIP 104530 65 kDa heat shock protein …").
+    /// Species name stripped to genus + species (e.g. "Mycobacterium gastri").
     pub description: String,
     /// Percent identity of the best local alignment window (0.0–100.0).
     pub identity: f32,
     /// `true` when the reverse complement of the query was the better match.
     pub is_reverse: bool,
+    /// Calls at each diagnostic hsp65 SNP position.
+    pub snp_calls: Vec<SnpCall>,
 }
+
+impl SeqIdHit {
+    /// Majority-vote species call based on the diagnostic SNPs.
+    /// Returns `Some("M. gastri")`, `Some("M. kansasii")`, or `None` when ambiguous/no data.
+    pub fn snp_species_call(&self) -> Option<&'static str> {
+        let gastri   = self.snp_calls.iter().filter(|c| c.is_gastri()).count();
+        let kansasii = self.snp_calls.iter().filter(|c| c.is_kansasii()).count();
+        match gastri.cmp(&kansasii) {
+            std::cmp::Ordering::Greater => Some("M. gastri"),
+            std::cmp::Ordering::Less    => Some("M. kansasii"),
+            std::cmp::Ordering::Equal   => None,
+        }
+    }
+}
+
+/// A single diagnostic SNP position in the hsp65 gene.
+#[derive(Clone, Debug)]
+pub struct SnpCall {
+    /// 0-based position in the reference sequence.
+    pub ref_pos: usize,
+    /// Base observed in the query at this position (uppercase ASCII).
+    pub query_base: u8,
+    /// Expected base for M. gastri (uppercase ASCII).
+    pub gastri_base: u8,
+    /// Expected base for M. kansasii (uppercase ASCII).
+    pub kansasii_base: u8,
+}
+
+impl SnpCall {
+    pub fn is_gastri(&self) -> bool {
+        self.query_base == self.gastri_base
+    }
+    pub fn is_kansasii(&self) -> bool {
+        self.query_base == self.kansasii_base
+    }
+    /// Human-readable species tag: "M. gastri", "M. kansasii", or "?".
+    pub fn species_tag(&self) -> &'static str {
+        if self.is_gastri()   { "M. gastri" }
+        else if self.is_kansasii() { "M. kansasii" }
+        else { "?" }
+    }
+}
+
+// ── SNP table ────────────────────────────────────────────────────────────────
+
+/// Diagnostic SNPs between M. gastri (AF547836) and M. kansasii (AF547849),
+/// defined at 0-based positions in the aligned hsp65 reference sequences.
+/// Both references are 423 bp with no indels, so positions are identical in both.
+const HSP65_SNPS: &[(usize, u8, u8)] = &[
+    // (0-based ref pos, gastri_base, kansasii_base)
+    (100, b'C', b'T'),
+    (130, b'C', b'T'),
+    (148, b'G', b'A'),
+    (193, b'G', b'C'),
+    (283, b'C', b'G'),
+    (304, b'T', b'C'),
+    (349, b'G', b'C'),
+    (399, b'G', b'A'),
+];
+
+// ── FASTA parsing ─────────────────────────────────────────────────────────────
 
 const REF_AF547836: &str = include_str!("../../res/sequences/AF547836.fasta");
 const REF_AF547849: &str = include_str!("../../res/sequences/AF547849.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
-///
-/// For ENA-style headers (`>ENA|AF547836|AF547836.1 Mycobacterium gastri …`):
-/// - accession  → second pipe field (`AF547836`)
-/// - description → everything after the first space in the third pipe field
-///   (`Mycobacterium gastri strain CIP 104530 …`)
 fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
     let mut accession = String::new();
     let mut description = String::new();
@@ -48,25 +105,69 @@ fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
     (accession, description, seq)
 }
 
-/// Compute the best percent identity of `query` against `reference` using a
-/// sliding-window local alignment (no gaps).  Returns a value in `0.0..=100.0`.
-fn sliding_identity(query: &[u8], reference: &[u8]) -> f32 {
-    if query.is_empty() || reference.len() < query.len() {
-        return 0.0;
+// ── Alignment ─────────────────────────────────────────────────────────────────
+
+/// Gapless sliding-window alignment.  Returns `(identity%, alignment_offset)`.
+///
+/// `alignment_offset` is a signed integer such that for any aligned position:
+///   `query_index = ref_index - alignment_offset`
+///
+/// - When `query.len() <= reference.len()`: query slides along the reference;
+///   `alignment_offset = ref_offset_where_query_starts` (≥ 0).
+/// - When `query.len() > reference.len()`: reference slides along the query;
+///   `alignment_offset = -query_offset_where_reference_starts` (≤ 0).
+///
+/// Identity denominator is always the shorter sequence (the aligned window).
+fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
+    if query.is_empty() || reference.is_empty() {
+        return (0.0, 0);
     }
-    let best = reference
-        .windows(query.len())
-        .map(|window| {
-            query
-                .iter()
-                .zip(window.iter())
-                .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
-                .count()
-        })
-        .max()
-        .unwrap_or(0);
-    best as f32 / query.len() as f32 * 100.0
+    if query.len() <= reference.len() {
+        let (best_count, best_off) = reference
+            .windows(query.len())
+            .enumerate()
+            .map(|(off, window)| {
+                let m = query.iter().zip(window)
+                    .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+                    .count();
+                (m, off)
+            })
+            .max_by_key(|&(c, _)| c)
+            .unwrap_or((0, 0));
+        (best_count as f32 / query.len() as f32 * 100.0, best_off as isize)
+    } else {
+        let (best_count, best_off) = query
+            .windows(reference.len())
+            .enumerate()
+            .map(|(off, window)| {
+                let m = reference.iter().zip(window)
+                    .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+                    .count();
+                (m, off)
+            })
+            .max_by_key(|&(c, _)| c)
+            .unwrap_or((0, 0));
+        (best_count as f32 / reference.len() as f32 * 100.0, -(best_off as isize))
+    }
 }
+
+/// Look up what the query has at each diagnostic SNP position given the alignment offset.
+fn call_snps(query: &[u8], alignment_offset: isize) -> Vec<SnpCall> {
+    HSP65_SNPS
+        .iter()
+        .filter_map(|&(ref_pos, gastri_base, kansasii_base)| {
+            let query_pos = ref_pos as isize - alignment_offset;
+            if query_pos >= 0 && (query_pos as usize) < query.len() {
+                let query_base = query[query_pos as usize].to_ascii_uppercase();
+                Some(SnpCall { ref_pos, query_base, gastri_base, kansasii_base })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 /// Align `query` against all embedded reference sequences and return every hit,
 /// sorted by identity descending (best match first).
@@ -80,14 +181,15 @@ pub fn identify_sequence(query: &[u8]) -> Vec<SeqIdHit> {
     let mut hits: Vec<SeqIdHit> = refs
         .into_iter()
         .map(|(accession, description, refseq)| {
-            let fwd_score = sliding_identity(query, &refseq);
-            let rev_score = sliding_identity(&rc, &refseq);
-            let (identity, is_reverse) = if rev_score > fwd_score {
-                (rev_score, true)
+            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+                (rev_id, true, rc.as_slice(), rev_off)
             } else {
-                (fwd_score, false)
+                (fwd_id, false, query, fwd_off)
             };
-            SeqIdHit { accession, description, identity, is_reverse }
+            let snp_calls = call_snps(aligned_query, offset);
+            SeqIdHit { accession, description, identity, is_reverse, snp_calls }
         })
         .collect();
 

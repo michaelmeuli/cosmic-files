@@ -41,7 +41,7 @@ use jiff_icu::ConvertFrom;
 use mime_guess::{Mime, mime};
 use regex::Regex;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 #[cfg(windows)]
@@ -87,10 +87,12 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
+        Ab1Channels, SeqData, SeqIdHit, SnpCall,
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
+        parse_ab1_quality, parse_ab1_sequence,
         seqid::identify_sequence,
-        parse_ab1_quality, parse_ab1_sequence, trim_to_min_quality, SeqData, SeqIdHit, Ab1Channels,
+        trim_to_min_quality,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
@@ -878,24 +880,30 @@ pub fn item_from_entry(
     } else {
         None
     };
-    let is_ab1 = path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
+    let is_ab1 = path
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("ab1"))
+        .unwrap_or(false);
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            let seq_id = ab1_seq.as_ref().map(|seq| {
-                let trimmed = match &ab1_qual {
-                    Some(qual) => trim_to_min_quality(seq, qual, 20),
-                    None => seq.as_slice(),
-                };
-                identify_sequence(trimmed)
-            }).unwrap_or_default();
+            let seq_id = ab1_seq
+                .as_ref()
+                .map(|seq| {
+                    let trimmed = match &ab1_qual {
+                        Some(qual) => trim_to_min_quality(seq, qual, 20),
+                        None => seq.as_slice(),
+                    };
+                    identify_sequence(trimmed)
+                })
+                .unwrap_or_default();
             let chromatogram = parse_ab1_chromatogram(&bytes);
-            SeqData { 
-                erm41position28_opt, 
-                chromatogram, 
-                seq_id 
+            SeqData {
+                erm41position28_opt,
+                chromatogram,
+                seq_id,
             }
         })
     } else {
@@ -1140,19 +1148,24 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
     for item in &mut items {
         let name = item.name.clone();
         let path = item.path_opt().cloned();
-        if let ItemMetadata::Path { is_raw_sample_file, .. } = &mut item.metadata {
+        if let ItemMetadata::Path {
+            is_raw_sample_file, ..
+        } = &mut item.metadata
+        {
             let maybe_split = (|| -> Option<(&str, &str)> {
-                    let first = name.find('.')?;
-                    let rest = &name[first + 1..];
-                    let second = rest.find('.')?;
-                    Some((&name[..first], &rest[second + 1..]))
-                })();
+                let first = name.find('.')?;
+                let rest = &name[first + 1..];
+                let second = rest.find('.')?;
+                Some((&name[..first], &rest[second + 1..]))
+            })();
             if let Some((sample_id, suffix)) = maybe_split {
-                let entry = samples.entry(sample_id.to_string()).or_insert(LocalSampleFiles {
-                    json: None,
-                    csv: None,
-                    docx: None,
-                });
+                let entry = samples
+                    .entry(sample_id.to_string())
+                    .or_insert(LocalSampleFiles {
+                        json: None,
+                        csv: None,
+                        docx: None,
+                    });
                 match suffix {
                     "json" => entry.json = path,
                     "csv" => entry.csv = path,
@@ -1165,10 +1178,15 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
     }
     for item in &mut items {
         let name = item.name.clone();
-        if let ItemMetadata::Path { is_raw_sample_file, .. } = &mut item.metadata {
+        if let ItemMetadata::Path {
+            is_raw_sample_file, ..
+        } = &mut item.metadata
+        {
             if *is_raw_sample_file {
                 let sample_id = name.find('.').map(|i| &name[..i]);
-                if sample_id.map_or(true, |id| samples.get(id).map_or(true, |f| f.json.is_none())) {
+                if sample_id.map_or(true, |id| {
+                    samples.get(id).map_or(true, |f| f.json.is_none())
+                }) {
                     *is_raw_sample_file = false;
                 }
             }
@@ -1182,12 +1200,20 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             let json: TbProfilerJson = fs::read_to_string(p)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())?;
-            Some((id.clone(), json.dr_variants.iter().all(|v| v.is_susceptible())))
+            Some((
+                id.clone(),
+                json.dr_variants.iter().all(|v| v.is_susceptible()),
+            ))
         })
         .collect();
     for item in &mut items {
         let name = item.name.clone();
-        if let ItemMetadata::Path { is_raw_sample_file, is_susceptible, .. } = &mut item.metadata {
+        if let ItemMetadata::Path {
+            is_raw_sample_file,
+            is_susceptible,
+            ..
+        } = &mut item.metadata
+        {
             if *is_raw_sample_file {
                 if let Some(id) = name.find('.').map(|i| &name[..i]) {
                     if let Some(&sus) = sample_susceptibility.get(id) {
@@ -2343,9 +2369,13 @@ impl ItemMetadata {
 
     pub fn is_tbprofiler_json(&self) -> bool {
         match self {
-            Self::Path { tbprofilerjson_opt, .. } => tbprofilerjson_opt.is_some(),
+            Self::Path {
+                tbprofilerjson_opt, ..
+            } => tbprofilerjson_opt.is_some(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { is_tbprofiler_json, .. } => *is_tbprofiler_json,
+            Self::RusshPath {
+                is_tbprofiler_json, ..
+            } => *is_tbprofiler_json,
             _ => false,
         }
     }
@@ -2389,13 +2419,15 @@ impl ItemMetadata {
 
     pub fn ab1_seq_id(&self) -> &[SeqIdHit] {
         match self {
-            Self::Path { sequence, .. } => {
-                sequence.as_ref().map(|s| s.seq_id.as_slice()).unwrap_or(&[])
-            }
+            Self::Path { sequence, .. } => sequence
+                .as_ref()
+                .map(|s| s.seq_id.as_slice())
+                .unwrap_or(&[]),
             #[cfg(feature = "russh")]
-            Self::RusshPath { sequence, .. } => {
-                sequence.as_ref().map(|s| s.seq_id.as_slice()).unwrap_or(&[])
-            }
+            Self::RusshPath { sequence, .. } => sequence
+                .as_ref()
+                .map(|s| s.seq_id.as_slice())
+                .unwrap_or(&[]),
             _ => &[],
         }
     }
@@ -2406,18 +2438,26 @@ impl ItemMetadata {
 
     pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
         match self {
-            Self::Path { tbprofilerjson_opt, .. } => *tbprofilerjson_opt = json,
+            Self::Path {
+                tbprofilerjson_opt, ..
+            } => *tbprofilerjson_opt = json,
             #[cfg(feature = "russh")]
-            Self::RusshPath { tbprofilerjson_opt, .. } => *tbprofilerjson_opt = json,
+            Self::RusshPath {
+                tbprofilerjson_opt, ..
+            } => *tbprofilerjson_opt = json,
             _ => {}
         }
     }
 
     pub fn is_tbprofilerjson_opt(&self) -> bool {
         match self {
-            Self::Path { tbprofilerjson_opt, .. } => tbprofilerjson_opt.is_some(),
+            Self::Path {
+                tbprofilerjson_opt, ..
+            } => tbprofilerjson_opt.is_some(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { tbprofilerjson_opt, .. } => tbprofilerjson_opt.is_some(),
+            Self::RusshPath {
+                tbprofilerjson_opt, ..
+            } => tbprofilerjson_opt.is_some(),
             _ => false,
         }
     }
@@ -2433,36 +2473,58 @@ impl ItemMetadata {
 
     pub fn is_sample(&self) -> bool {
         match self {
-            Self::Path { is_raw_sample_file, .. } => *is_raw_sample_file,
+            Self::Path {
+                is_raw_sample_file, ..
+            } => *is_raw_sample_file,
             #[cfg(feature = "russh")]
-            Self::RusshPath { is_raw_sample_file, .. } => *is_raw_sample_file,
+            Self::RusshPath {
+                is_raw_sample_file, ..
+            } => *is_raw_sample_file,
             _ => false,
         }
     }
 
     pub fn json_path(&self) -> Option<&PathBuf> {
         match self {
-            Self::Path { sample_json_path_opt, .. } => sample_json_path_opt.as_ref(),
+            Self::Path {
+                sample_json_path_opt,
+                ..
+            } => sample_json_path_opt.as_ref(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { sample_json_path_opt, .. } => sample_json_path_opt.as_ref(),
+            Self::RusshPath {
+                sample_json_path_opt,
+                ..
+            } => sample_json_path_opt.as_ref(),
             _ => None,
         }
     }
 
     pub fn csv_path(&self) -> Option<&PathBuf> {
         match self {
-            Self::Path { sample_csv_path_opt, .. } => sample_csv_path_opt.as_ref(),
+            Self::Path {
+                sample_csv_path_opt,
+                ..
+            } => sample_csv_path_opt.as_ref(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { sample_csv_path_opt, .. } => sample_csv_path_opt.as_ref(),
+            Self::RusshPath {
+                sample_csv_path_opt,
+                ..
+            } => sample_csv_path_opt.as_ref(),
             _ => None,
         }
     }
 
     pub fn docx_path(&self) -> Option<&PathBuf> {
         match self {
-            Self::Path { sample_docx_path_opt, .. } => sample_docx_path_opt.as_ref(),
+            Self::Path {
+                sample_docx_path_opt,
+                ..
+            } => sample_docx_path_opt.as_ref(),
             #[cfg(feature = "russh")]
-            Self::RusshPath { sample_docx_path_opt, .. } => sample_docx_path_opt.as_ref(),
+            Self::RusshPath {
+                sample_docx_path_opt,
+                ..
+            } => sample_docx_path_opt.as_ref(),
             _ => None,
         }
     }
@@ -3191,8 +3253,10 @@ impl Item {
                     .push({
                         let mut drug_col = widget::column();
                         for drug in &v.drugs {
-                            drug_col = drug_col
-                                .push(widget::text::body(format!("{}: {}", drug.drug, drug.confidence)));
+                            drug_col = drug_col.push(widget::text::body(format!(
+                                "{}: {}",
+                                drug.drug, drug.confidence
+                            )));
                         }
                         drug_col
                     })
@@ -3223,9 +3287,13 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let tbprofilerjson_opt = match &self.metadata {
-            ItemMetadata::Path { tbprofilerjson_opt, .. } => tbprofilerjson_opt.as_ref(),
+            ItemMetadata::Path {
+                tbprofilerjson_opt, ..
+            } => tbprofilerjson_opt.as_ref(),
             #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { tbprofilerjson_opt, .. } => tbprofilerjson_opt.as_ref(),
+            ItemMetadata::RusshPath {
+                tbprofilerjson_opt, ..
+            } => tbprofilerjson_opt.as_ref(),
             _ => None,
         };
 
@@ -3262,9 +3330,10 @@ impl Item {
                     ("Open .results.docx", self.metadata.docx_path()),
                 ] {
                     if let Some(p) = opt_path {
-                        column = column.push(widget::button::standard(label).on_press(
-                            Message::Open(Some(p.to_path_buf())),
-                        ));
+                        column = column.push(
+                            widget::button::standard(label)
+                                .on_press(Message::Open(Some(p.to_path_buf()))),
+                        );
                     }
                 }
             }
@@ -3273,11 +3342,15 @@ impl Item {
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata {
             if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
-                log::info!("item is remote, showing download button: {}", path.display());
+                log::info!(
+                    "item is remote, showing download button: {}",
+                    path.display()
+                );
                 if !self.metadata.is_tb_result() {
-                    column = column.push(widget::button::standard(fl!("download")).on_press(
-                        Message::Download(Some((path.clone(), uri.clone()))),
-                    ));
+                    column = column.push(
+                        widget::button::standard(fl!("download"))
+                            .on_press(Message::Download(Some((path.clone(), uri.clone())))),
+                    );
                 }
             }
             if let Some(Location::Remote(uri, _, _)) = &self.location_opt {
@@ -3288,9 +3361,10 @@ impl Item {
                         ("Download .results.docx", self.metadata.docx_path()),
                     ] {
                         if let Some(p) = opt_path {
-                            column = column.push(widget::button::standard(label).on_press(
-                                Message::Download(Some((p.to_path_buf(), uri.clone()))),
-                            ));
+                            column =
+                                column.push(widget::button::standard(label).on_press(
+                                    Message::Download(Some((p.to_path_buf(), uri.clone()))),
+                                ));
                         }
                     }
                 }
@@ -3319,7 +3393,9 @@ impl Item {
             _ => "erm(41) Undetermined",
         };
         details = details.push(widget::text::heading(label));
-        details = details.push(widget::text::body("Shown are bases 19-39, with position 28 in bold."));
+        details = details.push(widget::text::body(
+            "Shown are bases 19-39, with position 28 in bold.",
+        ));
 
         column = column.push(details);
 
@@ -3351,35 +3427,54 @@ impl Item {
         if hits.is_empty() {
             details = details.push(widget::text::heading("No sequence match found"));
         } else {
+            // ── Best match ──
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading("Best match:"));
+            let best = &hits[0];
+            let orient = if best.is_reverse { ", RC" } else { "" };
+            details = details.push(widget::text::heading(format!(
+                "{} ({:.1}%) {}",
+                best.description, best.identity, orient,
+            )));
 
-            for (i, hit) in hits.iter().enumerate() {
-                let label = if i == 0 {
-                    format!(
-                        "{} ({:.1}%)",
-                        hit.description,
-                        hit.identity,
-                    )
-                } else {
-                    format!(
-                        "{} ({:.1}%)",
-                        hit.description,
-                        hit.identity,
-                    )
-                };
-                if i == 0 {
-                    details = details.push(widget::text::heading(label));
-                    details = details.push(widget::text::heading(""));
-                    details = details.push(widget::text::body("Other matches:"));
-                } else {
-                    details = details.push(widget::text::body(label));
+            // ── SNP species call ──
+            if !best.snp_calls.is_empty() {
+                let gastri_n = best.snp_calls.iter().filter(|c| c.is_gastri()).count();
+                let kansasii_n = best.snp_calls.iter().filter(|c| c.is_kansasii()).count();
+                let total = best.snp_calls.len();
+                let species_call = best.snp_species_call().unwrap_or("Ambiguous");
+                details = details.push(widget::text::body("hsp65 SNP call:"));
+                details = details.push(widget::text::body(format!(
+                    "{} (M. gastri {}/{}, M. kansasii {}/{})",
+                    species_call, gastri_n, total, kansasii_n, total,
+                )));
+
+                // Individual SNP positions
+                for snp in &best.snp_calls {
+                    details = details.push(widget::text::body(format!(
+                        "  pos {}: {} = {}",
+                        snp.ref_pos + 1,
+                        snp.query_base as char,
+                        snp.species_tag(),
+                    )));
+                }
+                details = details.push(widget::text::body(""));
+            }
+
+            // ── Other matches ──
+            if hits.len() > 1 {
+                details = details.push(widget::text::body("Other matches:".to_string()));
+                for hit in &hits[1..] {
+                    let orient = if hit.is_reverse { ", RC" } else { "" };
+                    details = details.push(widget::text::body(format!(
+                        "{} ({:.1}%) {}",
+                        hit.description, hit.identity, orient,
+                    )));
                 }
             }
         }
 
         column = column.push(details);
-
         column.into()
     }
 
@@ -3450,8 +3545,8 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         bounds: Rectangle,
         _cursor: cosmic::iced::mouse::Cursor,
     ) -> Vec<widget::canvas::Geometry<cosmic::Renderer>> {
-        use widget::canvas::{Frame, Path, Stroke};
         use cosmic::iced::alignment;
+        use widget::canvas::{Frame, Path, Stroke};
 
         let chrom = self.chrom;
         let is_rev = chrom.is_reverse;
@@ -3462,9 +3557,11 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         // that way the displayed colour always matches the plus-strand base.
         let dna_complement = |b: u8| -> u8 {
             match b.to_ascii_uppercase() {
-                b'A' => b'T', b'T' => b'A',
-                b'C' => b'G', b'G' => b'C',
-                _    => b'N',
+                b'A' => b'T',
+                b'T' => b'A',
+                b'C' => b'G',
+                b'G' => b'C',
+                _ => b'N',
             }
         };
         let base_color = |base: u8| -> Color {
@@ -3473,7 +3570,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
                 b'C' => Color::from_rgb(0.0, 0.0, 1.0),
                 b'G' => Color::from_rgb(0.8, 0.55, 0.0),
                 b'T' => Color::from_rgb(1.0, 0.0, 0.0),
-                _    => Color::from_rgb(0.5, 0.5, 0.5),
+                _ => Color::from_rgb(0.5, 0.5, 0.5),
             }
         };
 
@@ -3494,12 +3591,21 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         let mut y_max = i16::MIN;
         for channel in &chrom.channels {
             for &v in &channel[scan_start.min(channel.len())..scan_end.min(channel.len())] {
-                if v < y_min { y_min = v; }
-                if v > y_max { y_max = v; }
+                if v < y_min {
+                    y_min = v;
+                }
+                if v > y_max {
+                    y_max = v;
+                }
             }
         }
-        if y_min == i16::MAX { y_min = 0; y_max = 1; }
-        if y_max == y_min { y_max = y_min + 1; }
+        if y_min == i16::MAX {
+            y_min = 0;
+            y_max = 1;
+        }
+        if y_max == y_min {
+            y_max = y_min + 1;
+        }
         let y_range = (y_max - y_min) as f32;
 
         // Leave a small margin at the top for base letters
@@ -3512,11 +3618,14 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         // always runs left to right, identical to a forward read.
         let scan_to_x = |scan: usize| -> f32 {
             let t = (scan.saturating_sub(scan_start)) as f32 / (window_len - 1).max(1) as f32;
-            if is_rev { (1.0 - t) * plot_w } else { t * plot_w }
+            if is_rev {
+                (1.0 - t) * plot_w
+            } else {
+                t * plot_w
+            }
         };
-        let intensity_to_y = |v: i16| -> f32 {
-            top_margin + (1.0 - (v - y_min) as f32 / y_range) * plot_h
-        };
+        let intensity_to_y =
+            |v: i16| -> f32 { top_margin + (1.0 - (v - y_min) as f32 / y_range) * plot_h };
 
         let mut frame = Frame::new(renderer, bounds.size());
 
@@ -3527,11 +3636,15 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             if channel.is_empty() {
                 continue;
             }
-            let raw_base    = chrom.base_order[ch_idx];
-            let display_base = if is_rev { dna_complement(raw_base) } else { raw_base };
+            let raw_base = chrom.base_order[ch_idx];
+            let display_base = if is_rev {
+                dna_complement(raw_base)
+            } else {
+                raw_base
+            };
             let color = base_color(display_base);
 
-            let slice_end   = (scan_end + 1).min(channel.len());
+            let slice_end = (scan_end + 1).min(channel.len());
             let slice_start = scan_start.min(slice_end);
             if slice_start >= slice_end {
                 continue;
@@ -3551,16 +3664,12 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
                 }
             });
 
-            frame.stroke(
-                &path,
-                Stroke::default()
-                    .with_color(color)
-                    .with_width(1.2),
-            );
+            frame.stroke(&path, Stroke::default().with_color(color).with_width(1.2));
         }
 
         // Scan index of position 28 — used to select the bold font below.
-        let pos28_scan = chrom.pos28_base_idx
+        let pos28_scan = chrom
+            .pos28_base_idx
             .and_then(|idx| chrom.peak_locs.get(idx).copied())
             .map(|v| v as usize);
 
@@ -6347,8 +6456,7 @@ impl Tab {
                         .align_y(Alignment::Center)
                         .spacing(space_xxxs);
                     let overflow_offset = 64.0;
-                    let overflow =
-                        w + name_width + overflow_offset > size.width && index > 0;
+                    let overflow = w + name_width + overflow_offset > size.width && index > 0;
                     if overflow {
                         button_row = button_row.push(widget::text::body(excess_str));
                         w += excess_width;
@@ -6905,7 +7013,6 @@ impl Tab {
                     item.rect_opt.set(None);
                     continue;
                 }
-
 
                 if count > 0 {
                     column = column
@@ -7645,8 +7752,7 @@ impl Tab {
                         .iter()
                         .flat_map(|item| {
                             if let ItemMetadata::RusshPath { .. } = &item.metadata {
-                                if let Some(Location::Remote(uri, _, path_opt)) =
-                                    &item.location_opt
+                                if let Some(Location::Remote(uri, _, path_opt)) = &item.location_opt
                                 {
                                     if item.metadata.is_tb_result() {
                                         // Expand sample items into their individual file paths
