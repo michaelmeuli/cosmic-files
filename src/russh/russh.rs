@@ -642,12 +642,17 @@ async fn load_remote_ab1(
     let ab1_seq = crate::sequencing::parse_ab1_sequence(&bytes);
     let ab1_qual = crate::sequencing::parse_ab1_quality(&bytes);
     let call = ab1_seq.as_ref().map(|seq| crate::sequencing::erm41::erm41_from_single_read(seq));
+    let is_erm41 = !matches!(call, Some(crate::sequencing::erm41::Erm41Position28::Undetermined) | None);
     let seq_id = ab1_seq.as_ref().map(|seq| {
         let trimmed = match &ab1_qual {
             Some(qual) => crate::sequencing::trim_to_min_quality(seq, qual, 20),
             None => seq.as_slice(),
         };
-        crate::sequencing::seqid::identify_sequence(trimmed)
+        if is_erm41 {
+            crate::sequencing::seqid::identify_sequence_erm41(trimmed)
+        } else {
+            crate::sequencing::seqid::identify_sequence(trimmed)
+        }
     }).unwrap_or_default();
     let chromatogram = crate::sequencing::erm41::parse_ab1_chromatogram(&bytes);
     Some(crate::sequencing::SeqData { erm41position28_opt: call, chromatogram, seq_id })

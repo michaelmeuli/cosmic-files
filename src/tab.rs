@@ -91,7 +91,7 @@ use crate::{
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
-        seqid::identify_sequence,
+        seqid::{identify_sequence, identify_sequence_erm41},
         trim_to_min_quality,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
@@ -889,6 +889,10 @@ pub fn item_from_entry(
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
+            let is_erm41 = !matches!(
+                erm41position28_opt,
+                Some(Erm41Position28::Undetermined) | None
+            );
             let seq_id = ab1_seq
                 .as_ref()
                 .map(|seq| {
@@ -896,7 +900,11 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    identify_sequence(trimmed)
+                    if is_erm41 {
+                        identify_sequence_erm41(trimmed)
+                    } else {
+                        identify_sequence(trimmed)
+                    }
                 })
                 .unwrap_or_default();
             let chromatogram = parse_ab1_chromatogram(&bytes);
@@ -3399,8 +3407,6 @@ impl Item {
             "Shown are bases 19-39, with position 28 in bold.",
         ));
 
-        column = column.push(details);
-
         if let Some(chrom) = self.metadata.ab1_chromatogram() {
             if chrom.is_reverse {
                 column = column.push(widget::text::body("reverse complement"));
@@ -3410,6 +3416,17 @@ impl Item {
                 .height(Length::Fixed(200.0));
             column = column.push(canvas);
         }
+
+        details = details.push(widget::text::body(""));
+        let hits = self.metadata.ab1_seq_id();
+        if let Some(best) = hits.first() {
+            details = details.push(
+                widget::button::standard("View alignment")
+                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
+            );
+        }
+        
+        column = column.push(details);
 
         column.into()
     }

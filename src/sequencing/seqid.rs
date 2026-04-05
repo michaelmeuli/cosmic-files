@@ -25,6 +25,7 @@ impl SeqIdHit {
         let ref_fasta = match self.accession.as_str() {
             "AF547836" => REF_AF547836,
             "AF547849" => REF_AF547849,
+            "MAB_2297" => REF_MAB2297,
             _ => return format!("Unknown reference accession: {}\n", self.accession),
         };
         let (_, _, refseq) = parse_fasta(ref_fasta);
@@ -149,6 +150,7 @@ const HSP65_SNPS: &[(usize, u8, u8)] = &[
 
 const REF_AF547836: &str = include_str!("../../res/sequences/AF547836.fasta");
 const REF_AF547849: &str = include_str!("../../res/sequences/AF547849.fasta");
+const REF_MAB2297:  &str = include_str!("../../res/sequences/MAB_2297.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
 fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
@@ -238,6 +240,15 @@ fn call_snps(query: &[u8], alignment_offset: isize) -> Vec<SnpCall> {
         .collect()
 }
 
+/// Parse a FASTA string, returning just the sequence bytes (ignores header).
+fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
+    fasta
+        .lines()
+        .filter(|l| !l.starts_with('>'))
+        .flat_map(|l| l.bytes().filter(|b| b.is_ascii_alphabetic()))
+        .collect()
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Align `query` against all embedded reference sequences and return every hit,
@@ -274,4 +285,28 @@ pub fn identify_sequence(query: &[u8]) -> Vec<SeqIdHit> {
 
     hits.sort_by(|a, b| b.identity.partial_cmp(&a.identity).unwrap_or(std::cmp::Ordering::Equal));
     hits
+}
+
+/// Align `query` against the erm(41) reference (MAB_2297) and return the single hit.
+pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
+    let refseq = parse_fasta_seq(REF_MAB2297);
+    let rc = reverse_complement(query);
+
+    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+        (rev_id, true, rc.as_slice(), rev_off)
+    } else {
+        (fwd_id, false, query, fwd_off)
+    };
+
+    vec![SeqIdHit {
+        accession: "MAB_2297".to_string(),
+        description: "M. abscessus".to_string(),
+        identity,
+        is_reverse,
+        snp_calls: vec![],
+        aligned_query: aligned_query.to_vec(),
+        alignment_offset: offset,
+    }]
 }
