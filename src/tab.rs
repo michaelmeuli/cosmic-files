@@ -889,10 +889,10 @@ pub fn item_from_entry(
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            // let is_erm41 = !matches!(
-            //     erm41position28_opt,
-            //     Some(Erm41Position28::Undetermined) | None
-            // );
+            let is_erm41 = !matches!(
+                erm41position28_opt,
+                Some(Erm41Position28::Undetermined) | None
+            );
             let seq_id = ab1_seq
                 .as_ref()
                 .map(|seq| {
@@ -900,13 +900,11 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    identify_sequence(trimmed)
-                    // TODO: delete
-                    // if is_erm41 {
-                    //     identify_sequence_erm41(trimmed)
-                    // } else {
-                    //     identify_sequence(trimmed)
-                    // }
+                    if is_erm41 {
+                        identify_sequence_erm41(trimmed)
+                    } else {
+                        identify_sequence(trimmed)
+                    }
                 })
                 .unwrap_or_default();
             let chromatogram = parse_ab1_chromatogram(&bytes);
