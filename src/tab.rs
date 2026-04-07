@@ -3261,9 +3261,9 @@ impl Item {
     pub fn preview_tbprofiler_json(&self) -> Element<'_, Message> {
         fn tb_variant_widget(v: &DrVariant) -> Element<'static, Message> {
             widget::container(
-                widget::column()
+                widget::column::with_capacity(3)
                     .push({
-                        let mut drug_col = widget::column();
+                        let mut drug_col = widget::column::with_capacity(v.drugs.len());
                         for drug in &v.drugs {
                             drug_col = drug_col.push(widget::text::body(format!(
                                 "{}: {}",
@@ -3277,7 +3277,7 @@ impl Item {
                         v.gene_name, v.gene_id, v.change
                     )))
                     .push({
-                        let mut ecoli_col = widget::column();
+                        let mut ecoli_col = widget::column::with_capacity(1);
                         if let Some(ecoli_value) =
                             TB_ECOLI_MAPPING.get(&(v.gene_name.clone(), v.change.clone()))
                         {
@@ -3294,8 +3294,8 @@ impl Item {
             space_m,
             ..
         } = theme::active().cosmic().spacing;
-        let mut column = widget::column().spacing(space_m);
-        let mut details = widget::column().spacing(space_xxxs);
+        let mut column = widget::column::with_capacity(10).spacing(space_m);
+        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
         let tbprofilerjson_opt = match &self.metadata {
@@ -3393,8 +3393,8 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column().spacing(space_m);
-        let mut details = widget::column().spacing(space_xxxs);
+        let mut column = widget::column::with_capacity(10).spacing(space_m);
+        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
         let call = self.metadata.ab1_call();
@@ -3440,8 +3440,8 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column().spacing(space_m);
-        let mut details = widget::column().spacing(space_xxxs);
+        let mut column = widget::column::with_capacity(10).spacing(space_m);
+        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.ab1_seq_id();
