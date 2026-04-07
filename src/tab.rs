@@ -50,7 +50,7 @@ use std::{
     borrow::Cow,
     cell::Cell,
     cmp::{Ordering, Reverse},
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt::{self, Display},
     fs::{self, File, Metadata},
@@ -2167,6 +2167,7 @@ pub enum Command {
     Preview(PreviewKind),
     SetOpenWith(Mime, String),
     SetPermissions(PathBuf, u32),
+    SetMultiplePermissions(Vec<(PathBuf, u32)>),
     SetSort(String, HeadingOptions, bool),
     WindowDrag,
     WindowToggleMaximize,
@@ -2227,6 +2228,7 @@ pub enum Message {
     SelectLast,
     SetOpenWith(Mime, String),
     SetPermissions(PathBuf, u32),
+    ShiftPermissions(Option<(PathBuf, u32)>, u32, u32),
     SetSort(HeadingOptions, bool),
     TabComplete(PathBuf, Vec<(String, PathBuf)>),
     Thumbnail(PathBuf, ItemThumbnail),
@@ -3023,7 +3025,7 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column().spacing(space_m);
+        let mut column = widget::column::with_capacity(4).spacing(space_m);
 
         column = column.push(
             widget::container(self.preview())
@@ -3031,7 +3033,7 @@ impl Item {
                 .max_height(THUMBNAIL_SIZE as f32),
         );
 
-        let mut details = widget::column().spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(8).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
         details = details.push(widget::text::body(fl!(
             "type",
@@ -3425,7 +3427,7 @@ impl Item {
                     .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
             );
         }
-        
+
         column = column.push(details);
 
         column.into()
@@ -3506,10 +3508,10 @@ impl Item {
     pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxxs, .. } = theme::active().cosmic().spacing;
 
-        let mut row = widget::row().spacing(space_xxxs);
+        let mut row = widget::row::with_capacity(2).spacing(space_xxxs);
         row = row.push(self.preview());
 
-        let mut column = widget::column().spacing(space_xxxs);
+        let mut column = widget::column::with_capacity(3).spacing(space_xxxs);
         column = column.push(widget::text::heading(heading));
 
         //TODO: translate!
@@ -5486,6 +5488,31 @@ impl Tab {
             Message::SetPermissions(path, mode) => {
                 commands.push(Command::SetPermissions(path, mode));
             }
+            Message::ShiftPermissions(path_mode_opt, shift, bits) => match path_mode_opt {
+                Some((path, mode)) => commands.push(Command::SetPermissions(
+                    path,
+                    set_mode_part(mode, shift, bits.try_into().unwrap()),
+                )),
+                // Shift permissions on all selected items
+                None => {
+                    let mut permissions = Vec::new();
+                    for item in self.items_opt().map_or(Vec::new(), |items| {
+                        items.iter().filter(|item| item.selected).collect()
+                    }) {
+                        if let (Some(path), Some(mode)) = (
+                            item.path_opt(),
+                            item.file_metadata()
+                                .and_then(|metadata| Some(metadata.mode())),
+                        ) {
+                            permissions.push((
+                                path.clone(),
+                                set_mode_part(mode, shift, bits.try_into().unwrap()),
+                            ));
+                        }
+                    }
+                    commands.push(Command::SetMultiplePermissions(permissions));
+                }
+            },
             Message::SetSort(heading_option, dir) => {
                 if !matches!(self.location, Location::Search(..)) {
                     self.sort_name = heading_option;
@@ -5968,14 +5995,14 @@ impl Tab {
 
                     let content: cosmic::Element<'_, Message> =
                         if let Some(error_msg) = error_msg_opt {
-                            widget::column()
+                            widget::column::with_capacity(2)
                                 .push(widget::image(image_handle))
                                 .push(widget::text(format!("⚠ {}", error_msg)).size(13))
                                 .padding(space_xs)
                                 .align_x(cosmic::iced::Alignment::Center)
                                 .into()
                         } else if is_loading {
-                            widget::column()
+                            widget::column::with_capacity(2)
                                 .push(widget::image(image_handle))
                                 .push(widget::text("Loading higher resolution...").size(14))
                                 .padding(space_xs)
@@ -6574,7 +6601,7 @@ impl Tab {
                     })
                     .into(),
                 ]),
-                Mode::Desktop => widget::column(),
+                Mode::Desktop => widget::column::with_capacity(0),
             }
             .align_x(Alignment::Center)
             .spacing(space_xxs),
@@ -6801,7 +6828,7 @@ impl Tab {
                     // Add a spacer if the row is empty, so scroll works
                     if grid_elements[row].is_empty() {
                         grid_elements[row].push(Element::from(
-                            widget::column()
+                            widget::column::with_capacity(0)
                                 .width(Length::Fill)
                                 .height(Length::Fixed(item_height as f32)),
                         ));
@@ -7342,7 +7369,7 @@ impl Tab {
 
                     button_row
                 } else {
-                    widget::column()
+                    widget::column::with_capacity(0)
                         .width(Length::Fill)
                         .height(Length::Fixed(f32::from(row_height)))
                         .into()
@@ -7635,14 +7662,17 @@ impl Tab {
 
         dnd_dest.into()
     }
-    pub fn multi_preview_view<'a>(&'a self) -> Element<'a, Message> {
+    pub fn multi_preview_view<'a>(
+        &'a self,
+        mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
+    ) -> Element<'a, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column().spacing(space_m);
+        let mut column = widget::column::with_capacity(4).spacing(space_m);
 
         let handle = widget::icon::from_name("text-x-generic")
             .size(IconSizes::default().grid())
@@ -7687,7 +7717,7 @@ impl Tab {
                 .collect()
         });
 
-        let mut details = widget::column().spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(3).spacing(space_xxxs);
         details = details.push(widget::text::body(fl!(
             "items",
             items = selected_items.len()
@@ -7695,6 +7725,11 @@ impl Tab {
 
         let mut total_size: u64 = 0;
         let mut mime_type_counts: BTreeMap<String, u64> = BTreeMap::new();
+        let mut user_name: BTreeSet<String> = BTreeSet::new();
+        let mut mode_user: BTreeSet<u32> = BTreeSet::new();
+        let mut group_name: BTreeSet<String> = BTreeSet::new();
+        let mut mode_group: BTreeSet<u32> = BTreeSet::new();
+        let mut mode_other: BTreeSet<u32> = BTreeSet::new();
         let mut calculating_dir_size = false;
         let mut dir_size_error: Option<String> = None;
         let mut show_size = true;
@@ -7734,6 +7769,20 @@ impl Tab {
                     _ => (),
                 }
             }
+            let mode = metadata.mode();
+            user_name.insert(
+                get_user_by_uid(metadata.uid())
+                    .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
+                    .unwrap_or_default(),
+            );
+            mode_user.insert(get_mode_part(mode, MODE_SHIFT_USER));
+            group_name.insert(
+                get_group_by_gid(metadata.gid())
+                    .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
+                    .unwrap_or_default(),
+            );
+            mode_group.insert(get_mode_part(mode, MODE_SHIFT_GROUP));
+            mode_other.insert(get_mode_part(mode, MODE_SHIFT_OTHER));
         }
         let mut mime_types: Vec<(String, u64)> = mime_type_counts.into_iter().collect();
         mime_types.sort_by(|(_, v1), (_, v2)| v2.cmp(v1));
@@ -7824,6 +7873,124 @@ impl Tab {
 
         if let Some(btn) = action_button {
             column = column.push(btn);
+        }
+
+        let mut settings = Vec::new();
+        // Only allow modifying open-with if all mime types are the same
+        if mime_types.len() == 1 {
+            if let Some(mime) = mime_types
+                .get(0)
+                .and_then(|(mime, _)| mime.parse::<Mime>().ok())
+            {
+                if let Some(mime_app_cache) = mime_app_cache_opt {
+                    let mime_apps = mime_app_cache.get(&mime);
+                    if !mime_apps.is_empty() {
+                        let mime_closure = mime.clone();
+                        settings.push(
+                            widget::settings::item::builder(fl!("open-with")).control(
+                                Element::from(
+                                    widget::dropdown(
+                                        mime_apps,
+                                        mime_apps.iter().position(|x| x.is_default),
+                                        move |index| (index, mime_closure.clone()),
+                                    )
+                                    .icons(Cow::Borrowed(mime_app_cache.icons(&mime))),
+                                )
+                                .map(|(index, mime)| {
+                                    let mime_app = &mime_apps[index];
+                                    Message::SetOpenWith(mime, mime_app.id.clone())
+                                }),
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            // Only return mode part if it's the only one
+            fn selected_mode_part(mut modes: BTreeSet<u32>) -> Option<usize> {
+                match (modes.pop_first(), modes.pop_first()) {
+                    (Some(mode), None) => Some(mode.try_into().unwrap()),
+                    _ => None,
+                }
+            }
+
+            // Convert a limited number of values from a set into a comma separated list
+            fn join_set(set: BTreeSet<String>) -> String {
+                let limit = 5;
+                let mut title = set.into_iter().collect::<Vec<String>>();
+                if title.len() > limit {
+                    title.truncate(limit);
+                    title.push("...".to_string());
+                }
+                title.join(", ")
+            }
+
+            let mode_part_user = selected_mode_part(mode_user);
+            settings.push(
+                widget::settings::item::builder(join_set(user_name))
+                    .description(fl!("owner"))
+                    .control(
+                        widget::dropdown(
+                            Cow::Borrowed(MODE_NAMES.as_slice()),
+                            mode_part_user,
+                            move |selected| {
+                                Message::ShiftPermissions(
+                                    None,
+                                    MODE_SHIFT_USER,
+                                    selected.try_into().unwrap(),
+                                )
+                            },
+                        )
+                        .placeholder(fl!("mixed")),
+                    ),
+            );
+
+            let mode_part_group = selected_mode_part(mode_group);
+            settings.push(
+                widget::settings::item::builder(join_set(group_name))
+                    .description(fl!("group"))
+                    .control(
+                        widget::dropdown(
+                            Cow::Borrowed(MODE_NAMES.as_slice()),
+                            mode_part_group,
+                            move |selected| {
+                                Message::ShiftPermissions(
+                                    None,
+                                    MODE_SHIFT_GROUP,
+                                    selected.try_into().unwrap(),
+                                )
+                            },
+                        )
+                        .placeholder(fl!("mixed")),
+                    ),
+            );
+
+            let mode_part_other = selected_mode_part(mode_other);
+            settings.push(
+                widget::settings::item::builder(fl!("other")).control(
+                    widget::dropdown(
+                        Cow::Borrowed(MODE_NAMES.as_slice()),
+                        mode_part_other,
+                        move |selected| {
+                            Message::ShiftPermissions(
+                                None,
+                                MODE_SHIFT_OTHER,
+                                selected.try_into().unwrap(),
+                            )
+                        },
+                    )
+                    .placeholder(fl!("mixed")),
+                ),
+            );
+        }
+
+        if !settings.is_empty() {
+            let mut section = widget::settings::section();
+            section = section.extend(settings);
+            column = column.push(section);
         }
 
         column.into()

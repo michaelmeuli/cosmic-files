@@ -721,7 +721,7 @@ impl App {
 
                         match (selected.next(), selected.next()) {
                             // At least two selected items
-                            (Some(_), Some(_)) => Some(self.tab.multi_preview_view()),
+                            (Some(_), Some(_)) => Some(self.tab.multi_preview_view(None)),
                             // Exactly one selected item
                             (Some(item), None) => Some(item.preview_view(None, military_time)),
                             // No selected items
@@ -1229,7 +1229,9 @@ impl Application for App {
                 .icon(widget::icon::from_name("dialog-question").size(64))
                 .body(fl!("replace-warning"))
                 .primary_action(
-                    widget::button::suggested(fl!("replace")).on_press(Message::DialogComplete),
+                    widget::button::suggested(fl!("replace"))
+                        .on_press(Message::DialogComplete)
+                        .id(REPLACE_BUTTON_ID.clone()),
                 )
                 .secondary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
