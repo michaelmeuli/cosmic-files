@@ -889,7 +889,7 @@ pub fn item_from_entry(
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            let is_erm41 = !matches!(
+            let is_erm41position28 = !matches!(
                 erm41position28_opt,
                 Some(Erm41Position28::Undetermined) | None
             );
@@ -900,7 +900,7 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    if is_erm41 {
+                    if is_erm41position28 {
                         identify_sequence_erm41(trimmed)
                     } else {
                         identify_sequence(trimmed)
@@ -2401,7 +2401,7 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_call(&self) -> Erm41Position28 {
+    pub fn erm41position28_call(&self) -> Erm41Position28 {
         match self {
             Self::Path { sequence, .. } => sequence
                 .as_ref()
@@ -2416,8 +2416,8 @@ impl ItemMetadata {
         }
     }
 
-    pub fn is_erm41(&self) -> bool {
-        !matches!(self.ab1_call(), Erm41Position28::Undetermined)
+    pub fn is_erm41position28(&self) -> bool {
+        !matches!(self.erm41position28_call(), Erm41Position28::Undetermined)
     }
 
     pub fn ab1_chromatogram(&self) -> Option<&Ab1Channels> {
@@ -3397,7 +3397,7 @@ impl Item {
         let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let call = self.metadata.ab1_call();
+        let call = self.metadata.erm41position28_call();
 
         let label = match &call {
             Erm41Position28::C28 => "erm(41) C28",
