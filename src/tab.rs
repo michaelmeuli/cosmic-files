@@ -7754,6 +7754,23 @@ impl Tab {
                 } else {
                     total_size = total_size.saturating_add(metadata.len());
                 }
+                #[cfg(unix)]
+                {
+                    let mode = metadata.mode();
+                    user_name.insert(
+                        get_user_by_uid(metadata.uid())
+                            .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
+                            .unwrap_or_default(),
+                    );
+                    mode_user.insert(get_mode_part(mode, MODE_SHIFT_USER));
+                    group_name.insert(
+                        get_group_by_gid(metadata.gid())
+                            .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
+                            .unwrap_or_default(),
+                    );
+                    mode_group.insert(get_mode_part(mode, MODE_SHIFT_GROUP));
+                    mode_other.insert(get_mode_part(mode, MODE_SHIFT_OTHER));
+                }
             } else {
                 match item.metadata {
                     #[cfg(feature = "russh")]
@@ -7769,20 +7786,6 @@ impl Tab {
                     _ => (),
                 }
             }
-            let mode = metadata.mode();
-            user_name.insert(
-                get_user_by_uid(metadata.uid())
-                    .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
-                    .unwrap_or_default(),
-            );
-            mode_user.insert(get_mode_part(mode, MODE_SHIFT_USER));
-            group_name.insert(
-                get_group_by_gid(metadata.gid())
-                    .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
-                    .unwrap_or_default(),
-            );
-            mode_group.insert(get_mode_part(mode, MODE_SHIFT_GROUP));
-            mode_other.insert(get_mode_part(mode, MODE_SHIFT_OTHER));
         }
         let mut mime_types: Vec<(String, u64)> = mime_type_counts.into_iter().collect();
         mime_types.sort_by(|(_, v1), (_, v2)| v2.cmp(v1));
