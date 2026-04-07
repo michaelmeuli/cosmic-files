@@ -2460,8 +2460,8 @@ impl App {
                                 (Some(item), None) => {
                                     if item.is_erm41() {
                                         Some(item.preview_erm41())
-                                    } else if item.metadata.is_seq_id() {
-                                        Some(item.preview_seq_id())
+                                    } else if item.is_hsp65() {
+                                        Some(item.preview_hsp65())
                                     } else if item.metadata.is_tbprofiler_json() {
                                         Some(item.preview_tbprofiler_json())
                                     } else {

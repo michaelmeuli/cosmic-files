@@ -2947,6 +2947,10 @@ impl Item {
         self.name.to_ascii_lowercase().contains("erm41")
     }
 
+    pub fn is_hsp65(&self) -> bool {
+        self.name.to_ascii_lowercase().contains("hsp65")
+    }
+
     pub fn can_gallery(&self) -> bool {
         self.mime.type_() == mime::IMAGE || self.mime.type_() == mime::TEXT
     }
@@ -3437,7 +3441,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_seq_id(&self) -> Element<'_, Message> {
+    pub fn preview_hsp65(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
