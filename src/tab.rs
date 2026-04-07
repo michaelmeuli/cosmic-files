@@ -900,7 +900,7 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    if is_erm41position28 {
+                    if name.to_ascii_lowercase().contains("erm41") {
                         identify_sequence_erm41(trimmed)
                     } else {
                         identify_sequence(trimmed)
