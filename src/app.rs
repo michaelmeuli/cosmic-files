@@ -2458,7 +2458,7 @@ impl App {
                                 }
                                 // Exactly one selected item
                                 (Some(item), None) => {
-                                    if item.metadata.is_erm41position28() {
+                                    if item.is_erm41() {
                                         Some(item.preview_erm41())
                                     } else if item.metadata.is_seq_id() {
                                         Some(item.preview_seq_id())

@@ -2943,6 +2943,10 @@ impl Item {
         self.location_opt.as_ref()?.path_opt()
     }
 
+    pub fn is_erm41(&self) -> bool {
+        self.name.to_ascii_lowercase().contains("erm41")
+    }
+
     pub fn can_gallery(&self) -> bool {
         self.mime.type_() == mime::IMAGE || self.mime.type_() == mime::TEXT
     }
