@@ -5499,10 +5499,14 @@ impl Tab {
                     for item in self.items_opt().map_or(Vec::new(), |items| {
                         items.iter().filter(|item| item.selected).collect()
                     }) {
+                        #[cfg(unix)]
                         if let (Some(path), Some(mode)) = (
                             item.path_opt(),
                             item.file_metadata()
-                                .and_then(|metadata| Some(metadata.mode())),
+                                .and_then(|metadata| {
+                                    use std::os::unix::fs::MetadataExt;
+                                    Some(metadata.mode())
+                                }),
                         ) {
                             permissions.push((
                                 path.clone(),
