@@ -3,7 +3,7 @@ pub mod jsondata;
 pub mod seqid;
 
 use erm41::Erm41Position28;
-pub use seqid::{SeqIdHit, SnpCall};
+pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 
 /// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
 ///

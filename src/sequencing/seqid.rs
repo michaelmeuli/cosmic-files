@@ -11,8 +11,10 @@ pub struct SeqIdHit {
     pub identity: f32,
     /// `true` when the reverse complement of the query was the better match.
     pub is_reverse: bool,
-    /// Calls at each diagnostic hsp65 SNP position.
-    pub hsp65_snp_calls: Vec<SnpCall>,
+    /// Calls at each diagnostic kansasii/gastri SNP position.
+    pub kansasii_gastri_snp_calls: Vec<KansasiiGastriSnpCall>,
+    /// Calls at each diagnostic marinum/ulcerans SNP position.
+    pub marinum_ulcerans_snp_calls: Vec<MarinumUlceransSnpCall>,
     /// The aligned query (forward or reverse-complement, whichever scored best).
     pub aligned_query: Vec<u8>,
     /// Signed offset such that `query_index = ref_index - alignment_offset`.
@@ -45,7 +47,13 @@ impl SeqIdHit {
             let end = start + query.len();
             let ref_p = refseq.clone();
             let query_p: Vec<u8> = (0..refseq.len())
-                .map(|i| if i >= start && i < end { query[i - start] } else { b'-' })
+                .map(|i| {
+                    if i >= start && i < end {
+                        query[i - start]
+                    } else {
+                        b'-'
+                    }
+                })
                 .collect();
             (ref_p, query_p)
         } else {
@@ -53,7 +61,13 @@ impl SeqIdHit {
             let end = start + refseq.len();
             let query_p = query.clone();
             let ref_p: Vec<u8> = (0..query.len())
-                .map(|i| if i >= start && i < end { refseq[i - start] } else { b'-' })
+                .map(|i| {
+                    if i >= start && i < end {
+                        refseq[i - start]
+                    } else {
+                        b'-'
+                    }
+                })
                 .collect();
             (ref_p, query_p)
         };
@@ -62,13 +76,21 @@ impl SeqIdHit {
             .iter()
             .zip(query_padded.iter())
             .map(|(&r, &q)| {
-                if r == b'-' || q == b'-' { b' ' }
-                else if r.to_ascii_uppercase() == q.to_ascii_uppercase() { b'|' }
-                else { b'.' }
+                if r == b'-' || q == b'-' {
+                    b' '
+                } else if r.to_ascii_uppercase() == q.to_ascii_uppercase() {
+                    b'|'
+                } else {
+                    b'.'
+                }
             })
             .collect();
 
-        let orient = if self.is_reverse { "Reverse Complement" } else { "Forward" };
+        let orient = if self.is_reverse {
+            "Reverse Complement"
+        } else {
+            "Forward"
+        };
         let mut out = format!(
             "Query vs {} ({}) — {:.1}% identity\n\n",
             self.accession, self.description, self.identity
@@ -81,9 +103,11 @@ impl SeqIdHit {
         let mut query_pos = 1usize;
         for chunk_start in (0..len).step_by(line_width) {
             let chunk_end = (chunk_start + line_width).min(len);
-            let ref_chunk   = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
-            let match_chunk = std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
-            let query_chunk = std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
+            let ref_chunk = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
+            let match_chunk =
+                std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
+            let query_chunk =
+                std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
 
             out.push_str(&format!("Ref   {:5}: {}\n", ref_pos, ref_chunk));
             out.push_str(&format!("             {match_chunk}\n"));
@@ -95,22 +119,57 @@ impl SeqIdHit {
         out
     }
 
-    /// Majority-vote species call based on the diagnostic SNPs.
-    /// Returns `Some("M. gastri")`, `Some("M. kansasii")`, or `None` when ambiguous/no data.
-    pub fn snp_species_call(&self) -> Option<&'static str> {
-        let gastri   = self.hsp65_snp_calls.iter().filter(|c| c.is_gastri()).count();
-        let kansasii = self.hsp65_snp_calls.iter().filter(|c| c.is_kansasii()).count();
+    pub fn is_kansasii(&self) -> bool {
+        self.accession == "AF547849"
+    }
+    pub fn is_gastri(&self) -> bool {
+        self.accession == "AF547836"
+    }
+    pub fn is_marinum(&self) -> bool {
+        self.accession == "AY299134"
+    }
+    pub fn is_ulcerans(&self) -> bool {
+        self.accession == "AY299145"
+    }
+    pub fn kansasii_gastri_snp_species_call(&self) -> Option<&'static str> {
+        let gastri = self
+            .kansasii_gastri_snp_calls
+            .iter()
+            .filter(|c| c.is_gastri())
+            .count();
+        let kansasii = self
+            .kansasii_gastri_snp_calls
+            .iter()
+            .filter(|c| c.is_kansasii())
+            .count();
         match gastri.cmp(&kansasii) {
             std::cmp::Ordering::Greater => Some("M. gastri"),
-            std::cmp::Ordering::Less    => Some("M. kansasii"),
-            std::cmp::Ordering::Equal   => None,
+            std::cmp::Ordering::Less => Some("M. kansasii"),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+    pub fn marinum_ulcerans_snp_species_call(&self) -> Option<&'static str> {
+        let marinum = self
+            .marinum_ulcerans_snp_calls
+            .iter()
+            .filter(|c| c.is_marinum())
+            .count();
+        let ulcerans = self
+            .marinum_ulcerans_snp_calls
+            .iter()
+            .filter(|c| c.is_ulcerans())
+            .count();
+        match marinum.cmp(&ulcerans) {
+            std::cmp::Ordering::Greater => Some("M. marinum"),
+            std::cmp::Ordering::Less => Some("M. ulcerans"),
+            std::cmp::Ordering::Equal => None,
         }
     }
 }
 
-/// A single diagnostic SNP position in the hsp65 gene.
+/// A single diagnostic SNP position in the kansasii/gastri comparison.
 #[derive(Clone, Debug)]
-pub struct SnpCall {
+pub struct KansasiiGastriSnpCall {
     /// 0-based position in the reference sequence.
     pub ref_pos: usize,
     /// Base observed in the query at this position (uppercase ASCII).
@@ -121,7 +180,7 @@ pub struct SnpCall {
     pub kansasii_base: u8,
 }
 
-impl SnpCall {
+impl KansasiiGastriSnpCall {
     pub fn is_gastri(&self) -> bool {
         self.query_base == self.gastri_base
     }
@@ -130,18 +189,21 @@ impl SnpCall {
     }
     /// Human-readable species tag: "M. gastri", "M. kansasii", or "?".
     pub fn species_tag(&self) -> &'static str {
-        if self.is_gastri()   { "M. gastri" }
-        else if self.is_kansasii() { "M. kansasii" }
-        else { "?" }
+        if self.is_gastri() {
+            "M. gastri"
+        } else if self.is_kansasii() {
+            "M. kansasii"
+        } else {
+            "?"
+        }
     }
 }
 
 // ── SNP table ────────────────────────────────────────────────────────────────
-
 /// Diagnostic SNPs between M. gastri (AF547836) and M. kansasii (AF547849),
 /// defined at 0-based positions in the aligned hsp65 reference sequences.
 /// Both references are 423 bp with no indels, so positions are identical in both.
-const HSP65_SNPS: &[(usize, u8, u8)] = &[
+const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
     // (0-based ref pos, gastri_base, kansasii_base)
     (100, b'C', b'T'),
     (130, b'C', b'T'),
@@ -153,6 +215,52 @@ const HSP65_SNPS: &[(usize, u8, u8)] = &[
     (399, b'G', b'A'),
 ];
 
+/// A single diagnostic SNP position in the kansasii/gastri comparison.
+#[derive(Clone, Debug)]
+pub struct MarinumUlceransSnpCall {
+    /// 0-based position in the reference sequence.
+    pub ref_pos: usize,
+    /// Base observed in the query at this position (uppercase ASCII).
+    pub query_base: u8,
+    /// Expected base for M. marinum (uppercase ASCII).
+    pub marinum_base: u8,
+    /// Expected base for M. ulcerans (uppercase ASCII).
+    pub ulcerans_base: u8,
+}
+
+impl MarinumUlceransSnpCall {
+    pub fn is_marinum(&self) -> bool {
+        self.query_base == self.marinum_base
+    }
+    pub fn is_ulcerans(&self) -> bool {
+        self.query_base == self.ulcerans_base
+    }
+    /// Human-readable species tag: "M. marinum", "M. ulcerans", or "?".
+    pub fn species_tag(&self) -> &'static str {
+        if self.is_marinum() {
+            "M. marinum"
+        } else if self.is_ulcerans() {
+            "M. ulcerans"
+        } else {
+            "?"
+        }
+    }
+}
+
+// ── SNP table ────────────────────────────────────────────────────────────────
+
+/// Diagnostic SNPs between M. marinum (AY299134) and M. ulcerans (AY299145),
+/// defined at 0-based positions in the aligned hsp65 reference sequences.
+/// Both references are 603 bp with no indels, so positions are identical in both.
+const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
+    // (0-based ref pos, marinum_base, ulcerans_base)
+    (20, b'C', b'T'),
+    (204, b'T', b'C'),
+    (212, b'G', b'A'),
+    (482, b'T', b'C'),
+    (500, b'G', b'C'),
+];
+
 // ── FASTA parsing ─────────────────────────────────────────────────────────────
 
 const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fasta");
@@ -162,7 +270,7 @@ const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fast
 const REF_AY458075: &str = include_str!("../../res/sequences/hsp65/AY458075.fasta");
 const REF_DQ987724: &str = include_str!("../../res/sequences/hsp65/DQ987724.fasta");
 const REF_EU191919: &str = include_str!("../../res/sequences/hsp65/EU191919.fasta");
-const REF_MAB2297:  &str = include_str!("../../res/sequences/MAB_2297.fasta");
+const REF_MAB2297: &str = include_str!("../../res/sequences/MAB_2297.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
 fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
@@ -178,7 +286,7 @@ fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
                 .and_then(|s| s.splitn(2, ' ').nth(1))
                 .map(|s| {
                     let mut words = s.splitn(3, ' ');
-                    let genus   = words.next().unwrap_or("");
+                    let genus = words.next().unwrap_or("");
                     let species = words.next().unwrap_or("");
                     format!("{} {}", genus, species)
                 })
@@ -212,39 +320,77 @@ fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
             .windows(query.len())
             .enumerate()
             .map(|(off, window)| {
-                let m = query.iter().zip(window)
+                let m = query
+                    .iter()
+                    .zip(window)
                     .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
                     .count();
                 (m, off)
             })
             .max_by_key(|&(c, _)| c)
             .unwrap_or((0, 0));
-        (best_count as f32 / query.len() as f32 * 100.0, best_off as isize)
+        (
+            best_count as f32 / query.len() as f32 * 100.0,
+            best_off as isize,
+        )
     } else {
         let (best_count, best_off) = query
             .windows(reference.len())
             .enumerate()
             .map(|(off, window)| {
-                let m = reference.iter().zip(window)
+                let m = reference
+                    .iter()
+                    .zip(window)
                     .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
                     .count();
                 (m, off)
             })
             .max_by_key(|&(c, _)| c)
             .unwrap_or((0, 0));
-        (best_count as f32 / reference.len() as f32 * 100.0, -(best_off as isize))
+        (
+            best_count as f32 / reference.len() as f32 * 100.0,
+            -(best_off as isize),
+        )
     }
 }
 
 /// Look up what the query has at each diagnostic SNP position given the alignment offset.
-fn call_snps(query: &[u8], alignment_offset: isize) -> Vec<SnpCall> {
-    HSP65_SNPS
+fn call_kansasii_gastri_snps(query: &[u8], alignment_offset: isize) -> Vec<KansasiiGastriSnpCall> {
+    KANSASII_GASTRI_SNPS
         .iter()
         .filter_map(|&(ref_pos, gastri_base, kansasii_base)| {
             let query_pos = ref_pos as isize - alignment_offset;
             if query_pos >= 0 && (query_pos as usize) < query.len() {
                 let query_base = query[query_pos as usize].to_ascii_uppercase();
-                Some(SnpCall { ref_pos, query_base, gastri_base, kansasii_base })
+                Some(KansasiiGastriSnpCall {
+                    ref_pos,
+                    query_base,
+                    gastri_base,
+                    kansasii_base,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn call_marinum_ulcerans_snps(
+    query: &[u8],
+    alignment_offset: isize,
+) -> Vec<MarinumUlceransSnpCall> {
+    MARINUM_ULCERANS_SNPS
+        .iter()
+        .filter_map(|&(ref_pos, marinum_base, ulcerans_base)| {
+            let query_pos = ref_pos as isize - alignment_offset;
+            if query_pos >= 0 && (query_pos as usize) < query.len() {
+                let query_base = query[query_pos as usize].to_ascii_uppercase();
+                Some(MarinumUlceransSnpCall {
+                    ref_pos,
+                    query_base,
+                    marinum_base,
+                    ulcerans_base,
+                })
             } else {
                 None
             }
@@ -283,20 +429,26 @@ pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query, fwd_off)
             };
-            let hsp65_snp_calls = call_snps(aligned_query, offset);
+            let kansasii_gastri_snp_calls = call_kansasii_gastri_snps(aligned_query, offset);
+            let marinum_ulcerans_snp_calls = call_marinum_ulcerans_snps(aligned_query, offset);
             SeqIdHit {
                 accession,
                 description,
                 identity,
                 is_reverse,
-                hsp65_snp_calls,
+                kansasii_gastri_snp_calls,
+                marinum_ulcerans_snp_calls,
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
             }
         })
         .collect();
 
-    hits.sort_by(|a, b| b.identity.partial_cmp(&a.identity).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.identity
+            .partial_cmp(&a.identity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits
 }
 
@@ -318,7 +470,8 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         description: "M. abscessus".to_string(),
         identity,
         is_reverse,
-        hsp65_snp_calls: vec![],
+        kansasii_gastri_snp_calls: vec![],
+        marinum_ulcerans_snp_calls: vec![],
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
     }]

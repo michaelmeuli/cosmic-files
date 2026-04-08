@@ -87,7 +87,7 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        Ab1Channels, SeqData, SeqIdHit, SnpCall,
+        Ab1Channels, SeqData, SeqIdHit,    
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
@@ -3456,7 +3456,6 @@ impl Item {
         if hits.is_empty() {
             details = details.push(widget::text::heading("No sequence match found"));
         } else {
-            // ── Best match ──
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading("Best match:"));
             let best = &hits[0];
@@ -3464,21 +3463,39 @@ impl Item {
                 "{} ({:.1}%)",
                 best.description, best.identity,
             )));
+            details = details.push(widget::text::body(""));
 
-            // ── SNP species call ──
-            if !best.hsp65_snp_calls.is_empty() {
-                let gastri_n = best.hsp65_snp_calls.iter().filter(|c| c.is_gastri()).count();
-                let kansasii_n = best.hsp65_snp_calls.iter().filter(|c| c.is_kansasii()).count();
-                let total = best.hsp65_snp_calls.len();
-                let species_call = best.snp_species_call().unwrap_or("Ambiguous");
-                details = details.push(widget::text::body("hsp65 SNP call:"));
+            if best.is_kansasii() || best.is_gastri() {
+                let gastri_n = best.kansasii_gastri_snp_calls.iter().filter(|c| c.is_gastri()).count();
+                let kansasii_n = best.kansasii_gastri_snp_calls.iter().filter(|c| c.is_kansasii()).count();
+                let total = best.kansasii_gastri_snp_calls.len();
+                let species_call = best.kansasii_gastri_snp_species_call().unwrap_or("Ambiguous");
+                details = details.push(widget::text::body("hsp65 kansasii/gastri SNP call:"));
                 details = details.push(widget::text::body(format!(
                     "{} (M. gastri {}/{}, M. kansasii {}/{})",
                     species_call, gastri_n, total, kansasii_n, total,
                 )));
-
-                // Individual SNP positions
-                for snp in &best.hsp65_snp_calls {
+                for snp in &best.kansasii_gastri_snp_calls {
+                    details = details.push(widget::text::body(format!(
+                        "  pos {}: {} = {}",
+                        snp.ref_pos + 1,
+                        snp.query_base as char,
+                        snp.species_tag(),
+                    )));
+                }
+                details = details.push(widget::text::body(""));
+            }
+            if best.is_marinum() || best.is_ulcerans() {
+                let ulcerans_n = best.marinum_ulcerans_snp_calls.iter().filter(|c| c.is_ulcerans()).count();
+                let marinum_n = best.marinum_ulcerans_snp_calls.iter().filter(|c| c.is_marinum()).count();
+                let total = best.marinum_ulcerans_snp_calls.len();
+                let species_call = best.marinum_ulcerans_snp_species_call().unwrap_or("Ambiguous");
+                details = details.push(widget::text::body("hsp65 marinum/ulcerans SNP call:"));
+                details = details.push(widget::text::body(format!(
+                    "{} (M. ulcerans {}/{}, M. marinum {}/{})",
+                    species_call, ulcerans_n, total, marinum_n, total,
+                )));
+                for snp in &best.marinum_ulcerans_snp_calls {
                     details = details.push(widget::text::body(format!(
                         "  pos {}: {} = {}",
                         snp.ref_pos + 1,
