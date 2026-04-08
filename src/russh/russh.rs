@@ -651,7 +651,7 @@ async fn load_remote_ab1(
         if is_erm41 {
             crate::sequencing::seqid::identify_sequence_erm41(trimmed)
         } else {
-            crate::sequencing::seqid::identify_sequence(trimmed)
+            crate::sequencing::seqid::identify_hsp65_sequence(trimmed)
         }
     }).unwrap_or_default();
     let chromatogram = crate::sequencing::erm41::parse_ab1_chromatogram(&bytes);

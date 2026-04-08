@@ -23,8 +23,15 @@ impl SeqIdHit {
     /// Format the alignment as a human-readable pairwise text (60-column wrapping).
     pub fn format_pairwise_alignment(&self) -> String {
         let ref_fasta = match self.accession.as_str() {
+            // For hsp65
             "AF547836" => REF_AF547836,
             "AF547849" => REF_AF547849,
+            "AY299134" => REF_AY299134,
+            "AY299145" => REF_AY299145,
+            "AY458075" => REF_AY458075,
+            "DQ987724" => REF_DQ987724,
+            "EU191919" => REF_EU191919,
+            // For erm(41)
             "MAB_2297" => REF_MAB2297,
             _ => return format!("Unknown reference accession: {}\n", self.accession),
         };
@@ -254,14 +261,15 @@ fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
         .collect()
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/// Align `query` against all embedded reference sequences and return every hit,
-/// sorted by identity descending (best match first).
-pub fn identify_sequence(query: &[u8]) -> Vec<SeqIdHit> {
+pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
     let refs = [
         parse_fasta(REF_AF547836),
         parse_fasta(REF_AF547849),
+        parse_fasta(REF_AY299134),
+        parse_fasta(REF_AY299145),
+        parse_fasta(REF_AY458075),
+        parse_fasta(REF_DQ987724),
+        parse_fasta(REF_EU191919),
     ];
     let rc = reverse_complement(query);
 

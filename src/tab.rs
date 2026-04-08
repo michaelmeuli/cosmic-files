@@ -91,7 +91,7 @@ use crate::{
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
-        seqid::{identify_sequence, identify_sequence_erm41},
+        seqid::{identify_hsp65_sequence, identify_sequence_erm41},
         trim_to_min_quality,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
@@ -889,10 +889,6 @@ pub fn item_from_entry(
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            let is_erm41position28 = !matches!(
-                erm41position28_opt,
-                Some(Erm41Position28::Undetermined) | None
-            );
             let seq_id = ab1_seq
                 .as_ref()
                 .map(|seq| {
@@ -902,8 +898,10 @@ pub fn item_from_entry(
                     };
                     if name.to_ascii_lowercase().contains("erm41") {
                         identify_sequence_erm41(trimmed)
+                    } else if name.to_ascii_lowercase().contains("hsp65") {
+                        identify_hsp65_sequence(trimmed)
                     } else {
-                        identify_sequence(trimmed)
+                        Vec::new()
                     }
                 })
                 .unwrap_or_default();
@@ -3457,10 +3455,9 @@ impl Item {
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading("Best match:"));
             let best = &hits[0];
-            let orient = if best.is_reverse { ", RC" } else { "" };
             details = details.push(widget::text::heading(format!(
-                "{} ({:.1}%) {}",
-                best.description, best.identity, orient,
+                "{} ({:.1}%)",
+                best.description, best.identity,
             )));
 
             // ── SNP species call ──
@@ -3497,10 +3494,9 @@ impl Item {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body("Other matches:".to_string()));
                 for hit in &hits[1..] {
-                    let orient = if hit.is_reverse { ", RC" } else { "" };
                     details = details.push(widget::text::body(format!(
-                        "{} ({:.1}%) {}",
-                        hit.description, hit.identity, orient,
+                        "{} ({:.1}%)",
+                        hit.description, hit.identity,
                     )));
                 }
             }
