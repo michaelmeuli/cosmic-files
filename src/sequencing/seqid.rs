@@ -148,8 +148,13 @@ const HSP65_SNPS: &[(usize, u8, u8)] = &[
 
 // ── FASTA parsing ─────────────────────────────────────────────────────────────
 
-const REF_AF547836: &str = include_str!("../../res/sequences/AF547836.fasta");
-const REF_AF547849: &str = include_str!("../../res/sequences/AF547849.fasta");
+const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fasta");
+const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
+const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
+const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
+const REF_AY458075: &str = include_str!("../../res/sequences/hsp65/AY458075.fasta");
+const REF_DQ987724: &str = include_str!("../../res/sequences/hsp65/DQ987724.fasta");
+const REF_EU191919: &str = include_str!("../../res/sequences/hsp65/EU191919.fasta");
 const REF_MAB2297:  &str = include_str!("../../res/sequences/MAB_2297.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
