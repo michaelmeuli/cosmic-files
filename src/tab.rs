@@ -884,6 +884,9 @@ pub fn item_from_entry(
         .extension()
         .map(|e| e.eq_ignore_ascii_case("ab1"))
         .unwrap_or(false);
+    let lower_name = name.to_ascii_lowercase();
+    let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
+    let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
@@ -896,9 +899,9 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    if name.to_ascii_lowercase().contains("erm41") {
+                    if is_erm41 {
                         identify_sequence_erm41(trimmed)
-                    } else if name.to_ascii_lowercase().contains("hsp65") {
+                    } else if is_hsp65 {
                         identify_hsp65_sequence(trimmed)
                     } else {
                         Vec::new()
@@ -2942,11 +2945,13 @@ impl Item {
     }
 
     pub fn is_erm41(&self) -> bool {
-        self.name.to_ascii_lowercase().contains("erm41")
+        let lower = self.name.to_ascii_lowercase();
+        lower.contains("erm41") || lower.contains("erm")
     }
 
     pub fn is_hsp65(&self) -> bool {
-        self.name.to_ascii_lowercase().contains("hsp65")
+        let lower = self.name.to_ascii_lowercase();
+        lower.contains("hsp65") || lower.contains("65kda")
     }
 
     pub fn can_gallery(&self) -> bool {
@@ -3461,10 +3466,10 @@ impl Item {
             )));
 
             // ── SNP species call ──
-            if !best.snp_calls.is_empty() {
-                let gastri_n = best.snp_calls.iter().filter(|c| c.is_gastri()).count();
-                let kansasii_n = best.snp_calls.iter().filter(|c| c.is_kansasii()).count();
-                let total = best.snp_calls.len();
+            if !best.hsp65_snp_calls.is_empty() {
+                let gastri_n = best.hsp65_snp_calls.iter().filter(|c| c.is_gastri()).count();
+                let kansasii_n = best.hsp65_snp_calls.iter().filter(|c| c.is_kansasii()).count();
+                let total = best.hsp65_snp_calls.len();
                 let species_call = best.snp_species_call().unwrap_or("Ambiguous");
                 details = details.push(widget::text::body("hsp65 SNP call:"));
                 details = details.push(widget::text::body(format!(
@@ -3473,7 +3478,7 @@ impl Item {
                 )));
 
                 // Individual SNP positions
-                for snp in &best.snp_calls {
+                for snp in &best.hsp65_snp_calls {
                     details = details.push(widget::text::body(format!(
                         "  pos {}: {} = {}",
                         snp.ref_pos + 1,

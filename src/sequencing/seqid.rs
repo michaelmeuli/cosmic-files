@@ -12,7 +12,7 @@ pub struct SeqIdHit {
     /// `true` when the reverse complement of the query was the better match.
     pub is_reverse: bool,
     /// Calls at each diagnostic hsp65 SNP position.
-    pub snp_calls: Vec<SnpCall>,
+    pub hsp65_snp_calls: Vec<SnpCall>,
     /// The aligned query (forward or reverse-complement, whichever scored best).
     pub aligned_query: Vec<u8>,
     /// Signed offset such that `query_index = ref_index - alignment_offset`.
@@ -98,8 +98,8 @@ impl SeqIdHit {
     /// Majority-vote species call based on the diagnostic SNPs.
     /// Returns `Some("M. gastri")`, `Some("M. kansasii")`, or `None` when ambiguous/no data.
     pub fn snp_species_call(&self) -> Option<&'static str> {
-        let gastri   = self.snp_calls.iter().filter(|c| c.is_gastri()).count();
-        let kansasii = self.snp_calls.iter().filter(|c| c.is_kansasii()).count();
+        let gastri   = self.hsp65_snp_calls.iter().filter(|c| c.is_gastri()).count();
+        let kansasii = self.hsp65_snp_calls.iter().filter(|c| c.is_kansasii()).count();
         match gastri.cmp(&kansasii) {
             std::cmp::Ordering::Greater => Some("M. gastri"),
             std::cmp::Ordering::Less    => Some("M. kansasii"),
@@ -283,13 +283,13 @@ pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query, fwd_off)
             };
-            let snp_calls = call_snps(aligned_query, offset);
+            let hsp65_snp_calls = call_snps(aligned_query, offset);
             SeqIdHit {
                 accession,
                 description,
                 identity,
                 is_reverse,
-                snp_calls,
+                hsp65_snp_calls,
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
             }
@@ -318,7 +318,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         description: "M. abscessus".to_string(),
         identity,
         is_reverse,
-        snp_calls: vec![],
+        hsp65_snp_calls: vec![],
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
     }]
