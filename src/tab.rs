@@ -3401,43 +3401,40 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column::with_capacity(10).spacing(space_m);
-        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
-
+        let mut column = widget::column::with_capacity(4).spacing(space_m);
+        column = column.push(widget::text::heading(self.name.clone()));
         let call = self.metadata.erm41position28_call();
-
         let label = match &call {
             Erm41Position28::C28 => "erm(41) C28",
             Erm41Position28::T28 => "erm(41) T28",
             _ => "erm(41) Undetermined",
         };
-        details = details.push(widget::text::heading(label));
-        details = details.push(widget::text::body(
-            "Shown are bases 19-39, with position 28 in bold.",
-        ));
+        column = column.push(widget::text::heading(label));
 
+        let mut details = widget::column::with_capacity(5).spacing(space_xxxs);
         if let Some(chrom) = self.metadata.ab1_chromatogram() {
+            details = details.push(widget::text::body(
+                "Shown are bases 19-39, with position 28 in bold.",
+            ));
             if chrom.is_reverse {
-                column = column.push(widget::text::body("reverse complement"));
+                details = details.push(widget::text::body("reverse complement"));
             }
+            details = details.push(widget::text::body(""));
             let canvas = widget::Canvas::new(ChromatogramProgram { chrom })
                 .width(Length::Fill)
                 .height(Length::Fixed(200.0));
-            column = column.push(canvas);
+            details = details.push(canvas);
+            details = details.push(widget::text::body(""));
         }
-
-        details = details.push(widget::text::body(""));
+        column = column.push(details);
+        
         let hits = self.metadata.ab1_seq_id();
         if let Some(best) = hits.first() {
-            details = details.push(
+            column = column.push(
                 widget::button::standard("View alignment")
                     .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
             );
         }
-
-        column = column.push(details);
-
         column.into()
     }
 
@@ -3448,8 +3445,8 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column::with_capacity(10).spacing(space_m);
-        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.ab1_seq_id();
@@ -5510,11 +5507,10 @@ impl Tab {
                         #[cfg(unix)]
                         if let (Some(path), Some(mode)) = (
                             item.path_opt(),
-                            item.file_metadata()
-                                .and_then(|metadata| {
-                                    use std::os::unix::fs::MetadataExt;
-                                    Some(metadata.mode())
-                                }),
+                            item.file_metadata().and_then(|metadata| {
+                                use std::os::unix::fs::MetadataExt;
+                                Some(metadata.mode())
+                            }),
                         ) {
                             permissions.push((
                                 path.clone(),
