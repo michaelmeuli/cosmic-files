@@ -3,7 +3,7 @@ pub mod jsondata;
 pub mod seqid;
 
 use erm41::Erm41Position28;
-pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall};
+pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall, SpeciesHit};
 
 /// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
 ///
@@ -158,4 +158,5 @@ pub struct SeqData {
     pub erm41position28_opt: Option<Erm41Position28>,
     pub chromatogram: Option<Ab1Channels>,
     pub seq_id: Vec<SeqIdHit>,
+    pub species_hit_opt: Option<SpeciesHit>,
 }

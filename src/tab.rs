@@ -87,11 +87,18 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        Ab1Channels, SeqData, SeqIdHit,    
+        Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
-        seqid::{identify_hsp65_sequence, identify_sequence_erm41},
+        seqid::{
+            identify_sequence_erm41,
+            identify_hsp65_sequence, 
+            identify_species_erm41, 
+            identify_species_hsp65, 
+            identify_species_16S, 
+            identify_species_rpoB
+        },
         trim_to_min_quality,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
@@ -887,6 +894,8 @@ pub fn item_from_entry(
     let lower_name = name.to_ascii_lowercase();
     let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
     let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
+    let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
+    let is_16s = lower_name.contains("16s");
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
@@ -908,11 +917,47 @@ pub fn item_from_entry(
                     }
                 })
                 .unwrap_or_default();
+            let species_hit_opt = if is_hsp65 {
+                ab1_seq.as_ref().and_then(|seq| {
+                    let trimmed: &[u8] = match &ab1_qual {
+                        Some(qual) => trim_to_min_quality(seq, qual, 20),
+                        None => seq.as_slice(),
+                    };
+                    identify_species_hsp65(trimmed)
+                })
+            } else if is_erm41 {
+                ab1_seq.as_ref().and_then(|seq| {
+                    let trimmed: &[u8] = match &ab1_qual {
+                        Some(qual) => trim_to_min_quality(seq, qual, 20),
+                        None => seq.as_slice(),
+                    };
+                    identify_species_erm41(trimmed)
+                })
+            } else if is_rpob {
+                ab1_seq.as_ref().and_then(|seq| {
+                    let trimmed: &[u8] = match &ab1_qual {
+                        Some(qual) => trim_to_min_quality(seq, qual, 20),
+                        None => seq.as_slice(),
+                    };
+                    identify_species_rpoB(trimmed)
+                })
+            } else if is_16s {
+                ab1_seq.as_ref().and_then(|seq| {
+                    let trimmed: &[u8] = match &ab1_qual {
+                        Some(qual) => trim_to_min_quality(seq, qual, 20),
+                        None => seq.as_slice(),
+                    };
+                    identify_species_16S(trimmed)
+                })
+            } else {
+                None
+            };
             let chromatogram = parse_ab1_chromatogram(&bytes);
             SeqData {
                 erm41position28_opt,
                 chromatogram,
                 seq_id,
+                species_hit_opt,
             }
         })
     } else {
@@ -2445,6 +2490,15 @@ impl ItemMetadata {
         }
     }
 
+    pub fn ab1_species_hit(&self) -> Option<&SpeciesHit> {
+        match self {
+            Self::Path { sequence, .. } => sequence.as_ref()?.species_hit_opt.as_ref(),
+            #[cfg(feature = "russh")]
+            Self::RusshPath { sequence, .. } => sequence.as_ref()?.species_hit_opt.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn is_seq_id(&self) -> bool {
         self.ab1_seq_id().first().is_some_and(|h| h.identity >= 2.0)
     }
@@ -3515,13 +3569,26 @@ impl Item {
             if hits.len() > 1 {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body("Other matches:".to_string()));
-                for hit in &hits[1..] {
+                for hit in &hits[1..3.min(hits.len())] {
                     details = details.push(widget::text::body(format!(
                         "{} ({:.1}%)",
                         hit.description, hit.identity,
                     )));
                 }
             }
+        }
+
+        // ── Species identification (myco_hsp65 database) ──
+        if let Some(hit) = self.metadata.ab1_species_hit() {
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::body("Species identification (hsp65 database):"));
+            details = details.push(widget::text::heading(format!(
+                "{} ({:.1}%)",
+                hit.description, hit.identity,
+            )));
+            details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
+
+            
         }
 
         column = column.push(details);

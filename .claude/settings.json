@@ -4,7 +4,8 @@
       "Read(//c/Users/micha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/iced_widget-0.13.4/src/**)",
       "Read(//c/Users/micha/rust/libcosmic/src//**)",
       "Read(//c/Users/micha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/iced_graphics-0.13.0/src/geometry/**)",
-      "Read(//c/Users/micha/.cargo/git/checkouts/libcosmic-41009aea1d72760b/03d0171/iced/graphics/src/geometry/**)"
+      "Read(//c/Users/micha/.cargo/git/checkouts/libcosmic-41009aea1d72760b/03d0171/iced/graphics/src/geometry/**)",
+      "Bash(grep -n \"pub fn identify_sequence\\\\b\\\\|myco_hsp65\\\\|myco_concat\" c:/Users/micha/rust/cosmic-files/src/sequencing/*.rs c:/Users/micha/rust/cosmic-files/src/tab.rs)"
     ]
   }
 }

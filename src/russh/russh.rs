@@ -655,7 +655,7 @@ async fn load_remote_ab1(
         }
     }).unwrap_or_default();
     let chromatogram = crate::sequencing::erm41::parse_ab1_chromatogram(&bytes);
-    Some(crate::sequencing::SeqData { erm41position28_opt: call, chromatogram, seq_id })
+    Some(crate::sequencing::SeqData { erm41position28_opt: call, chromatogram, seq_id, species_hit_opt: None })
 }
 
 async fn load_remote_json(client: &Client, uri: &str) -> Result<TbProfilerJson, String> {

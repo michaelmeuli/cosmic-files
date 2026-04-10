@@ -1,5 +1,13 @@
 use super::erm41::reverse_complement;
 
+/// Best-hit species identification from aligning against the full myco_hsp65 database.
+#[derive(Clone, Debug)]
+pub struct SpeciesHit {
+    pub accession: String,
+    pub description: String,
+    pub identity: f32,
+}
+
 /// Best-hit result from aligning an AB1 read against the reference sequences.
 #[derive(Clone, Debug)]
 pub struct SeqIdHit {
@@ -30,9 +38,6 @@ impl SeqIdHit {
             "AF547849" => REF_AF547849,
             "AY299134" => REF_AY299134,
             "AY299145" => REF_AY299145,
-            "AY458075" => REF_AY458075,
-            "DQ987724" => REF_DQ987724,
-            "EU191919" => REF_EU191919,
             // For erm(41)
             "MAB_2297" => REF_MAB2297,
             _ => return format!("Unknown reference accession: {}\n", self.accession),
@@ -263,13 +268,14 @@ const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
 
 // ── FASTA parsing ─────────────────────────────────────────────────────────────
 
+const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
+const REF_MYCO_ERM41: &str = include_str!("../../res/sequences/myco_erm41.fasta");
+const REF_MYCO_16S: &str = include_str!("../../res/sequences/myco_16S.fasta");
+const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpoB.fasta");
 const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fasta");
 const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
 const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
 const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
-const REF_AY458075: &str = include_str!("../../res/sequences/hsp65/AY458075.fasta");
-const REF_DQ987724: &str = include_str!("../../res/sequences/hsp65/DQ987724.fasta");
-const REF_EU191919: &str = include_str!("../../res/sequences/hsp65/EU191919.fasta");
 const REF_MAB2297: &str = include_str!("../../res/sequences/MAB_2297.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
@@ -413,9 +419,6 @@ pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
         parse_fasta(REF_AF547849),
         parse_fasta(REF_AY299134),
         parse_fasta(REF_AY299145),
-        parse_fasta(REF_AY458075),
-        parse_fasta(REF_DQ987724),
-        parse_fasta(REF_EU191919),
     ];
     let rc = reverse_complement(query);
 
@@ -475,4 +478,57 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
     }]
+}
+
+/// Parse a simple multi-FASTA (`>accession description\nSEQ...`) into
+/// `(accession, "Genus species", sequence)` tuples.
+fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
+    let mut result = Vec::new();
+    let mut cur_acc = String::new();
+    let mut cur_desc = String::new();
+    let mut cur_seq: Vec<u8> = Vec::new();
+    for line in fasta.lines() {
+        if let Some(rest) = line.strip_prefix('>') {
+            if !cur_acc.is_empty() {
+                result.push((cur_acc.clone(), cur_desc.clone(), std::mem::take(&mut cur_seq)));
+            }
+            let mut words = rest.splitn(4, ' ');
+            cur_acc = words.next().unwrap_or("").to_string();
+            let genus = words.next().unwrap_or("");
+            let species = words.next().unwrap_or("");
+            cur_desc = format!("{} {}", genus, species).trim().to_string();
+        } else {
+            cur_seq.extend(line.bytes().filter(|b| b.is_ascii_alphabetic()));
+        }
+    }
+    if !cur_acc.is_empty() {
+        result.push((cur_acc, cur_desc, cur_seq));
+    }
+    result
+}
+
+/// Align `query` against every sequence in `database` and return the best hit.
+pub fn identify_species(query: &[u8], database: &str) -> Option<SpeciesHit> {
+    let rc = reverse_complement(query);
+    parse_multi_fasta(database)
+        .into_iter()
+        .map(|(accession, description, refseq)| {
+            let (fwd_id, _) = best_alignment(query, &refseq);
+            let (rev_id, _) = best_alignment(&rc, &refseq);
+            SpeciesHit { accession, description, identity: fwd_id.max(rev_id) }
+        })
+        .max_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+pub fn identify_species_hsp65(query: &[u8]) -> Option<SpeciesHit> {
+    identify_species(query, REF_MYCO_HSP65)
+}
+pub fn identify_species_erm41(query: &[u8]) -> Option<SpeciesHit> {
+    identify_species(query, REF_MYCO_ERM41)
+}
+pub fn identify_species_16S(query: &[u8]) -> Option<SpeciesHit> {
+    identify_species(query, REF_MYCO_16S)
+}
+pub fn identify_species_rpoB(query: &[u8]) -> Option<SpeciesHit> {
+    identify_species(query, REF_MYCO_RPOB)
 }
