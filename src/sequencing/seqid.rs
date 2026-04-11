@@ -1,11 +1,98 @@
 use super::erm41::reverse_complement;
 
-/// Best-hit species identification from aligning against the full myco_hsp65 database.
+/// Best-hit species identification from aligning against a multi-FASTA reference database.
 #[derive(Clone, Debug)]
 pub struct SpeciesHit {
     pub accession: String,
     pub description: String,
     pub identity: f32,
+    /// `true` when the reverse complement of the query was the better match.
+    pub is_reverse: bool,
+    /// The aligned query (forward or reverse-complement, whichever scored best).
+    pub aligned_query: Vec<u8>,
+    /// Signed offset such that `query_index = ref_index - alignment_offset`.
+    pub alignment_offset: isize,
+    /// The full reference sequence for this hit (used for pairwise display).
+    pub ref_seq: Vec<u8>,
+}
+
+impl SpeciesHit {
+    /// Format the alignment as a human-readable pairwise text (60-column wrapping).
+    pub fn format_pairwise_alignment(&self) -> String {
+        let query = &self.aligned_query;
+        let refseq = &self.ref_seq;
+        let offset = self.alignment_offset;
+
+        let (ref_padded, query_padded): (Vec<u8>, Vec<u8>) = if query.len() <= refseq.len() {
+            let start = offset as usize;
+            let end = start + query.len();
+            let ref_p = refseq.clone();
+            let query_p: Vec<u8> = (0..refseq.len())
+                .map(|i| {
+                    if i >= start && i < end {
+                        query[i - start]
+                    } else {
+                        b'-'
+                    }
+                })
+                .collect();
+            (ref_p, query_p)
+        } else {
+            let start = (-offset) as usize;
+            let end = start + refseq.len();
+            let query_p = query.clone();
+            let ref_p: Vec<u8> = (0..query.len())
+                .map(|i| {
+                    if i >= start && i < end {
+                        refseq[i - start]
+                    } else {
+                        b'-'
+                    }
+                })
+                .collect();
+            (ref_p, query_p)
+        };
+
+        let match_line: Vec<u8> = ref_padded
+            .iter()
+            .zip(query_padded.iter())
+            .map(|(&r, &q)| {
+                if r == b'-' || q == b'-' {
+                    b' '
+                } else if r.to_ascii_uppercase() == q.to_ascii_uppercase() {
+                    b'|'
+                } else {
+                    b'.'
+                }
+            })
+            .collect();
+
+        let orient = if self.is_reverse { "Reverse Complement" } else { "Forward" };
+        let mut out = format!(
+            "Query vs {} ({}) — {:.1}% identity\n\n",
+            self.accession, self.description, self.identity
+        );
+        out.push_str(&format!("Orientation: {orient}\n\n"));
+
+        let line_width = 60usize;
+        let len = ref_padded.len();
+        let mut ref_pos = 1usize;
+        let mut query_pos = 1usize;
+        for chunk_start in (0..len).step_by(line_width) {
+            let chunk_end = (chunk_start + line_width).min(len);
+            let ref_chunk = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
+            let match_chunk = std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
+            let query_chunk = std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
+
+            out.push_str(&format!("Ref   {:5}: {}\n", ref_pos, ref_chunk));
+            out.push_str(&format!("             {match_chunk}\n"));
+            out.push_str(&format!("Query {:5}: {}\n\n", query_pos, query_chunk));
+
+            ref_pos += ref_chunk.bytes().filter(|&b| b != b'-').count();
+            query_pos += query_chunk.bytes().filter(|&b| b != b'-').count();
+        }
+        out
+    }
 }
 
 /// Best-hit result from aligning an AB1 read against the reference sequences.
@@ -513,9 +600,22 @@ pub fn identify_species(query: &[u8], database: &str) -> Option<SpeciesHit> {
     parse_multi_fasta(database)
         .into_iter()
         .map(|(accession, description, refseq)| {
-            let (fwd_id, _) = best_alignment(query, &refseq);
-            let (rev_id, _) = best_alignment(&rc, &refseq);
-            SpeciesHit { accession, description, identity: fwd_id.max(rev_id) }
+            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
+                (rev_id, true, rc.clone(), rev_off)
+            } else {
+                (fwd_id, false, query.to_vec(), fwd_off)
+            };
+            SpeciesHit {
+                accession,
+                description,
+                identity,
+                is_reverse,
+                aligned_query,
+                alignment_offset,
+                ref_seq: refseq,
+            }
         })
         .max_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap_or(std::cmp::Ordering::Equal))
 }

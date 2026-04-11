@@ -2206,6 +2206,7 @@ pub enum Command {
     Iced(TaskWrapper),
     OpenFile(Vec<PathBuf>),
     OpenSeqAlignment(Box<SeqIdHit>),
+    OpenSpeciesAlignment(Box<SpeciesHit>),
     OpenInNewTab(PathBuf),
     OpenUriInNewTab(String, String, Option<PathBuf>),
     OpenInNewWindow(PathBuf),
@@ -2292,6 +2293,7 @@ pub enum Message {
     DirectorySize(PathBuf, DirSize),
     ImageDecoded(PathBuf, u32, u32, Vec<u8>, Option<(u32, u32)>, u64), // path, width, height, pixels, display_size, generation
     OpenSeqAlignment(Box<SeqIdHit>),
+    OpenSpeciesAlignment(Box<SpeciesHit>),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -3587,8 +3589,11 @@ impl Item {
                 hit.description, hit.identity,
             )));
             details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
-
-            
+            details = details.push(widget::text::body(""));
+            details = details.push(
+                widget::button::standard("View alignment")
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone()))),
+            );
         }
 
         column = column.push(details);
@@ -5776,6 +5781,9 @@ impl Tab {
             }
             Message::OpenSeqAlignment(hit) => {
                 commands.push(Command::OpenSeqAlignment(hit));
+            }
+            Message::OpenSpeciesAlignment(hit) => {
+                commands.push(Command::OpenSpeciesAlignment(hit));
             }
         }
 
