@@ -892,10 +892,11 @@ pub fn item_from_entry(
         .map(|e| e.eq_ignore_ascii_case("ab1"))
         .unwrap_or(false);
     let lower_name = name.to_ascii_lowercase();
-    let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
-    let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
-    let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
-    let is_16s = lower_name.contains("mbak14");
+    let is_fasta = lower_name.ends_with(".fasta") || lower_name.ends_with(".fa");
+    let is_erm41 = !is_fasta && (lower_name.contains("erm41") || lower_name.contains("erm"));
+    let is_hsp65 = !is_fasta && (lower_name.contains("hsp65") || lower_name.contains("65kda"));
+    let is_rpob  = !is_fasta && (lower_name.contains("rpob")  || lower_name.contains("rpo"));
+    let is_16s   = !is_fasta && lower_name.contains("mbak14");
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
@@ -3000,18 +3001,23 @@ impl Item {
         self.location_opt.as_ref()?.path_opt()
     }
 
+    fn is_fasta(&self) -> bool {
+        let lower = self.name.to_ascii_lowercase();
+        lower.ends_with(".fasta") || lower.ends_with(".fa")
+    }
+
     pub fn is_erm41(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        lower.contains("erm41") || lower.contains("erm")
+        !self.is_fasta() && (lower.contains("erm41") || lower.contains("erm"))
     }
 
     pub fn is_hsp65(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        lower.contains("hsp65") || lower.contains("65kda")
+        !self.is_fasta() && (lower.contains("hsp65") || lower.contains("65kda"))
     }
 
     pub fn is_16s(&self) -> bool {
-        self.name.to_ascii_lowercase().contains("mbak14")
+        !self.is_fasta() && self.name.to_ascii_lowercase().contains("mbak14")
     }
 
     pub fn can_gallery(&self) -> bool {
