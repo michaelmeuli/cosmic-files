@@ -19,79 +19,15 @@ pub struct SpeciesHit {
 impl SpeciesHit {
     /// Format the alignment as a human-readable pairwise text (60-column wrapping).
     pub fn format_pairwise_alignment(&self) -> String {
-        let query = &self.aligned_query;
-        let refseq = &self.ref_seq;
-        let offset = self.alignment_offset;
-
-        let (ref_padded, query_padded): (Vec<u8>, Vec<u8>) = if query.len() <= refseq.len() {
-            let start = offset as usize;
-            let end = start + query.len();
-            let ref_p = refseq.clone();
-            let query_p: Vec<u8> = (0..refseq.len())
-                .map(|i| {
-                    if i >= start && i < end {
-                        query[i - start]
-                    } else {
-                        b'-'
-                    }
-                })
-                .collect();
-            (ref_p, query_p)
-        } else {
-            let start = (-offset) as usize;
-            let end = start + refseq.len();
-            let query_p = query.clone();
-            let ref_p: Vec<u8> = (0..query.len())
-                .map(|i| {
-                    if i >= start && i < end {
-                        refseq[i - start]
-                    } else {
-                        b'-'
-                    }
-                })
-                .collect();
-            (ref_p, query_p)
-        };
-
-        let match_line: Vec<u8> = ref_padded
-            .iter()
-            .zip(query_padded.iter())
-            .map(|(&r, &q)| {
-                if r == b'-' || q == b'-' {
-                    b' '
-                } else if r.to_ascii_uppercase() == q.to_ascii_uppercase() {
-                    b'|'
-                } else {
-                    b'.'
-                }
-            })
-            .collect();
-
-        let orient = if self.is_reverse { "Reverse Complement" } else { "Forward" };
-        let mut out = format!(
-            "Query vs {} ({}) — {:.1}% identity\n\n",
-            self.accession, self.description, self.identity
-        );
-        out.push_str(&format!("Orientation: {orient}\n\n"));
-
-        let line_width = 60usize;
-        let len = ref_padded.len();
-        let mut ref_pos = 1usize;
-        let mut query_pos = 1usize;
-        for chunk_start in (0..len).step_by(line_width) {
-            let chunk_end = (chunk_start + line_width).min(len);
-            let ref_chunk = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
-            let match_chunk = std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
-            let query_chunk = std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
-
-            out.push_str(&format!("Ref   {:5}: {}\n", ref_pos, ref_chunk));
-            out.push_str(&format!("             {match_chunk}\n"));
-            out.push_str(&format!("Query {:5}: {}\n\n", query_pos, query_chunk));
-
-            ref_pos += ref_chunk.bytes().filter(|&b| b != b'-').count();
-            query_pos += query_chunk.bytes().filter(|&b| b != b'-').count();
-        }
-        out
+        format_pairwise_alignment_impl(
+            &self.accession,
+            &self.description,
+            self.identity,
+            self.is_reverse,
+            &self.aligned_query,
+            &self.ref_seq,
+            self.alignment_offset,
+        )
     }
 }
 
@@ -130,85 +66,15 @@ impl SeqIdHit {
             _ => return format!("Unknown reference accession: {}\n", self.accession),
         };
         let (_, _, refseq) = parse_fasta(ref_fasta);
-        let query = &self.aligned_query;
-        let offset = self.alignment_offset;
-
-        // Build padded strings of equal length so positions align.
-        let (ref_padded, query_padded): (Vec<u8>, Vec<u8>) = if query.len() <= refseq.len() {
-            let start = offset as usize;
-            let end = start + query.len();
-            let ref_p = refseq.clone();
-            let query_p: Vec<u8> = (0..refseq.len())
-                .map(|i| {
-                    if i >= start && i < end {
-                        query[i - start]
-                    } else {
-                        b'-'
-                    }
-                })
-                .collect();
-            (ref_p, query_p)
-        } else {
-            let start = (-offset) as usize;
-            let end = start + refseq.len();
-            let query_p = query.clone();
-            let ref_p: Vec<u8> = (0..query.len())
-                .map(|i| {
-                    if i >= start && i < end {
-                        refseq[i - start]
-                    } else {
-                        b'-'
-                    }
-                })
-                .collect();
-            (ref_p, query_p)
-        };
-
-        let match_line: Vec<u8> = ref_padded
-            .iter()
-            .zip(query_padded.iter())
-            .map(|(&r, &q)| {
-                if r == b'-' || q == b'-' {
-                    b' '
-                } else if r.to_ascii_uppercase() == q.to_ascii_uppercase() {
-                    b'|'
-                } else {
-                    b'.'
-                }
-            })
-            .collect();
-
-        let orient = if self.is_reverse {
-            "Reverse Complement"
-        } else {
-            "Forward"
-        };
-        let mut out = format!(
-            "Query vs {} ({}) — {:.1}% identity\n\n",
-            self.accession, self.description, self.identity
-        );
-        out.push_str(&format!("Orientation: {orient}\n\n"));
-
-        let line_width = 60usize;
-        let len = ref_padded.len();
-        let mut ref_pos = 1usize;
-        let mut query_pos = 1usize;
-        for chunk_start in (0..len).step_by(line_width) {
-            let chunk_end = (chunk_start + line_width).min(len);
-            let ref_chunk = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
-            let match_chunk =
-                std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
-            let query_chunk =
-                std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
-
-            out.push_str(&format!("Ref   {:5}: {}\n", ref_pos, ref_chunk));
-            out.push_str(&format!("             {match_chunk}\n"));
-            out.push_str(&format!("Query {:5}: {}\n\n", query_pos, query_chunk));
-
-            ref_pos += ref_chunk.bytes().filter(|&b| b != b'-').count();
-            query_pos += query_chunk.bytes().filter(|&b| b != b'-').count();
-        }
-        out
+        format_pairwise_alignment_impl(
+            &self.accession,
+            &self.description,
+            self.identity,
+            self.is_reverse,
+            &self.aligned_query,
+            &refseq,
+            self.alignment_offset,
+        )
     }
 
     pub fn is_kansasii(&self) -> bool {
@@ -352,6 +218,73 @@ const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
     (482, b'T', b'C'),
     (500, b'G', b'C'),
 ];
+
+// ── Shared alignment formatter ────────────────────────────────────────────────
+
+fn format_pairwise_alignment_impl(
+    accession: &str,
+    description: &str,
+    identity: f32,
+    is_reverse: bool,
+    query: &[u8],
+    refseq: &[u8],
+    offset: isize,
+) -> String {
+    let (ref_padded, query_padded): (Vec<u8>, Vec<u8>) = if query.len() <= refseq.len() {
+        let start = offset as usize;
+        let end = start + query.len();
+        let ref_p = refseq.to_vec();
+        let query_p: Vec<u8> = (0..refseq.len())
+            .map(|i| if i >= start && i < end { query[i - start] } else { b'-' })
+            .collect();
+        (ref_p, query_p)
+    } else {
+        let start = (-offset) as usize;
+        let end = start + refseq.len();
+        let query_p = query.to_vec();
+        let ref_p: Vec<u8> = (0..query.len())
+            .map(|i| if i >= start && i < end { refseq[i - start] } else { b'-' })
+            .collect();
+        (ref_p, query_p)
+    };
+
+    let match_line: Vec<u8> = ref_padded
+        .iter()
+        .zip(query_padded.iter())
+        .map(|(&r, &q)| {
+            if r == b'-' || q == b'-' {
+                b' '
+            } else if r.to_ascii_uppercase() == q.to_ascii_uppercase() {
+                b'|'
+            } else {
+                b'.'
+            }
+        })
+        .collect();
+
+    let orient = if is_reverse { "Reverse Complement" } else { "Forward" };
+    let mut out = format!("Query vs {} ({}) — {:.1}% identity\n\n", accession, description, identity);
+    out.push_str(&format!("Orientation: {orient}\n\n"));
+
+    let line_width = 60usize;
+    let len = ref_padded.len();
+    let mut ref_pos = 1usize;
+    let mut query_pos = 1usize;
+    for chunk_start in (0..len).step_by(line_width) {
+        let chunk_end = (chunk_start + line_width).min(len);
+        let ref_chunk   = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
+        let match_chunk = std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
+        let query_chunk = std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
+
+        out.push_str(&format!("Ref   {:5}: {}\n", ref_pos, ref_chunk));
+        out.push_str(&format!("             {match_chunk}\n"));
+        out.push_str(&format!("Query {:5}: {}\n\n", query_pos, query_chunk));
+
+        ref_pos   += ref_chunk.bytes().filter(|&b| b != b'-').count();
+        query_pos += query_chunk.bytes().filter(|&b| b != b'-').count();
+    }
+    out
+}
 
 // ── FASTA parsing ─────────────────────────────────────────────────────────────
 
