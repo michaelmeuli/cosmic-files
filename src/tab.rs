@@ -96,8 +96,8 @@ use crate::{
             identify_hsp65_sequence, 
             identify_species_erm41, 
             identify_species_hsp65, 
-            identify_species_16S, 
-            identify_species_rpoB
+            identify_species_16s, 
+            identify_species_rpob
         },
         trim_to_min_quality,
     },
@@ -940,7 +940,7 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    identify_species_rpoB(trimmed)
+                    identify_species_rpob(trimmed)
                 })
             } else if is_16s {
                 ab1_seq.as_ref().and_then(|seq| {
@@ -948,7 +948,7 @@ pub fn item_from_entry(
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    identify_species_16S(trimmed)
+                    identify_species_16s(trimmed)
                 })
             } else {
                 None
@@ -2358,8 +2358,6 @@ pub enum ItemMetadata {
         size_opt: Option<u64>,
         children_opt: Option<usize>,
         is_tbprofiler_json: bool,
-        is_ab1: bool,
-        sequence: Option<SeqData>,
         tbprofilerjson_opt: Option<TbProfilerJson>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
@@ -2444,8 +2442,6 @@ impl ItemMetadata {
     pub fn is_ab1(&self) -> bool {
         match self {
             Self::Path { is_ab1, .. } => *is_ab1,
-            #[cfg(feature = "russh")]
-            Self::RusshPath { is_ab1, .. } => *is_ab1,
             _ => false,
         }
     }
@@ -2453,11 +2449,6 @@ impl ItemMetadata {
     pub fn erm41position28_call(&self) -> Erm41Position28 {
         match self {
             Self::Path { sequence, .. } => sequence
-                .as_ref()
-                .and_then(|s| s.erm41position28_opt.clone())
-                .unwrap_or(Erm41Position28::Undetermined),
-            #[cfg(feature = "russh")]
-            Self::RusshPath { sequence, .. } => sequence
                 .as_ref()
                 .and_then(|s| s.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
@@ -2472,8 +2463,6 @@ impl ItemMetadata {
     pub fn ab1_chromatogram(&self) -> Option<&Ab1Channels> {
         match self {
             Self::Path { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
             _ => None,
         }
     }
@@ -2484,11 +2473,6 @@ impl ItemMetadata {
                 .as_ref()
                 .map(|s| s.seq_id.as_slice())
                 .unwrap_or(&[]),
-            #[cfg(feature = "russh")]
-            Self::RusshPath { sequence, .. } => sequence
-                .as_ref()
-                .map(|s| s.seq_id.as_slice())
-                .unwrap_or(&[]),
             _ => &[],
         }
     }
@@ -2496,8 +2480,6 @@ impl ItemMetadata {
     pub fn ab1_species_hit(&self) -> Option<&SpeciesHit> {
         match self {
             Self::Path { sequence, .. } => sequence.as_ref()?.species_hit_opt.as_ref(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath { sequence, .. } => sequence.as_ref()?.species_hit_opt.as_ref(),
             _ => None,
         }
     }

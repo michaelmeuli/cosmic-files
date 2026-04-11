@@ -559,9 +559,9 @@ pub fn identify_species_hsp65(query: &[u8]) -> Option<SpeciesHit> {
 pub fn identify_species_erm41(query: &[u8]) -> Option<SpeciesHit> {
     identify_species(query, REF_MYCO_ERM41)
 }
-pub fn identify_species_16S(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_16s(query: &[u8]) -> Option<SpeciesHit> {
     identify_species(query, REF_MYCO_16S)
 }
-pub fn identify_species_rpoB(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_rpob(query: &[u8]) -> Option<SpeciesHit> {
     identify_species(query, REF_MYCO_RPOB)
 }
