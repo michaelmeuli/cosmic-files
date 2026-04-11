@@ -2462,6 +2462,8 @@ impl App {
                                         Some(item.preview_erm41())
                                     } else if item.is_hsp65() {
                                         Some(item.preview_hsp65())
+                                    } else if item.is_16s() {
+                                        Some(item.preview_16s())
                                     } else if item.metadata.is_tbprofiler_json() {
                                         Some(item.preview_tbprofiler_json())
                                     } else {

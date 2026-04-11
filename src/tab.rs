@@ -895,7 +895,7 @@ pub fn item_from_entry(
     let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
     let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
     let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
-    let is_16s = lower_name.contains("16s");
+    let is_16s = lower_name.contains("mbak14");
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
@@ -3010,6 +3010,10 @@ impl Item {
         lower.contains("hsp65") || lower.contains("65kda")
     }
 
+    pub fn is_16s(&self) -> bool {
+        self.name.to_ascii_lowercase().contains("mbak14")
+    }
+
     pub fn can_gallery(&self) -> bool {
         self.mime.type_() == mime::IMAGE || self.mime.type_() == mime::TEXT
     }
@@ -3510,7 +3514,7 @@ impl Item {
 
         let hits = self.metadata.ab1_seq_id();
         if hits.is_empty() {
-            details = details.push(widget::text::heading("No sequence match found"));
+            details = details.push(widget::text::body("No sequence match found"));
         } else {
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading("Best match:"));
@@ -3599,6 +3603,40 @@ impl Item {
         column = column.push(details);
         column.into()
     }
+
+    pub fn preview_16s(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        if let Some(hit) = self.metadata.ab1_species_hit() {
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::body("Species identification (16S database):"));
+            details = details.push(widget::text::heading(format!(
+                "{} ({:.1}%)",
+                hit.description, hit.identity,
+            )));
+            details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
+            details = details.push(widget::text::body(""));
+            details = details.push(
+                widget::button::standard("View alignment")
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone()))),
+            );
+        } else {
+            details = details.push(widget::text::body("No species match found"));
+        }
+
+        column = column.push(details);
+        column.into()
+    }
+
+
 
     pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxxs, .. } = theme::active().cosmic().spacing;
