@@ -9,7 +9,7 @@ For now, SSH connections must be configured using a private and public key pair 
 
 ## Doc
 
-[Dateien](https://uzh-my.sharepoint.com/:f:/g/personal/mmeuli_imm_uzh_ch/IgANQxBmjwxaTpjCTdDPgocxAdiRcxx5qaYzsTE9Twfyx8k?e=1Fv4ag)
+[Dateien](https://uzh-my.sharepoint.com/:f:/g/personal/mmeuli_imm_uzh_ch/IgANQxBmjwxaTpjCTdDPgocxAdiRcxx5qaYzsTE9Twfyx8k?e=OrNlms)
 
 
 ### Dev
