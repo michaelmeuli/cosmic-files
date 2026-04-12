@@ -159,4 +159,8 @@ pub struct SeqData {
     pub chromatogram: Option<Ab1Channels>,
     pub seq_id: Vec<SeqIdHit>,
     pub species_hit_opt: Option<SpeciesHit>,
+    /// Length of the quality-trimmed basecall sequence used for identification.
+    pub trimmed_length: usize,
+    /// Mean Phred quality score over the trimmed region. `None` when no quality data is available.
+    pub trimmed_avg_quality: Option<f32>,
 }

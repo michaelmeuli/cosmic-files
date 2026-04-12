@@ -92,12 +92,8 @@ use crate::{
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
         seqid::{
-            identify_sequence_erm41,
-            identify_hsp65_sequence, 
-            identify_species_erm41, 
-            identify_species_hsp65, 
-            identify_species_16s, 
-            identify_species_rpob
+            identify_hsp65_sequence, identify_sequence_erm41, identify_species_16s,
+            identify_species_erm41, identify_species_hsp65, identify_species_rpob,
         },
         trim_to_min_quality,
     },
@@ -895,70 +891,62 @@ pub fn item_from_entry(
     let is_fasta = lower_name.ends_with(".fasta") || lower_name.ends_with(".fa");
     let is_erm41 = !is_fasta && (lower_name.contains("erm41") || lower_name.contains("erm"));
     let is_hsp65 = !is_fasta && (lower_name.contains("hsp65") || lower_name.contains("65kda"));
-    let is_rpob  = !is_fasta && (lower_name.contains("rpob")  || lower_name.contains("rpo"));
-    let is_16s   = !is_fasta && lower_name.contains("mbak14");
+    let is_rpob = !is_fasta && (lower_name.contains("rpob") || lower_name.contains("rpo"));
+    let is_16s = !is_fasta && lower_name.contains("mbak14");
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
             let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
-            let seq_id = ab1_seq
-                .as_ref()
-                .map(|seq| {
-                    let trimmed = match &ab1_qual {
+            let (seq_id, species_hit_opt, trimmed_length, trimmed_avg_quality) =
+                if let Some(seq) = ab1_seq.as_ref() {
+                    let trimmed: &[u8] = match &ab1_qual {
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
-                    if is_erm41 {
+                    let trimmed_length = trimmed.len();
+                    let trimmed_avg_quality =
+                        ab1_qual
+                            .as_ref()
+                            .filter(|_| trimmed_length > 0)
+                            .map(|qual| {
+                                let start = trimmed.as_ptr() as usize - seq.as_ptr() as usize;
+                                let sum: u32 = qual[start..start + trimmed_length]
+                                    .iter()
+                                    .map(|&q| q as u32)
+                                    .sum();
+                                sum as f32 / trimmed_length as f32
+                            });
+                    let seq_id = if is_erm41 {
                         identify_sequence_erm41(trimmed)
                     } else if is_hsp65 {
                         identify_hsp65_sequence(trimmed)
                     } else {
                         Vec::new()
-                    }
-                })
-                .unwrap_or_default();
-            let species_hit_opt = if is_hsp65 {
-                ab1_seq.as_ref().and_then(|seq| {
-                    let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => trim_to_min_quality(seq, qual, 20),
-                        None => seq.as_slice(),
                     };
-                    identify_species_hsp65(trimmed)
-                })
-            } else if is_erm41 {
-                ab1_seq.as_ref().and_then(|seq| {
-                    let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => trim_to_min_quality(seq, qual, 20),
-                        None => seq.as_slice(),
+                    let species_hit_opt = if is_hsp65 {
+                        identify_species_hsp65(trimmed)
+                    } else if is_erm41 {
+                        identify_species_erm41(trimmed)
+                    } else if is_rpob {
+                        identify_species_rpob(trimmed)
+                    } else if is_16s {
+                        identify_species_16s(trimmed)
+                    } else {
+                        None
                     };
-                    identify_species_erm41(trimmed)
-                })
-            } else if is_rpob {
-                ab1_seq.as_ref().and_then(|seq| {
-                    let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => trim_to_min_quality(seq, qual, 20),
-                        None => seq.as_slice(),
-                    };
-                    identify_species_rpob(trimmed)
-                })
-            } else if is_16s {
-                ab1_seq.as_ref().and_then(|seq| {
-                    let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => trim_to_min_quality(seq, qual, 20),
-                        None => seq.as_slice(),
-                    };
-                    identify_species_16s(trimmed)
-                })
-            } else {
-                None
-            };
+                    (seq_id, species_hit_opt, trimmed_length, trimmed_avg_quality)
+                } else {
+                    (Vec::new(), None, 0, None)
+                };
             let chromatogram = parse_ab1_chromatogram(&bytes);
             SeqData {
                 erm41position28_opt,
                 chromatogram,
                 seq_id,
                 species_hit_opt,
+                trimmed_length,
+                trimmed_avg_quality,
             }
         })
     } else {
@@ -2485,7 +2473,23 @@ impl ItemMetadata {
     }
 
     pub fn is_seq_id(&self) -> bool {
-        self.ab1_seq_id().first().is_some_and(|h| h.identity >= 2.0)
+        self.ab1_seq_id()
+            .first()
+            .is_some_and(|h| h.identity >= 60.0)
+    }
+
+    pub fn sequence_length(&self) -> Option<usize> {
+        match self {
+            Self::Path { sequence, .. } => sequence.as_ref().map(|s| s.trimmed_length),
+            _ => None,
+        }
+    }
+
+    pub fn sequence_avg_quality(&self) -> Option<f32> {
+        match self {
+            Self::Path { sequence, .. } => sequence.as_ref()?.trimmed_avg_quality,
+            _ => None,
+        }
     }
 
     pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
@@ -3478,7 +3482,7 @@ impl Item {
             details = details.push(widget::text::body(""));
         }
         column = column.push(details);
-        
+
         let hits = self.metadata.ab1_seq_id();
         if let Some(best) = hits.first() {
             column = column.push(
@@ -3504,6 +3508,19 @@ impl Item {
         if hits.is_empty() {
             details = details.push(widget::text::body("No sequence match found"));
         } else {
+            if !self.metadata.is_seq_id() {
+                details = details.push(widget::text::body("Percent identity is less than 60%."));
+            }
+            details = details.push(widget::text::body(format!(
+                "Sequence length: {}",
+                self.metadata.sequence_length().unwrap_or(0)
+            )));
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading("Best match:"));
             let best = &hits[0];
@@ -3514,10 +3531,20 @@ impl Item {
             details = details.push(widget::text::body(""));
 
             if best.is_kansasii() || best.is_gastri() {
-                let gastri_n = best.kansasii_gastri_snp_calls.iter().filter(|c| c.is_gastri()).count();
-                let kansasii_n = best.kansasii_gastri_snp_calls.iter().filter(|c| c.is_kansasii()).count();
+                let gastri_n = best
+                    .kansasii_gastri_snp_calls
+                    .iter()
+                    .filter(|c| c.is_gastri())
+                    .count();
+                let kansasii_n = best
+                    .kansasii_gastri_snp_calls
+                    .iter()
+                    .filter(|c| c.is_kansasii())
+                    .count();
                 let total = best.kansasii_gastri_snp_calls.len();
-                let species_call = best.kansasii_gastri_snp_species_call().unwrap_or("Ambiguous");
+                let species_call = best
+                    .kansasii_gastri_snp_species_call()
+                    .unwrap_or("Ambiguous");
                 details = details.push(widget::text::body("hsp65 kansasii/gastri SNP call:"));
                 details = details.push(widget::text::body(format!(
                     "{} (M. gastri {}/{}, M. kansasii {}/{})",
@@ -3534,10 +3561,20 @@ impl Item {
                 details = details.push(widget::text::body(""));
             }
             if best.is_marinum() || best.is_ulcerans() {
-                let ulcerans_n = best.marinum_ulcerans_snp_calls.iter().filter(|c| c.is_ulcerans()).count();
-                let marinum_n = best.marinum_ulcerans_snp_calls.iter().filter(|c| c.is_marinum()).count();
+                let ulcerans_n = best
+                    .marinum_ulcerans_snp_calls
+                    .iter()
+                    .filter(|c| c.is_ulcerans())
+                    .count();
+                let marinum_n = best
+                    .marinum_ulcerans_snp_calls
+                    .iter()
+                    .filter(|c| c.is_marinum())
+                    .count();
                 let total = best.marinum_ulcerans_snp_calls.len();
-                let species_call = best.marinum_ulcerans_snp_species_call().unwrap_or("Ambiguous");
+                let species_call = best
+                    .marinum_ulcerans_snp_species_call()
+                    .unwrap_or("Ambiguous");
                 details = details.push(widget::text::body("hsp65 marinum/ulcerans SNP call:"));
                 details = details.push(widget::text::body(format!(
                     "{} (M. ulcerans {}/{}, M. marinum {}/{})",
@@ -3575,7 +3612,9 @@ impl Item {
         // ── Species identification (myco_hsp65 database) ──
         if let Some(hit) = self.metadata.ab1_species_hit() {
             details = details.push(widget::text::body(""));
-            details = details.push(widget::text::body("Species identification (hsp65 database):"));
+            details = details.push(widget::text::body(
+                "Species identification (hsp65 database):",
+            ));
             details = details.push(widget::text::heading(format!(
                 "{} ({:.1}%)",
                 hit.description, hit.identity,
@@ -3623,8 +3662,6 @@ impl Item {
         column = column.push(details);
         column.into()
     }
-
-
 
     pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxxs, .. } = theme::active().cosmic().spacing;
