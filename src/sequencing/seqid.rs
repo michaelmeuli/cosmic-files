@@ -478,7 +478,44 @@ fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
         .collect()
 }
 
+fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
+    const FWD_START: &[&[u8]] = &[b"ATGGTGTGTCCATCGCCAAG", b"GAGGACCCGTACGAGAAGAT"];
+    const FWD_END: &[&[u8]] = &[b"GAGCTCACCGAGGGTATGCG", b"CGCTGTCCACCCTGGTCGTC"];
+
+    // On an RC-strand query the start primers appear as RC(end primers) and vice versa,
+    // so we search both orientations for each boundary.
+    let rc_start: Vec<Vec<u8>> = FWD_END.iter().map(|p| reverse_complement(p)).collect();
+    let rc_end: Vec<Vec<u8>> = FWD_START.iter().map(|p| reverse_complement(p)).collect();
+
+    let find_start = |p: &[u8]| seq.windows(p.len()).position(|w| w.eq_ignore_ascii_case(p));
+    let find_end = |p: &[u8]| {
+        seq.windows(p.len())
+            .rposition(|w| w.eq_ignore_ascii_case(p))
+            .map(|pos| pos + p.len())
+    };
+
+    let start = FWD_START
+        .iter()
+        .map(|p| p as &[u8])
+        .chain(rc_start.iter().map(|p| p.as_slice()))
+        .filter_map(find_start)
+        .min()
+        .unwrap_or(0);
+
+    let end = FWD_END
+        .iter()
+        .map(|p| p as &[u8])
+        .chain(rc_end.iter().map(|p| p.as_slice()))
+        .filter_map(find_end)
+        .max()
+        .unwrap_or(seq.len());
+
+    seq[start..end.min(seq.len())].to_vec()
+}
+
 pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
+    let query = trim_hsp65_primers(query);
+    let query = query.as_slice();
     let refs = [
         parse_fasta(REF_AF547836),
         parse_fasta(REF_AF547849),
