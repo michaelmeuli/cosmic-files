@@ -326,7 +326,18 @@ fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
 
 // ── Alignment ─────────────────────────────────────────────────────────────────
 
-/// Gapless sliding-window alignment.  Returns `(identity%, alignment_offset)`.
+/// FNV-1a hash of a k-mer, case-insensitive.
+fn kmer_hash(kmer: &[u8]) -> u64 {
+    let mut h: u64 = 14695981039346656037;
+    for &b in kmer {
+        h ^= b.to_ascii_uppercase() as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    h
+}
+
+/// BLAST-inspired gapless alignment: k-mer seeding followed by ungapped extension.
+/// Returns `(identity%, alignment_offset)`.
 ///
 /// `alignment_offset` is a signed integer such that for any aligned position:
 ///   `query_index = ref_index - alignment_offset`
@@ -337,47 +348,81 @@ fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
 ///   `alignment_offset = -query_offset_where_reference_starts` (≤ 0).
 ///
 /// Identity denominator is always the shorter sequence (the aligned window).
+///
+/// Phase 1 (seed): exact k-mer matches (word size 11, matching BLAST's blastn default)
+/// identify candidate diagonals.  Phase 2 (extend): each candidate diagonal is scored
+/// by counting identical bases over the full window; the highest-scoring diagonal wins.
+/// When no seeds are found (sequences shorter than the word size, or zero k-mer overlap)
+/// every valid diagonal is evaluated, preserving correctness.
 fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
+    const WORD_SIZE: usize = 11;
+
     if query.is_empty() || reference.is_empty() {
         return (0.0, 0);
     }
-    if query.len() <= reference.len() {
-        let (best_count, best_off) = reference
-            .windows(query.len())
-            .enumerate()
-            .map(|(off, window)| {
-                let m = query
-                    .iter()
-                    .zip(window)
-                    .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
-                    .count();
-                (m, off)
-            })
-            .max_by_key(|&(c, _)| c)
-            .unwrap_or((0, 0));
-        (
-            best_count as f32 / query.len() as f32 * 100.0,
-            best_off as isize,
-        )
+
+    // Orient so `shorter` fits inside `longer`.
+    let (shorter, longer, swapped) = if query.len() <= reference.len() {
+        (query, reference, false)
     } else {
-        let (best_count, best_off) = query
-            .windows(reference.len())
-            .enumerate()
-            .map(|(off, window)| {
-                let m = reference
-                    .iter()
-                    .zip(window)
-                    .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
-                    .count();
-                (m, off)
-            })
-            .max_by_key(|&(c, _)| c)
-            .unwrap_or((0, 0));
-        (
-            best_count as f32 / reference.len() as f32 * 100.0,
-            -(best_off as isize),
-        )
+        (reference, query, true)
+    };
+
+    let max_offset = longer.len() - shorter.len();
+
+    // ── Phase 1: seed ────────────────────────────────────────────────────────
+    // Build a k-mer index over the shorter sequence, then scan the longer
+    // sequence for matching k-mers.  Each match fixes a diagonal (offset).
+    let mut candidates: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+
+    if shorter.len() >= WORD_SIZE {
+        let mut kmer_index: std::collections::HashMap<u64, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (i, w) in shorter.windows(WORD_SIZE).enumerate() {
+            kmer_index.entry(kmer_hash(w)).or_default().push(i);
+        }
+        for (j, w) in longer.windows(WORD_SIZE).enumerate() {
+            if let Some(positions) = kmer_index.get(&kmer_hash(w)) {
+                for &i in positions {
+                    if j >= i {
+                        let d = j - i;
+                        if d <= max_offset
+                            // Verify to guard against hash collisions.
+                            && shorter[i..i + WORD_SIZE]
+                                .iter()
+                                .zip(&longer[j..j + WORD_SIZE])
+                                .all(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+                        {
+                            candidates.insert(d);
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    // ── Phase 2: extend ──────────────────────────────────────────────────────
+    // Score each candidate diagonal; fall back to all diagonals when no seeds
+    // were found (short sequences or no k-mer overlap).
+    let score_offset = |off: usize| -> (usize, usize) {
+        let count = shorter
+            .iter()
+            .zip(&longer[off..off + shorter.len()])
+            .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+            .count();
+        (count, off)
+    };
+
+    let (best_count, best_off) = if candidates.is_empty() {
+        (0..=max_offset).map(score_offset).max_by_key(|&(c, _)| c)
+    } else {
+        candidates.into_iter().map(score_offset).max_by_key(|&(c, _)| c)
+    }
+    .unwrap_or((0, 0));
+
+    let identity = best_count as f32 / shorter.len() as f32 * 100.0;
+    let offset = if swapped { -(best_off as isize) } else { best_off as isize };
+    (identity, offset)
 }
 
 /// Look up what the query has at each diagnostic SNP position given the alignment offset.
