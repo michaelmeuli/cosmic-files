@@ -400,11 +400,16 @@ pub fn context_menu<'a>(
         }
         (_, Location::Remote(..)) => {
             if selected > 0 {
-                if selected == selected_remote_paths.len()
-                    && selected_dir == 0
-                    && is_valid_fastq_selection(&selected_remote_paths, &config)
-                {
-                    children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
+                if selected == selected_remote_paths.len() && selected_dir == 0 {
+                    if config.pair1_suffix.is_empty() || config.pair2_suffix.is_empty() {
+                        children.push(
+                            menu_item(fl!("run-tb-profiler"), Action::TbProfilerConfigError)
+                                .into(),
+                        );
+                    } else if is_valid_fastq_selection(&selected_remote_paths, &config) {
+                        children
+                            .push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
+                    }
                 }
                 if matches!(tab.mode, tab::Mode::App) {
                     children.push(divider::horizontal::light().into());

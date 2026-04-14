@@ -194,6 +194,7 @@ pub enum Action {
     Rename,
     RestoreFromTrash,
     RunTbProfiler,
+    TbProfilerConfigError,
     DeleteRemoteFiles,
     SearchActivate,
     SelectFirst,
@@ -272,6 +273,7 @@ impl Action {
             Self::Rename => Message::Rename(entity_opt),
             Self::RestoreFromTrash => Message::RestoreFromTrash(entity_opt),
             Self::RunTbProfiler => Message::RunTbProfiler(entity_opt),
+            Self::TbProfilerConfigError => Message::TbProfilerConfigError,
             Self::DeleteRemoteFiles => Message::DeleteRemoteFiles(entity_opt),
             Self::SearchActivate => Message::SearchActivate,
             Self::SelectAll => Message::TabMessage(entity_opt, tab::Message::SelectAll),
@@ -463,6 +465,7 @@ pub enum Message {
     ReplaceResult(ReplaceResult),
     RestoreFromTrash(Option<Entity>),
     RunTbProfiler(Option<Entity>),
+    TbProfilerConfigError,
     RunTbProfilerResult(ClientKey, String, Result<SlurmJobId, String>),
     DeleteRemoteFilesResult(ClientKey, String, Result<String, String>),
     JobStatusUpdate(ClientKey, String, usize, usize),
@@ -625,6 +628,7 @@ pub enum DialogPage {
         uri: String,
         error: String,
     },
+    TbProfilerConfigError,
     DeleteRemoteFilesSuccess {
         client_key: ClientKey,
         uri: String,
@@ -3654,6 +3658,7 @@ impl Application for App {
                                 cosmic::action::none()
                             }));
                         }
+                        DialogPage::TbProfilerConfigError => {}
                         DialogPage::DeleteRemoteFilesSuccess {
                             client_key: _,
                             uri: _,
@@ -4322,6 +4327,12 @@ impl Application for App {
                         .run_tb_profiler(selected_paths, selected_uris, self.config.tb_config.clone())
                         .map(|()| cosmic::action::none());
                 }
+            }
+            Message::TbProfilerConfigError => {
+                log::error!("TB Profiler pair suffixes are not configured");
+                return self
+                    .dialog_pages
+                    .push_back(DialogPage::TbProfilerConfigError);
             }
             Message::DeleteRemoteFiles(entity_opt) => {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
@@ -6863,6 +6874,13 @@ impl Application for App {
                 .icon(icon::from_name("dialog-error").size(64))
                 .primary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                ),
+            DialogPage::TbProfilerConfigError => widget::dialog()
+                .title(fl!("tb-profiler-config-error"))
+                .body(fl!("tb-profiler-config-error-body"))
+                .icon(icon::from_name("dialog-error").size(64))
+                .primary_action(
+                    widget::button::standard(fl!("ok")).on_press(Message::DialogCancel),
                 ),
             DialogPage::DeleteRemoteFilesSuccess {
                 client_key: _,
