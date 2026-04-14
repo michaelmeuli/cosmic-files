@@ -208,13 +208,7 @@ async fn remote_sftp_list(
         // display layer can toggle without a rescan.
         let mut is_raw_sample_file = false;
         if file_type == FileType::File {
-            let maybe_split = (|| -> Option<(&str, &str)> {
-                let first = name.find('.')?;
-                let rest = &name[first + 1..];
-                let second = rest.find('.')?;
-                Some((&name[..first], &rest[second + 1..]))
-            })();
-            if let Some((sample_id, suffix)) = maybe_split {
+            if let Some((sample_id, suffix)) = name.split_once(".results.") {
                 let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
                     json: None,
                     csv: None,
