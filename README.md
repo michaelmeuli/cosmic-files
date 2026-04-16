@@ -5,7 +5,17 @@ Forked from [cosmic-files](https://github.com/pop-os/cosmic-files.git)
 For now, SSH connections must be configured using a private and public key pair (password authentication is not supported).
 
 ## Databases
-[Web-accessible database of hsp65 sequences from Mycobacterium reference strains.](https://europepmc.org/article/pmc/pmc3122750)
+
+
+
+## References
+[Web-accessible database of hsp65 sequences from Mycobacterium reference strains.](https://europepmc.org/article/pmc/pmc3122750)  
+[Global phylogenomic analyses of Mycobacterium abscessus provide context for non cystic fibrosis infections and the evolution of antibiotic resistance](https://www.nature.com/articles/s41467-021-25484-9)  
+  
+Jody Phelan:  
+[TBProfiler](https://github.com/jodyphelan/TBProfiler)  
+[tbdb](https://github.com/jodyphelan/TBProfiler)  (used by TBProfiler by default)  
+[ntmdb](https://github.com/jodyphelan/ntmdb/tree/main)  (for abscessus_resistance_variants.csv)  
 
 ## Doc
 
