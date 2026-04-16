@@ -87,13 +87,14 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
+        Ab1Channels, RrlSnpCall, SeqData, SeqIdHit, SpeciesHit,
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
         seqid::{
-            identify_hsp65_sequence, identify_sequence_erm41, identify_species_16s,
-            identify_species_erm41, identify_species_hsp65, identify_species_rpob,
+            identify_hsp65_sequence, identify_sequence_23s_ntm, identify_sequence_erm41,
+            identify_species_16s, identify_species_erm41, identify_species_hsp65,
+            identify_species_rpob,
         },
         trim_to_min_quality,
     },
@@ -893,6 +894,7 @@ pub fn item_from_entry(
     let is_hsp65 = !is_fasta && (lower_name.contains("hsp65") || lower_name.contains("65kda"));
     let is_rpob = !is_fasta && (lower_name.contains("rpob") || lower_name.contains("rpo"));
     let is_16s = !is_fasta && lower_name.contains("mbak14");
+    let is_23s_ntm = !is_fasta && (lower_name.contains("rrl") || lower_name.contains("mclr"));
     let sequence = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
@@ -921,6 +923,8 @@ pub fn item_from_entry(
                         identify_sequence_erm41(trimmed)
                     } else if is_hsp65 {
                         identify_hsp65_sequence(trimmed)
+                    } else if is_23s_ntm {
+                        identify_sequence_23s_ntm(trimmed)
                     } else {
                         Vec::new()
                     };
@@ -3000,6 +3004,10 @@ impl Item {
         !self.is_fasta() && self.name.to_ascii_lowercase().contains("mbak14")
     }
 
+    pub fn is_23s_ntm(&self) -> bool {
+        !self.is_fasta() && self.name.to_ascii_lowercase().contains("mclr")
+    }
+
     pub fn can_gallery(&self) -> bool {
         self.mime.type_() == mime::IMAGE || self.mime.type_() == mime::TEXT
     }
@@ -3656,6 +3664,66 @@ impl Item {
         column = column.push(details);
         column.into()
     }
+
+    pub fn preview_23s_ntm(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        let hits = self.metadata.ab1_seq_id();
+        if hits.is_empty() {
+            details = details.push(widget::text::body("No sequence match found"));
+        } else {
+            if !self.metadata.is_seq_id() {
+                details = details.push(widget::text::body("Percent identity is less than 60%."));
+            }
+            details = details.push(widget::text::body(format!(
+                "Sequence length: {}",
+                self.metadata.sequence_length().unwrap_or(0)
+            )));
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading("Best match:"));
+            let best = &hits[0];
+            details = details.push(widget::text::heading(format!(
+                "{} ({:.1}%)",
+                best.description, best.identity,
+            )));
+            details = details.push(widget::text::body(""));
+
+            details = details.push(widget::text::body(
+                "23S rRNA macrolide resistance SNPs (rrl):",
+            ));
+            for snp in &best.rrl_snp_calls {
+                details = details.push(widget::text::body(format!(
+                    "  pos {}: {}",
+                    snp.ref_pos + 1,
+                    snp.call_tag(),
+                )));
+            }
+            details = details.push(widget::text::body(""));
+
+            details = details.push(
+                widget::button::standard("View alignment")
+                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
+            );
+        }
+
+        column = column.push(details);
+        column.into()
+    }
+
 
     pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxxs, .. } = theme::active().cosmic().spacing;

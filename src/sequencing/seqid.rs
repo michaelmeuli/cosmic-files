@@ -46,6 +46,8 @@ pub struct SeqIdHit {
     pub kansasii_gastri_snp_calls: Vec<KansasiiGastriSnpCall>,
     /// Calls at each diagnostic marinum/ulcerans SNP position.
     pub marinum_ulcerans_snp_calls: Vec<MarinumUlceransSnpCall>,
+    /// Calls at each rrl macrolide-resistance SNP position (23S rRNA).
+    pub rrl_snp_calls: Vec<RrlSnpCall>,
     /// The aligned query (forward or reverse-complement, whichever scored best).
     pub aligned_query: Vec<u8>,
     /// Signed offset such that `query_index = ref_index - alignment_offset`.
@@ -63,6 +65,8 @@ impl SeqIdHit {
             "AY299145" => REF_AY299145,
             // For erm(41)
             "MAB_2297" => REF_MAB2297,
+            // For 23S rRNA NTM
+            "MAB_r5052" => REF_MAB_R5052,
             _ => return format!("Unknown reference accession: {}\n", self.accession),
         };
         let (_, _, refseq) = parse_fasta(ref_fasta);
@@ -219,6 +223,59 @@ const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
     (500, b'G', b'C'),
 ];
 
+// ── rrl resistance SNPs ───────────────────────────────────────────────────────
+
+/// A single macrolide-resistance SNP position in the M. abscessus 23S rRNA (rrl).
+/// `query_base` is `None` when the position is not covered by the read.
+#[derive(Clone, Debug)]
+pub struct RrlSnpCall {
+    /// 0-based position in the rrl reference sequence (MAB_r5052).
+    pub ref_pos: usize,
+    /// Base observed in the query at this position, or `None` if not covered.
+    pub query_base: Option<u8>,
+    /// Wild-type base at this position.
+    pub wt_base: u8,
+}
+
+impl RrlSnpCall {
+    /// "wt", "NA", or the observed mutant base as a char string.
+    pub fn call_tag(&self) -> String {
+        match self.query_base {
+            None => "NA".to_string(),
+            Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
+            Some(b) => format!("{} (mutation)", b as char),
+        }
+    }
+}
+
+/// Resistance-associated SNP positions in rrl (23S rRNA), sourced from
+/// abscessus_resistance_variants.csv (Gene == rrl).
+/// Format: (0-based ref pos, wt_base).
+/// 1-based HGVS positions: 2270, 2271, 2281, 2293.
+const RRL_RESISTANCE_SNPS: &[(usize, u8)] = &[
+    (2269, b'A'), // n.2270 — macrolide resistance
+    (2270, b'A'), // n.2271 — macrolide resistance
+    (2280, b'G'), // n.2281 — macrolide resistance
+    (2292, b'A'), // n.2293 — macrolide resistance
+];
+
+/// Compute a call for every rrl resistance SNP position.
+/// Returns one entry per position; `query_base` is `None` when not covered.
+fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
+    RRL_RESISTANCE_SNPS
+        .iter()
+        .map(|&(ref_pos, wt_base)| {
+            let query_pos = ref_pos as isize - alignment_offset;
+            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
+                Some(query[query_pos as usize].to_ascii_uppercase())
+            } else {
+                None
+            };
+            RrlSnpCall { ref_pos, query_base, wt_base }
+        })
+        .collect()
+}
+
 // ── Shared alignment formatter ────────────────────────────────────────────────
 
 fn format_pairwise_alignment_impl(
@@ -297,6 +354,7 @@ const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fast
 const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
 const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
 const REF_MAB2297: &str = include_str!("../../res/sequences/MAB_2297.fasta");
+const REF_MAB_R5052: &str = include_str!("../../res/sequences/MAB_r5052.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
 fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
@@ -543,6 +601,7 @@ pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
                 is_reverse,
                 kansasii_gastri_snp_calls,
                 marinum_ulcerans_snp_calls,
+                rrl_snp_calls: vec![],
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
             }
@@ -577,6 +636,37 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         is_reverse,
         kansasii_gastri_snp_calls: vec![],
         marinum_ulcerans_snp_calls: vec![],
+        rrl_snp_calls: vec![],
+        aligned_query: aligned_query.to_vec(),
+        alignment_offset: offset,
+    }]
+}
+
+/// Align `query` against the M. abscessus rrl (23S rRNA) reference (MAB_r5052) and return
+/// the single hit with resistance SNP calls for all positions from abscessus_resistance_variants.csv
+/// (Gene == rrl).
+pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
+    let refseq = parse_fasta_seq(REF_MAB_R5052);
+    let rc = reverse_complement(query);
+
+    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+        (rev_id, true, rc.as_slice(), rev_off)
+    } else {
+        (fwd_id, false, query, fwd_off)
+    };
+
+    let rrl_snp_calls = call_rrl_snps(aligned_query, offset);
+
+    vec![SeqIdHit {
+        accession: "MAB_r5052".to_string(),
+        description: "M. abscessus".to_string(),
+        identity,
+        is_reverse,
+        kansasii_gastri_snp_calls: vec![],
+        marinum_ulcerans_snp_calls: vec![],
+        rrl_snp_calls,
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
     }]

@@ -2468,6 +2468,8 @@ impl App {
                                         Some(item.preview_hsp65())
                                     } else if item.is_16s() {
                                         Some(item.preview_16s())
+                                    } else if item.is_23s_ntm() {
+                                        Some(item.preview_23s_ntm())
                                     } else if item.metadata.is_tbprofiler_json() {
                                         Some(item.preview_tbprofiler_json())
                                     } else {
