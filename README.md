@@ -15,7 +15,7 @@ For now, SSH connections must be configured using a private and public key pair 
 Jody Phelan:  
 [TBProfiler](https://github.com/jodyphelan/TBProfiler)  
 [tbdb](https://github.com/jodyphelan/TBProfiler)  (used by TBProfiler by default)  
-[ntmdb](https://github.com/jodyphelan/ntmdb/tree/main)  (for abscessus_resistance_variants.csv)  
+[ntm-db](https://github.com/pathogen-profiler/ntm-db)  (for abscessus_resistance_variants.csv)  
 
 ## Doc
 
