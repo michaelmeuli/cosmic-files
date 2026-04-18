@@ -1,3 +1,5 @@
+use cosmic::cosmic_theme::palette::white_point::B;
+
 use super::erm41::reverse_complement;
 use super::ntm_data::RRL_RESISTANCE_SNPS;
 
@@ -236,6 +238,8 @@ pub struct RrlSnpCall {
     pub query_base: Option<u8>,
     /// Wild-type base at this position.
     pub wt_base: u8,
+    /// Resistance-conferring base.
+    pub resistance_base: u8,
 }
 
 impl RrlSnpCall {
@@ -244,6 +248,7 @@ impl RrlSnpCall {
         match self.query_base {
             None => "NA".to_string(),
             Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
+            Some(b) if b == self.resistance_base => format!("{} (resistance)", self.resistance_base as char),
             Some(b) => format!("{} (mutation)", b as char),
         }
     }
@@ -254,14 +259,14 @@ impl RrlSnpCall {
 fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
     RRL_RESISTANCE_SNPS
         .iter()
-        .map(|&(ref_pos, wt_base)| {
+        .map(|&(ref_pos, wt_base, resistance_base)| {
             let query_pos = ref_pos as isize - alignment_offset;
             let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
                 Some(query[query_pos as usize].to_ascii_uppercase())
             } else {
                 None
             };
-            RrlSnpCall { ref_pos, query_base, wt_base }
+            RrlSnpCall { ref_pos, query_base, wt_base, resistance_base }
         })
         .collect()
 }
