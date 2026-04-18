@@ -29,9 +29,27 @@ ntm-db:
 
 ## Doc
 
+### NTM 
+
+rrl M. abscessus macrolides:  
+
+<pre>
+impl RrlSnpCall {
+    /// "wt", "NA", or the observed mutant base as a char string.
+    pub fn call_tag(&self) -> String {
+        match self.query_base {
+            None => "NA".to_string(),
+            Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
+            Some(b) if b == self.resistance_base => format!("{} (resistance)", self.resistance_base as char),
+            Some(b) => format!("{} (mutation)", b as char),
+        }
+    }
+}
+</pre>
+  
+    
 ### TBProfiler:
-
-
+  
 Unique confidence values of TBProfiler (examples/tbgetconfidencetypes.rs):
   - Assoc w R
   - Assoc w R - Interim
