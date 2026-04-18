@@ -347,7 +347,7 @@ fn format_pairwise_alignment_impl(
 
 const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 const REF_MYCO_ERM41: &str = include_str!("../../res/sequences/myco_erm41.fasta");
-const REF_MYCO_16S: &str = include_str!("../../res/sequences/myco_16S.fasta");
+const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpoB.fasta");
 const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fasta");
 const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
@@ -732,7 +732,7 @@ pub fn identify_species_erm41(query: &[u8]) -> Option<SpeciesHit> {
     identify_species(query, REF_MYCO_ERM41)
 }
 pub fn identify_species_16s(query: &[u8]) -> Option<SpeciesHit> {
-    identify_species(query, REF_MYCO_16S)
+    identify_species(query, REF_MYCO_RRS)
 }
 pub fn identify_species_rpob(query: &[u8]) -> Option<SpeciesHit> {
     identify_species(query, REF_MYCO_RPOB)
