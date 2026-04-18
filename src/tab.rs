@@ -89,7 +89,7 @@ use crate::{
     sequencing::{
         Ab1Channels, RrlSnpCall, SeqData, SeqIdHit, SpeciesHit,
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
-        jsondata::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
+        tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
         seqid::{
             identify_hsp65_sequence, identify_sequence_23s_ntm, identify_sequence_erm41,

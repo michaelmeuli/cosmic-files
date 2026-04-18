@@ -1,4 +1,5 @@
 use super::erm41::reverse_complement;
+use super::ntm_data::RRL_RESISTANCE_SNPS;
 
 /// Best-hit species identification from aligning against a multi-FASTA reference database.
 #[derive(Clone, Debug)]
@@ -247,17 +248,6 @@ impl RrlSnpCall {
         }
     }
 }
-
-/// Resistance-associated SNP positions in rrl (23S rRNA), sourced from
-/// abscessus_resistance_variants.csv (Gene == rrl).
-/// Format: (0-based ref pos, wt_base).
-/// 1-based HGVS positions: 2270, 2271, 2281, 2293.
-const RRL_RESISTANCE_SNPS: &[(usize, u8)] = &[
-    (2269, b'A'), // n.2270 — macrolide resistance
-    (2270, b'A'), // n.2271 — macrolide resistance
-    (2280, b'G'), // n.2281 — macrolide resistance
-    (2292, b'A'), // n.2293 — macrolide resistance
-];
 
 /// Compute a call for every rrl resistance SNP position.
 /// Returns one entry per position; `query_base` is `None` when not covered.

@@ -1,5 +1,6 @@
 pub mod erm41;
-pub mod jsondata;
+pub mod tb_data;
+pub mod ntm_data;
 pub mod seqid;
 
 use erm41::Erm41Position28;
