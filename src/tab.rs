@@ -93,7 +93,7 @@ use crate::{
         parse_ab1_quality, parse_ab1_sequence,
         seqid::{
             identify_hsp65_sequence, identify_sequence_23s_ntm, identify_sequence_erm41,
-            identify_species_16s, identify_species_erm41, identify_species_hsp65,
+            identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
             identify_species_rpob,
         },
         trim_to_min_quality,
@@ -936,6 +936,8 @@ pub fn item_from_entry(
                         identify_species_rpob(trimmed)
                     } else if is_16s {
                         identify_species_16s(trimmed)
+                    } else if is_23s_ntm {
+                        identify_species_23s_ntm(trimmed)
                     } else {
                         None
                     };
@@ -3678,10 +3680,10 @@ impl Item {
 
         let hits = self.metadata.ab1_seq_id();
         if hits.is_empty() {
-            details = details.push(widget::text::body("No sequence match found"));
+            details = details.push(widget::text::body("Could not align sequence to reference"));
         } else {
             if !self.metadata.is_seq_id() {
-                details = details.push(widget::text::body("Percent identity is less than 60%."));
+                details = details.push(widget::text::body("Percent identity to reference is less than 60%."));
             }
             details = details.push(widget::text::body(format!(
                 "Sequence length: {}",
@@ -3693,18 +3695,12 @@ impl Item {
                     avg_qual
                 )));
             }
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading("Best match:"));
-            let best = &hits[0];
-            details = details.push(widget::text::heading(format!(
-                "{} ({:.1}%)",
-                best.description, best.identity,
-            )));
             details = details.push(widget::text::body(""));
 
             details = details.push(widget::text::body(
                 "23S rRNA macrolide resistance SNPs (rrl):",
             ));
+            let best = &hits[0];
             for snp in &best.rrl_snp_calls {
                 details = details.push(widget::text::body(format!(
                     "  pos {}: {}",
@@ -3720,10 +3716,26 @@ impl Item {
             );
         }
 
+        if let Some(hit) = self.metadata.ab1_species_hit() {
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::body("Species identification (23S database):"));
+            details = details.push(widget::text::heading(format!(
+                "{} ({:.1}%)",
+                hit.description, hit.identity,
+            )));
+            details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
+            details = details.push(widget::text::body(""));
+            details = details.push(
+                widget::button::standard("View alignment")
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone()))),
+            );
+        } else {
+            details = details.push(widget::text::body("No species match found"));
+        }
+
         column = column.push(details);
         column.into()
     }
-
 
     pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxxs, .. } = theme::active().cosmic().spacing;
