@@ -76,6 +76,9 @@ pub static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, Vec<u8>)>> =
             if row.gene.trim() != "rrl" {
                 continue;
             }
+            if row.confers.trim() != "resistance" {
+                continue;
+            }
             let m = row.mutation.trim();
             if let Some(rest) = m.strip_prefix("n.") {
                 let digits_end =
