@@ -1,6 +1,6 @@
 pub mod erm41;
 pub mod tb_data;
-pub mod ntm_data;
+pub mod rrl;
 pub mod seqid;
 
 use erm41::Erm41Position28;

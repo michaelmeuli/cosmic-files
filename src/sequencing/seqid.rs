@@ -1,7 +1,7 @@
 use cosmic::cosmic_theme::palette::white_point::B;
 
 use super::erm41::reverse_complement;
-use super::ntm_data::RRL_RESISTANCE_SNPS;
+use super::rrl::RRL_RESISTANCE_SNPS;
 
 /// Best-hit species identification from aligning against a multi-FASTA reference database.
 #[derive(Clone, Debug)]
