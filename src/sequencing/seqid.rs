@@ -259,7 +259,7 @@ fn format_pairwise_alignment_impl(
         .map(|(&r, &q)| {
             if r == b'-' || q == b'-' {
                 b' '
-            } else if r.to_ascii_uppercase() == q.to_ascii_uppercase() {
+            } else if r.eq_ignore_ascii_case(&q) {
                 b'|'
             } else {
                 b'.'
@@ -316,7 +316,7 @@ fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
             accession = parts.get(1).copied().unwrap_or(rest).to_string();
             description = parts
                 .get(2)
-                .and_then(|s| s.splitn(2, ' ').nth(1))
+                .and_then(|s| s.split_once(' ').map(|x| x.1))
                 .map(|s| {
                     let mut words = s.splitn(3, ' ');
                     let genus = words.next().unwrap_or("");
@@ -398,7 +398,7 @@ fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
                             && shorter[i..i + WORD_SIZE]
                                 .iter()
                                 .zip(&longer[j..j + WORD_SIZE])
-                                .all(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+                                .all(|(a, b)| a.eq_ignore_ascii_case(b))
                         {
                             candidates.insert(d);
                         }
@@ -415,7 +415,7 @@ fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
         let count = shorter
             .iter()
             .zip(&longer[off..off + shorter.len()])
-            .filter(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase())
+            .filter(|(a, b)| a.eq_ignore_ascii_case(b))
             .count();
         (count, off)
     };

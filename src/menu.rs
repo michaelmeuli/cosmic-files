@@ -210,7 +210,7 @@ pub fn context_menu<'a>(
                 if !trash::os_limited::is_empty().unwrap_or(true) {
                     children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash).into());
                 }
-            } else if let Some(entry) = selected_desktop_entry {
+            } else if let Some(_entry) = selected_desktop_entry {
                 children.push(menu_item(fl!("open"), Action::Open).into());
                 #[cfg(feature = "desktop")]
                 {
@@ -405,7 +405,7 @@ pub fn context_menu<'a>(
                             menu_item(fl!("run-tb-profiler"), Action::TbProfilerConfigError)
                                 .into(),
                         );
-                    } else if is_valid_fastq_selection(&selected_remote_paths, &config) {
+                    } else if is_valid_fastq_selection(&selected_remote_paths, config) {
                         children
                             .push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler).into());
                     }

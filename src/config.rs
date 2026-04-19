@@ -166,6 +166,7 @@ impl State {
 
 #[derive(Clone, Debug, Eq, PartialEq, CosmicConfigEntry, Deserialize, Serialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct TBConfig {
     pub script_path: String,
     pub out_dir: String,
@@ -174,17 +175,6 @@ pub struct TBConfig {
     pub pair2_suffix: String,
 }
 
-impl Default for TBConfig {
-    fn default() -> Self {
-        Self {
-            script_path: String::new(),
-            out_dir: String::new(),
-            docx_template_path: String::new(),
-            pair1_suffix: String::new(),
-            pair2_suffix: String::new(),
-        }
-    }
-}
 
 #[derive(Clone, CosmicConfigEntry, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]

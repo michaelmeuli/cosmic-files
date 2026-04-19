@@ -786,7 +786,7 @@ pub fn item_from_entry(
     sizes: IconSizes,
 ) -> Item {
     let mut is_desktop = false;
-    let mut is_gvfs = false;
+    let is_gvfs = false;
 
     let hidden = name.starts_with('.') || hidden_attribute(&metadata);
 
@@ -1074,7 +1074,7 @@ pub fn item_from_path<P: Into<PathBuf>>(path: P, sizes: IconSizes) -> Result<Ite
 pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
     let mut items = Vec::new();
     let mut hidden_files = Box::from([]);
-    let mut remote_scannable = false;
+    let remote_scannable = false;
 
     #[cfg(feature = "gvfs")]
     {
@@ -1197,8 +1197,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         if let ItemMetadata::Path {
             is_raw_sample_file, ..
         } = &mut item.metadata
-        {
-            if let Some((sample_id, suffix)) = name.split_once(".results.") {
+            && let Some((sample_id, suffix)) = name.split_once(".results.") {
                 let entry = samples
                     .entry(sample_id.to_string())
                     .or_insert(LocalSampleFiles {
@@ -1214,23 +1213,20 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
                 }
                 *is_raw_sample_file = true;
             }
-        }
     }
     for item in &mut items {
         let name = item.name.clone();
         if let ItemMetadata::Path {
             is_raw_sample_file, ..
         } = &mut item.metadata
-        {
-            if *is_raw_sample_file {
+            && *is_raw_sample_file {
                 let sample_id = name.find('.').map(|i| &name[..i]);
-                if sample_id.map_or(true, |id| {
-                    samples.get(id).map_or(true, |f| f.json.is_none())
+                if sample_id.is_none_or(|id| {
+                    samples.get(id).is_none_or(|f| f.json.is_none())
                 }) {
                     *is_raw_sample_file = false;
                 }
             }
-        }
     }
     // Propagate susceptibility to raw sample files so filtering works in file view too
     let sample_susceptibility: HashMap<String, bool> = samples
@@ -1253,15 +1249,11 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             is_susceptible,
             ..
         } = &mut item.metadata
-        {
-            if *is_raw_sample_file {
-                if let Some(id) = name.find('.').map(|i| &name[..i]) {
-                    if let Some(&sus) = sample_susceptibility.get(id) {
+            && *is_raw_sample_file
+                && let Some(id) = name.find('.').map(|i| &name[..i])
+                    && let Some(&sus) = sample_susceptibility.get(id) {
                         *is_susceptible = sus;
                     }
-                }
-            }
-        }
     }
 
     for (sample_id, files) in samples {
@@ -2011,8 +2003,8 @@ impl Location {
                 *time,
             ),
             Self::Remote(uri, ..) => {
-                if let Ok(mut url) = url::Url::parse(uri) {
-                    if let Some(path_str) = path.to_str() {
+                if let Ok(mut url) = url::Url::parse(uri)
+                    && let Some(path_str) = path.to_str() {
                         url.set_path(path_str);
                         let name = path
                             .file_name()
@@ -2021,7 +2013,6 @@ impl Location {
                             .to_string();
                         return Self::Remote(url.to_string(), name, Some(path));
                     }
-                }
                 self.clone()
             }
 
@@ -3274,23 +3265,20 @@ impl Item {
                 column = column.push(details);
 
                 if self.metadata.is_dir() {
-                    if let Some(_path) = self.path_opt() {
-                        if self.selected {
+                    if let Some(_path) = self.path_opt()
+                        && self.selected {
                             column = column.push(
                                 widget::button::standard(fl!("open")).on_press(Message::Open(None)),
                             );
                         }
-                    }
                 } else {
                     if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
-                    {
-                        if self.selected && path_opt.is_some() {
+                        && self.selected && path_opt.is_some() {
                             column =
                                 column.push(widget::button::standard(fl!("download")).on_press(
                                     Message::Download(Some((path_opt.unwrap(), uri.clone()))),
                                 ));
                         }
-                    }
                 }
             }
             _ => {
@@ -3376,15 +3364,14 @@ impl Item {
         column = column.push(details);
 
         #[cfg(feature = "russh")]
-        if let ItemMetadata::RusshPath { .. } = &self.metadata {
-            if self.metadata.is_dir() {
+        if let ItemMetadata::RusshPath { .. } = &self.metadata
+            && self.metadata.is_dir() {
                 if self.selected {
                     column = column
                         .push(widget::button::standard(fl!("open")).on_press(Message::Open(None)));
                 }
                 return column.into();
             }
-        }
 
         if let Some(json) = tbprofilerjson_opt {
             column = column.push(widget::text::heading(format!(
@@ -3398,8 +3385,8 @@ impl Item {
             }
         }
 
-        if let ItemMetadata::Path { .. } = &self.metadata {
-            if self.metadata.is_tb_result() {
+        if let ItemMetadata::Path { .. } = &self.metadata
+            && self.metadata.is_tb_result() {
                 for (label, opt_path) in [
                     ("Open .results.csv", self.metadata.csv_path()),
                     ("Open .results.json", self.metadata.json_path()),
@@ -3413,7 +3400,6 @@ impl Item {
                     }
                 }
             }
-        }
 
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata {
@@ -3429,8 +3415,8 @@ impl Item {
                     );
                 }
             }
-            if let Some(Location::Remote(uri, _, _)) = &self.location_opt {
-                if self.metadata.is_tb_result() {
+            if let Some(Location::Remote(uri, _, _)) = &self.location_opt
+                && self.metadata.is_tb_result() {
                     for (label, opt_path) in [
                         ("Download .results.csv", self.metadata.csv_path()),
                         ("Download .results.json", self.metadata.json_path()),
@@ -3444,7 +3430,6 @@ impl Item {
                         }
                     }
                 }
-            }
         }
 
         column.into()
@@ -3939,7 +3924,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             let display_base = if is_rev { dna_complement(*base) } else { *base };
             let x = scan_to_x(scan);
             let color = base_color(display_base);
-            let is_pos28 = pos28_scan.map_or(false, |s| s == scan);
+            let is_pos28 = pos28_scan == Some(scan);
             frame.fill_text(widget::canvas::Text {
                 content: String::from(display_base as char),
                 position: Point { x, y: 2.0 },
@@ -4926,11 +4911,8 @@ impl Tab {
                     }
                 }
             }
-            Message::Download(path_uri_opt) => match path_uri_opt {
-                Some(path_uri) => {
-                    commands.push(Command::DownloadFile(vec![path_uri.0], vec![path_uri.1]));
-                }
-                None => {}
+            Message::Download(path_uri_opt) => if let Some(path_uri) = path_uri_opt {
+                commands.push(Command::DownloadFile(vec![path_uri.0], vec![path_uri.1]));
             },
             Message::DownloadMany(paths, uris) => {
                 commands.push(Command::DownloadFile(paths, uris));
@@ -5718,12 +5700,12 @@ impl Tab {
             Message::ShiftPermissions(path_mode_opt, shift, bits) => match path_mode_opt {
                 Some((path, mode)) => commands.push(Command::SetPermissions(
                     path,
-                    set_mode_part(mode, shift, bits.try_into().unwrap()),
+                    set_mode_part(mode, shift, bits),
                 )),
                 // Shift permissions on all selected items
                 None => {
-                    let mut permissions = Vec::new();
-                    for item in self.items_opt().map_or(Vec::new(), |items| {
+                    let permissions = Vec::new();
+                    for _item in self.items_opt().map_or(Vec::new(), |items| {
                         items.iter().filter(|item| item.selected).collect()
                     }) {
                         #[cfg(unix)]
@@ -7937,11 +7919,10 @@ impl Tab {
                     // Include remote TB result items even though their location path is None
                     // (they carry their downloadable paths in sample_*_path_opt fields)
                     #[cfg(feature = "russh")]
-                    if item.metadata.is_tb_result() {
-                        if let Some(Location::Remote(..)) = &item.location_opt {
+                    if item.metadata.is_tb_result()
+                        && let Some(Location::Remote(..)) = &item.location_opt {
                             return true;
                         }
-                    }
                     item.location_opt
                         .as_ref()
                         .and_then(Location::path_opt)
@@ -7958,11 +7939,11 @@ impl Tab {
 
         let mut total_size: u64 = 0;
         let mut mime_type_counts: BTreeMap<String, u64> = BTreeMap::new();
-        let mut user_name: BTreeSet<String> = BTreeSet::new();
-        let mut mode_user: BTreeSet<u32> = BTreeSet::new();
-        let mut group_name: BTreeSet<String> = BTreeSet::new();
-        let mut mode_group: BTreeSet<u32> = BTreeSet::new();
-        let mut mode_other: BTreeSet<u32> = BTreeSet::new();
+        let _user_name: BTreeSet<String> = BTreeSet::new();
+        let _mode_user: BTreeSet<u32> = BTreeSet::new();
+        let _group_name: BTreeSet<String> = BTreeSet::new();
+        let _mode_group: BTreeSet<u32> = BTreeSet::new();
+        let _mode_other: BTreeSet<u32> = BTreeSet::new();
         let mut calculating_dir_size = false;
         let mut dir_size_error: Option<String> = None;
         let mut show_size = true;
@@ -8064,8 +8045,8 @@ impl Tab {
                     selected_items
                         .iter()
                         .flat_map(|item| {
-                            if let ItemMetadata::RusshPath { .. } = &item.metadata {
-                                if let Some(Location::Remote(uri, _, path_opt)) = &item.location_opt
+                            if let ItemMetadata::RusshPath { .. } = &item.metadata
+                                && let Some(Location::Remote(uri, _, path_opt)) = &item.location_opt
                                 {
                                     if item.metadata.is_tb_result() {
                                         // Expand sample items into their individual file paths
@@ -8084,7 +8065,6 @@ impl Tab {
                                         return vec![(path.clone(), uri.clone())];
                                     }
                                 }
-                            }
                             vec![]
                         })
                         .filter(|(path, _)| seen.insert(path.clone()))
@@ -8113,12 +8093,10 @@ impl Tab {
 
         let mut settings = Vec::new();
         // Only allow modifying open-with if all mime types are the same
-        if mime_types.len() == 1 {
-            if let Some(mime) = mime_types
-                .get(0)
+        if mime_types.len() == 1
+            && let Some(mime) = mime_types.first()
                 .and_then(|(mime, _)| mime.parse::<Mime>().ok())
-            {
-                if let Some(mime_app_cache) = mime_app_cache_opt {
+                && let Some(mime_app_cache) = mime_app_cache_opt {
                     let mime_apps = mime_app_cache.get(&mime);
                     if !mime_apps.is_empty() {
                         let mime_closure = mime.clone();
@@ -8140,8 +8118,6 @@ impl Tab {
                         );
                     }
                 }
-            }
-        }
 
         #[cfg(unix)]
         {

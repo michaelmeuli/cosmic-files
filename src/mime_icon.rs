@@ -63,8 +63,8 @@ static MIME_ICON_CACHE: LazyLock<Mutex<MimeIconCache>> =
 
 pub fn mime_for_path(
     path: impl AsRef<Path>,
-    metadata_opt: Option<&fs::Metadata>,
-    remote: bool,
+    _metadata_opt: Option<&fs::Metadata>,
+    _remote: bool,
 ) -> Mime {
     let path = path.as_ref();
 
@@ -106,7 +106,7 @@ pub fn mime_for_path(
     }
     #[cfg(not(unix))]
     {
-        mime_guess::from_path(&path).first_or_octet_stream()
+        mime_guess::from_path(path).first_or_octet_stream()
     }
 }
 

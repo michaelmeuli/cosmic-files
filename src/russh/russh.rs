@@ -207,8 +207,8 @@ async fn remote_sftp_list(
         // but also add them individually (is_raw_sample_file = true) so the
         // display layer can toggle without a rescan.
         let mut is_raw_sample_file = false;
-        if file_type == FileType::File {
-            if let Some((sample_id, suffix)) = name.split_once(".results.") {
+        if file_type == FileType::File
+            && let Some((sample_id, suffix)) = name.split_once(".results.") {
                 let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
                     json: None,
                     csv: None,
@@ -231,7 +231,6 @@ async fn remote_sftp_list(
 
                 is_raw_sample_file = true;
             }
-        }
 
         let metadata = if !force_dir {
             let mtime = info
@@ -245,7 +244,7 @@ async fn remote_sftp_list(
             let mut children_opt = None;
             let is_tbprofiler_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
-            let is_ab1 = new_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
+            let _is_ab1 = new_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
             let mut tbprofilerjson_opt = None;
             let mut is_susceptible = false;
             if is_tbprofiler_json {
@@ -264,7 +263,7 @@ async fn remote_sftp_list(
                 let mut count = 0;
                 match sftp.read_dir(new_path.to_string_lossy().to_string()).await {
                     Ok(mut dir) => {
-                        while let Some(entry) = dir.next() {
+                        for entry in dir.by_ref() {
                             if entry.file_name() == "." || entry.file_name() == ".." {
                                 continue;
                             }
@@ -375,19 +374,16 @@ async fn remote_sftp_list(
         let name = item.name.clone();
         if let ItemMetadata::RusshPath { is_raw_sample_file, is_susceptible, .. } =
             &mut item.metadata
-        {
-            if *is_raw_sample_file {
+            && *is_raw_sample_file {
                 let sample_id = name.find('.').map(|i| &name[..i]);
-                if sample_id.map_or(true, |id| samples.get(id).map_or(true, |f| f.json.is_none()))
+                if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none()))
                 {
                     *is_raw_sample_file = false;
-                } else if let Some(id) = sample_id {
-                    if let Some(&sus) = sample_susceptibility.get(id) {
+                } else if let Some(id) = sample_id
+                    && let Some(&sus) = sample_susceptibility.get(id) {
                         *is_susceptible = sus;
                     }
-                }
             }
-        }
     }
 
     // ------------------------------------------------------------
@@ -532,7 +528,7 @@ async fn remote_sftp_parent(
             let mut count = 0;
             match sftp.read_dir(remote_file.path.clone()).await {
                 Ok(mut dir) => {
-                    while let Some(entry) = dir.next() {
+                    for entry in dir.by_ref() {
                         if entry.file_name() == "." || entry.file_name() == ".." {
                             continue;
                         }

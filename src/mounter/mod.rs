@@ -75,7 +75,7 @@ impl MounterItem {
         }
     }
 
-    pub fn icon(&self, symbolic: bool) -> Option<widget::icon::Handle> {
+    pub fn icon(&self, _symbolic: bool) -> Option<widget::icon::Handle> {
         match self {
             #[cfg(feature = "gvfs")]
             Self::Gvfs(item) => item.icon(symbolic),

@@ -134,7 +134,7 @@ impl TryFrom<(Vec<u8>, String)> for ClipboardPaste {
                 let text = str::from_utf8(&data)?;
                 let lines = text.lines();
                 if text.is_empty() || lines.count() == 0 {
-                    Err(format!("Empty file url"))?;
+                    Err("Empty file url".to_string())?;
                 }
                 for line in text.lines() {
                     let url = Url::parse(line)?;
@@ -148,7 +148,7 @@ impl TryFrom<(Vec<u8>, String)> for ClipboardPaste {
                 let text = str::from_utf8(&data)?;
                 let lines = text.lines();
                 if text.is_empty() || lines.count() == 0 {
-                    Err(format!("Empty file url"))?;
+                    Err("Empty file url".to_string())?;
                 }
                 for (i, line) in text.lines().enumerate() {
                     if i == 0 {

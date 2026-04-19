@@ -1173,7 +1173,7 @@ impl Operation {
                 .map_err(|e| OperationError::from_err(e, &controller))?;
                 Ok(OperationSelection::default())
             }
-            Self::SetPermissions { path, mode } => {
+            Self::SetPermissions { path, mode: _ } => {
                 controller
                     .check()
                     .await
@@ -1182,8 +1182,8 @@ impl Operation {
                 let controller_clone = controller.clone();
                 let path_clone = path.clone();
                 compio::runtime::spawn_blocking(move || -> Result<(), OperationError> {
-                    let controller = controller_clone;
-                    let path = path_clone;
+                    let _controller = controller_clone;
+                    let _path = path_clone;
                     //TODO: what to do on non-Unix systems?
                     #[cfg(unix)]
                     {

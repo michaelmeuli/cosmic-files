@@ -31,7 +31,7 @@ pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
             break;
         }
         let tag_name   = &data[e..e + 4];
-        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?) as i32;
+        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
         // num_elements at e+12, data_size at e+16, data_offset at e+20
         let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
         let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
@@ -150,7 +150,7 @@ impl Ab1Channels {
     pub fn channel_for_base(&self, base: u8) -> Option<usize> {
         self.base_order
             .iter()
-            .position(|&b| b.to_ascii_uppercase() == base.to_ascii_uppercase())
+            .position(|&b| b.eq_ignore_ascii_case(&base))
     }
 }
 

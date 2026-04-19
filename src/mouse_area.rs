@@ -113,7 +113,7 @@ impl<'a, Message> MouseArea<'a, Message> {
 
     /// Only on wayland, on_right_press will provide window position instead of widget relative
     #[must_use]
-    pub fn wayland_on_right_press_window_position(mut self) -> Self {
+    pub fn wayland_on_right_press_window_position(self) -> Self {
         #[cfg(feature = "wayland")]
         {
             self.on_right_press_window_position = true;

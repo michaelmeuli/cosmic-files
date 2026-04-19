@@ -1154,7 +1154,7 @@ impl App {
         )
     }
 
-    fn download_to(&mut self, paths: &[impl AsRef<Path>], uris: &Vec<String>) -> Task<Message> {
+    fn download_to(&mut self, paths: &[impl AsRef<Path>], uris: &[String]) -> Task<Message> {
         if let Some(destination) = dirs::download_dir() {
             // Count how many selected items are remote directories so we can
             // offer a SaveFile dialog (with an editable zip name) when needed.
@@ -1176,7 +1176,7 @@ impl App {
                 let default_name = if dir_count == 1 {
                     paths
                         .iter()
-                        .find(|p| {
+                        .find(|_p| {
                             // pick the one path that is a dir (best-effort by metadata)
                             true
                         })
@@ -1551,7 +1551,7 @@ impl App {
         // Manually rescan any trash tabs after any operation is completed
         commands.push(self.rescan_trash());
 
-        return Task::batch(commands);
+        Task::batch(commands)
     }
 
     fn handle_operation_errors(&mut self, errors: Vec<(u64, OperationError)>) -> Task<Message> {
@@ -1596,7 +1596,7 @@ impl App {
         }
         // Manually rescan any trash tabs after any operation is completed
         tasks.push(self.rescan_trash());
-        return Task::batch(tasks);
+        Task::batch(tasks)
     }
 
     fn remove_window(&mut self, id: &window::Id) {
@@ -1663,7 +1663,7 @@ impl App {
     ) -> Task<Message> {
         log::info!("rescan_tab {entity:?} {location:?} {selection_paths:?}");
         let icon_sizes = self.config.tab.icon_sizes;
-        let mounter_items = self.mounter_items.clone();
+        let _mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
 
         Task::future(async move {
@@ -3063,15 +3063,13 @@ impl Application for App {
                             // TODO do we need to choose the correct mounter?
                             self.client_items.keys().copied().next()
                         })
-                    {
-                        if let Some(client) = CLIENTS.get(&key) {
+                        && let Some(client) = CLIENTS.get(&key) {
                             return client.remote_drive(uri.clone()).map(move |()| {
                                 cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount {
                                     entity,
                                 })
                             });
                         }
-                    }
 
                     log::warn!(
                         "failed to open favorite, path does not exist: {}",
@@ -3481,7 +3479,7 @@ impl Application for App {
                 }
             }
             Message::DesktopViewOptions => {
-                let mut settings = window::Settings {
+                let settings = window::Settings {
                     decorations: true,
                     min_size: Some(Size::new(360.0, 180.0)),
                     resizable: true,
@@ -3506,7 +3504,7 @@ impl Application for App {
                 if matches!(self.mode, Mode::Desktop) {
                     if show {
                         //TODO: would it be better to make this a layer surface?
-                        let mut settings = window::Settings {
+                        let settings = window::Settings {
                             decorations: false,
                             level: window::Level::AlwaysOnTop,
                             max_size: Some(Size::new(1280.0, 640.0)),
@@ -3827,17 +3825,14 @@ impl Application for App {
                     DialogResult::Cancel => {}
                     DialogResult::Open(selected_paths) => {
                         let mut from_paths_and_uris = None;
-                        if let Some(file_dialog) = &self.file_dialog_opt {
-                            if let Some(window) = self.windows.remove(&file_dialog.window_id()) {
-                                if let WindowKind::DownloadDialog(paths_and_uris) = window.kind {
+                        if let Some(file_dialog) = &self.file_dialog_opt
+                            && let Some(window) = self.windows.remove(&file_dialog.window_id())
+                                && let WindowKind::DownloadDialog(paths_and_uris) = window.kind {
                                     from_paths_and_uris = paths_and_uris;
                                 }
-                            }
-                        }
                         if let Some((download_paths, download_uris, save_as_zip)) =
                             from_paths_and_uris
-                        {
-                            if !selected_paths.is_empty() {
+                            && !selected_paths.is_empty() {
                                 self.file_dialog_opt = None;
                                 // When save_as_zip, selected_paths[0] is the full
                                 // "dir/name.zip" path chosen by the user; otherwise
@@ -3852,7 +3847,7 @@ impl Application for App {
                                 } else {
                                     (selected_paths[0].clone(), None)
                                 };
-                                for (_key, client) in CLIENTS.iter() {
+                                if let Some((_key, client)) = CLIENTS.iter().next() {
                                     self.download_files_total += download_paths.len();
                                     return client
                                         .download_file(
@@ -3871,7 +3866,6 @@ impl Application for App {
                                         });
                                 }
                             }
-                        }
                     }
                 }
                 self.file_dialog_opt = None;
@@ -4067,22 +4061,20 @@ impl Application for App {
                 let mut disconnected = Vec::new();
                 if let Some(old_items) = self.client_items.get(&client_key) {
                     for old_item in old_items {
-                        if let Some(old_path) = old_item.path() {
-                            if old_item.is_connected() {
+                        if let Some(old_path) = old_item.path()
+                            && old_item.is_connected() {
                                 let mut still_connected = false;
                                 for item in &client_items {
-                                    if let Some(path) = item.path() {
-                                        if path == old_path && item.is_connected() {
+                                    if let Some(path) = item.path()
+                                        && path == old_path && item.is_connected() {
                                             still_connected = true;
                                             break;
                                         }
-                                    }
                                 }
                                 if !still_connected {
                                     disconnected.push(old_path);
                                 }
                             }
-                        }
                     }
                 }
 
@@ -4917,7 +4909,7 @@ impl Application for App {
                         };
 
                         if let Some(preview_kind) = preview_kind {
-                            let mut settings = window::Settings {
+                            let settings = window::Settings {
                                 decorations: true,
                                 min_size: Some(Size::new(360.0, 180.0)),
                                 resizable: true,
@@ -5244,7 +5236,7 @@ impl Application for App {
                                 self.update_tab(entity, tab_path, selection_paths),
                             ]));
                         }
-                        tab::Command::ContextMenu(point_opt, parent_id) => {
+                        tab::Command::ContextMenu(_point_opt, _parent_id) => {
                             #[cfg(feature = "wayland")]
                             if let Some(point) = point_opt {
                                 if crate::is_wayland() {
@@ -6149,8 +6141,8 @@ impl Application for App {
                     if let Some(p) = paths.next() {
                         {
                             for (k, client_items) in &self.client_items {
-                                if let Some(client) = CLIENTS.get(k) {
-                                    if let Some(item) = client_items
+                                if let Some(client) = CLIENTS.get(k)
+                                    && let Some(item) = client_items
                                         .iter()
                                         .find(|&item| item.path().is_some_and(|path| path == p))
                                     {
@@ -6158,7 +6150,6 @@ impl Application for App {
                                             .disconnect(item.clone())
                                             .map(|()| cosmic::action::none());
                                     }
-                                }
                             }
                         }
                     }
@@ -6502,7 +6493,7 @@ impl Application for App {
             }
             DialogPage::FailedOperations(ids) => {
                 let errors: Vec<String> = ids
-                    .into_iter()
+                    .iter()
                     .filter_map(|id| match self.failed_operations.get(id) {
                         Some((operation, _, err)) => Some(format!("{operation:#?}\n{err}")),
                         _ => None,
@@ -7870,7 +7861,7 @@ impl Application for App {
                 stream::channel(
                     1,
                     |mut output: futures::channel::mpsc::Sender<Message>| async move {
-                        let watcher_res = new_debouncer(
+                        let _watcher_res = new_debouncer(
                             time::Duration::from_millis(250),
                             Some(time::Duration::from_millis(250)),
                             move |event_res: notify_debouncer_full::DebounceEventResult| {

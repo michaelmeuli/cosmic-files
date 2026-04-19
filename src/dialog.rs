@@ -266,7 +266,7 @@ impl<M: Send + 'static> Dialog<M> {
 
         let (config_handler, config) = Config::load();
 
-        let mut settings = window::Settings {
+        let settings = window::Settings {
             decorations: false,
             exit_on_close_request: false,
             min_size: Some(Size::new(360.0, 180.0)),
@@ -746,7 +746,7 @@ impl App {
     fn rescan_tab(&self, selection_paths: Option<Vec<PathBuf>>) -> Task<Message> {
         let location = self.tab.location.clone();
         let icon_sizes = self.tab.config.icon_sizes;
-        let mounter_items = self.mounter_items.clone();
+        let _mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
         Task::future(async move {
             let location2 = location.clone();
@@ -1345,13 +1345,12 @@ impl Application for App {
                 .mount(data.1.clone())
                 .map(|()| cosmic::action::none());
         }
-        if let Some(data) = self.nav_model.data::<ClientData>(entity) {
-            if let Some(client) = CLIENTS.get(&data.0) {
+        if let Some(data) = self.nav_model.data::<ClientData>(entity)
+            && let Some(client) = CLIENTS.get(&data.0) {
                 return client
                     .connect(data.1.clone())
                     .map(|()| cosmic::action::none());
             }
-        }
         Task::none()
     }
 
@@ -1604,22 +1603,20 @@ impl Application for App {
                 let mut not_connected = Vec::new();
                 if let Some(old_items) = self.client_items.get(&client_key) {
                     for old_item in old_items {
-                        if let Some(old_path) = old_item.path() {
-                            if old_item.is_connected() {
+                        if let Some(old_path) = old_item.path()
+                            && old_item.is_connected() {
                                 let mut still_connected = false;
                                 for item in &client_items {
-                                    if let Some(path) = item.path() {
-                                        if path == old_path && item.is_connected() {
+                                    if let Some(path) = item.path()
+                                        && path == old_path && item.is_connected() {
                                             still_connected = true;
                                             break;
                                         }
-                                    }
                                 }
                                 if !still_connected {
                                     not_connected.push(Location::Path(old_path));
                                 }
                             }
-                        }
                     }
                 }
 
@@ -1853,7 +1850,7 @@ impl Application for App {
                                 self.rescan_tab(selection_paths),
                             ]));
                         }
-                        tab::Command::ContextMenu(point_opt, parent_id) => {
+                        tab::Command::ContextMenu(_point_opt, _parent_id) => {
                             #[cfg(feature = "wayland")]
                             match point_opt {
                                 Some(point) => {
