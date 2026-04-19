@@ -4,7 +4,8 @@ pub mod rrl;
 pub mod seqid;
 
 use erm41::Erm41Position28;
-pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall, RrlSnpCall, SpeciesHit};
+pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall, SpeciesHit};
+pub use rrl::RrlSnpCall;
 
 /// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
 ///

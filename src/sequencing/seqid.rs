@@ -1,7 +1,7 @@
 use cosmic::cosmic_theme::palette::white_point::B;
 
 use super::erm41::reverse_complement;
-use super::rrl::RRL_RESISTANCE_SNPS;
+use super::rrl::{call_rrl_snps, RrlSnpCall};
 
 /// Best-hit species identification from aligning against a multi-FASTA reference database.
 #[derive(Clone, Debug)]
@@ -225,51 +225,6 @@ const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
     (482, b'T', b'C'),
     (500, b'G', b'C'),
 ];
-
-// ── rrl resistance SNPs ───────────────────────────────────────────────────────
-
-/// A single macrolide-resistance SNP position in the M. abscessus 23S rRNA (rrl).
-/// `query_base` is `None` when the position is not covered by the read.
-#[derive(Clone, Debug)]
-pub struct RrlSnpCall {
-    /// 0-based position in the rrl reference sequence (MAB_r5052).
-    pub ref_pos: usize,
-    /// Base observed in the query at this position, or `None` if not covered.
-    pub query_base: Option<u8>,
-    /// Wild-type base at this position.
-    pub wt_base: u8,
-    /// All resistance-conferring bases at this position (sorted).
-    pub resistance_bases: Vec<u8>,
-}
-
-impl RrlSnpCall {
-    /// "NA", "<base> (wt)", "<base> (resistance)", or "<base> (mutation)".
-    pub fn call_tag(&self) -> String {
-        match self.query_base {
-            None => "NA".to_string(),
-            Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
-            Some(b) if self.resistance_bases.contains(&b) => format!("{} (resistance)", b as char),
-            Some(b) => format!("{} (mutation)", b as char),
-        }
-    }
-}
-
-/// Compute a call for every rrl resistance SNP position.
-/// Returns one entry per unique position; `query_base` is `None` when not covered.
-fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
-    RRL_RESISTANCE_SNPS
-        .iter()
-        .map(|(&ref_pos, (wt_base, resistance_bases))| {
-            let query_pos = ref_pos as isize - alignment_offset;
-            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
-                Some(query[query_pos as usize].to_ascii_uppercase())
-            } else {
-                None
-            };
-            RrlSnpCall { ref_pos, query_base, wt_base: *wt_base, resistance_bases: resistance_bases.clone() }
-        })
-        .collect()
-}
 
 // ── Shared alignment formatter ────────────────────────────────────────────────
 
