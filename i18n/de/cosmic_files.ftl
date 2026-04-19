@@ -330,7 +330,7 @@ light = Hell
 
 type-to-search = Zum Suchen tippen
 type-to-search-recursive = Durchsucht den aktuellen Ordner und alle Unterordner
-type-to-search-enter-path = Gibt den Pfad zu einem Verzeichnis oder einer Datei ein
+type-to-search-enter-path = Gib den Pfad zum Verzeichnis oder zur Datei ein
 # Kontextmenü
 add-to-sidebar = Zur Seitenleiste hinzufügen
 compress = Komprimieren...
@@ -376,9 +376,9 @@ select-all = Alles auswählen
 
 ## Ansicht
 
-zoom-in = Vergrößern
+zoom-in = Hineinzoomen
 default-size = Standardgröße
-zoom-out = Verkleinern
+zoom-out = Herauszoomen
 view = Ansicht
 grid-view = Rasteransicht
 list-view = Listenansicht
@@ -390,7 +390,7 @@ menu-about = Über COSMIC Dateien...
 
 ## Sortieren
 
-sort = Sortieren
+sort = Sortierung
 sort-a-z = A-Z
 sort-z-a = Z-A
 sort-newest-first = Neueste zuerst
@@ -436,3 +436,8 @@ delete-remote-files-error = Einige Dateien auf dem Server konnen nicht gelöscht
 tb-profiler-success = TB-Profiler gestarted
 ok = OK
 delete-remote-files-success = Dateien erfolgreich auf Remote gelöscht
+move-to-title = Verschiebeziel auswählen
+remove-from-recents = Aus den zuletzt verwendeten Elementen entfernen
+move-to = Verschieben nach...
+copy-path = Pfad kopieren
+mixed = Gemischt

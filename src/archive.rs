@@ -189,8 +189,7 @@ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
         if file.is_symlink() && (cfg!(unix) || cfg!(windows)) {
             let mut target = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut target)?;
-
-            // release mutable borrow of archive
+            // File no longer needed, drop to allow reading target on windows
             drop(file);
 
             #[cfg(unix)]
@@ -203,15 +202,15 @@ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
             #[cfg(windows)]
             {
                 let Ok(target) = String::from_utf8(target) else {
-                    return Err(ZipError::InvalidArchive(std::borrow::Cow::Borrowed(
-                        "Invalid UTF-8 as symlink target",
-                    )));
+                    return Err(ZipError::InvalidArchive(
+                        "Invalid UTF-8 as symlink target".into(),
+                    ));
                 };
-                let target = target.into_boxed_str();
-                let target_is_dir_from_archive = archive.file_names().any(|name| {
-                    name.ends_with('/')
-                        && name.trim_end_matches('/') == target.as_ref().trim_end_matches('/')
-                });
+                let target_is_dir_from_archive = match password {
+                    None => archive.by_name(&target),
+                    Some(pwd) => archive.by_name_decrypt(&target, pwd.as_bytes()),
+                }
+                .map_or(false, |x| x.is_dir());
                 let target_path = directory.as_ref().join(OsString::from(target.to_string()));
                 let target_is_dir = if target_is_dir_from_archive {
                     true

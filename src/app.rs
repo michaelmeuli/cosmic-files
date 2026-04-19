@@ -1,6 +1,10 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(windows))]
+use cosmic::desktop::fde::DesktopEntry;
+#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
+use cosmic::iced::platform_specific::shell::wayland::commands::overlap_notify::overlap_notify;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced::{
     Limits, Point,
@@ -12,14 +16,14 @@ use cosmic::iced::{
         Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
     },
 };
-#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
-use cosmic::iced_winit::commands::overlap_notify::overlap_notify;
 use cosmic::{
     Application, ApplicationExt, Element,
     app::{self, Core, Task, context_drawer},
     cosmic_config::{self, ConfigSet},
-    cosmic_theme,
-    executor,
+    cosmic_theme, executor,
+    iced::core::widget::operation::focusable::unfocus,
+    iced::runtime::{clipboard, task},
+    iced::widget::{button::focus, scrollable::AbsoluteOffset},
     iced::{
         self, Alignment, Event, Length, Size, Subscription,
         clipboard::dnd::DndAction,
@@ -31,8 +35,6 @@ use cosmic::{
         widget::scrollable,
         window::{self, Event as WindowEvent, Id as WindowId},
     },
-    iced_runtime::clipboard,
-    iced_widget::{button::focus, scrollable::AbsoluteOffset},
     style, surface, theme,
     widget::{
         self,
@@ -44,8 +46,6 @@ use cosmic::{
         space,
     },
 };
-#[cfg(not(windows))]
-use cosmic::desktop::fde::DesktopEntry;
 use mime_guess::Mime;
 use notify_debouncer_full::{
     DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
@@ -53,6 +53,8 @@ use notify_debouncer_full::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::Key as SlotMapKey;
+#[cfg(feature = "notify")]
+use std::sync::Mutex;
 use std::{
     any::TypeId,
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
@@ -66,8 +68,6 @@ use std::{
     sync::{Arc, LazyLock},
     time::{self, Duration, Instant},
 };
-#[cfg(feature = "notify")]
-use std::sync::Mutex;
 use tokio::sync::mpsc;
 use trash::TrashItem;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -80,9 +80,10 @@ use crate::{
         ClipboardPasteText, ClipboardPasteVideo,
     },
     config::{
-        AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TIME_CONFIG_ID, TabConfig,
-        TimeConfig, TypeToSearch, TBConfig,
+        AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TBConfig, TIME_CONFIG_ID,
+        TabConfig, TimeConfig, TypeToSearch,
     },
+    context_action,
     dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings},
     fl, home_dir,
     key_bind::key_binds,
@@ -95,12 +96,16 @@ use crate::{
         Controller, Operation, OperationError, OperationErrorType, OperationSelection,
         ReplaceResult, copy_unique_path,
     },
-    russh::{CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, SlurmJobId, same_uri},
+    russh::{
+        CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, SlurmJobId,
+        same_uri,
+    },
     spawn_detached::spawn_detached,
     tab::{
         self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
         SearchLocation, Tab,
     },
+    trash::{Trash, TrashExt},
     zoom::{zoom_in_view, zoom_out_view, zoom_to_default},
 };
 
@@ -112,6 +117,9 @@ static DELETE_TRASH_BUTTON_ID: LazyLock<widget::Id> =
 
 static CONFIRM_OPEN_WITH_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("confirm-open-with-button"));
+
+static CONFIRM_CONTEXT_ACTION_BUTTON_ID: LazyLock<widget::Id> =
+    LazyLock::new(|| widget::Id::new("confirm-context-action-button"));
 
 static EMPTY_TRASH_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("empty-trash-button"));
@@ -188,6 +196,7 @@ pub enum Action {
     OpenItemLocation,
     OpenTerminal,
     OpenWith,
+    RunContextAction(usize),
     Paste,
     PermanentlyDelete,
     Preview,
@@ -267,6 +276,9 @@ impl Action {
             Self::OpenItemLocation => Message::OpenItemLocation(entity_opt),
             Self::OpenTerminal => Message::OpenTerminal(entity_opt),
             Self::OpenWith => Message::OpenWithDialog(entity_opt),
+            Self::RunContextAction(action) => {
+                Message::TabMessage(entity_opt, tab::Message::RunContextAction(*action))
+            }
             Self::Paste => Message::Paste(entity_opt),
             Self::PermanentlyDelete => Message::PermanentlyDelete(entity_opt),
             Self::Preview => Message::Preview(entity_opt),
@@ -344,6 +356,7 @@ pub enum NavMenuAction {
     OpenInNewTab(segmented_button::Entity),
     OpenInNewWindow(segmented_button::Entity),
     Preview(segmented_button::Entity),
+    RunContextAction(segmented_button::Entity, usize),
     RemoveFromSidebar(segmented_button::Entity),
 }
 
@@ -441,6 +454,7 @@ pub enum Message {
     CheckClipboardImage,
     CheckClipboardVideo,
     CheckClipboardText,
+    RetryCheckClipboard(ClipboardCache),
     ClipboardCached(ClipboardCache),
     PendingCancel(u64),
     PendingCancelAll,
@@ -645,6 +659,10 @@ pub enum DialogPage {
         parent: PathBuf,
         name: String,
         dir: bool,
+    },
+    RunContextAction {
+        action: usize,
+        paths: Box<[PathBuf]>,
     },
     OpenWith {
         path: PathBuf,
@@ -920,12 +938,12 @@ impl App {
 
             // First launch apps that can be launched directly
             if mime == "application/x-desktop" {
-                // Try opening desktop application
-                #[cfg(not(windows))]
+                #[cfg(feature = "desktop")]
                 {
+                    // Try opening desktop application
                     Self::launch_desktop_entries(&paths);
+                    continue;
                 }
-                continue;
             } else if mime == "application/x-executable" || mime == "application/vnd.appimage" {
                 // Try opening executable
                 for path in paths {
@@ -986,8 +1004,10 @@ impl App {
         Task::batch(tasks)
     }
 
-    #[cfg(not(windows))]
+    #[cfg(feature = "desktop")]
     fn launch_desktop_entries(paths: &[impl AsRef<Path>]) {
+        use cosmic::desktop::fde::DesktopEntry;
+
         for path in paths.iter().map(AsRef::as_ref) {
             match DesktopEntry::from_path::<&str>(path, None) {
                 Ok(entry) => match entry.exec() {
@@ -1214,7 +1234,7 @@ impl App {
             Task::none()
         }
     }
-    
+
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     fn handle_overlap(&mut self) {
         let mut overlaps: FxHashMap<_, _> = self
@@ -1344,14 +1364,14 @@ impl App {
             entity.id()
         };
 
-        (
-            entity,
-            Task::batch([
-                self.update_title(),
-                self.update_watcher(),
-                self.update_tab(entity, location, selection_paths),
-            ]),
-        )
+        let mut tasks = Vec::with_capacity(4);
+        if activate {
+            tasks.push(task::widget(unfocus()));
+        }
+        tasks.push(self.update_title());
+        tasks.push(self.update_watcher());
+        tasks.push(self.update_tab(entity, location, selection_paths));
+        (entity, Task::batch(tasks))
     }
 
     fn open_tab(
@@ -1419,31 +1439,28 @@ impl App {
             .insert(id, (operation.clone(), controller.clone()));
 
         // Use a task to send operations to the compio runtime thread.
-        cosmic::Task::stream(cosmic::iced_futures::stream::channel(
-            4,
-            move |msg_tx| async move {
-                let (tx, rx) = tokio::sync::oneshot::channel();
+        cosmic::Task::stream(cosmic::iced::stream::channel(4, move |msg_tx| async move {
+            let (tx, rx) = tokio::sync::oneshot::channel();
 
-                let msg_tx = Arc::new(tokio::sync::Mutex::new(msg_tx));
+            let msg_tx = Arc::new(tokio::sync::Mutex::new(msg_tx));
 
-                let msg_tx_clone = msg_tx.clone();
+            let msg_tx_clone = msg_tx.clone();
 
-                _ = compio_tx
-                    .send(Box::pin(async move {
-                        let msg = match operation.perform(&msg_tx_clone, controller).await {
-                            Ok(result_paths) => Message::PendingComplete(id, result_paths),
-                            Err(err) => Message::PendingError(id, err),
-                        };
+            _ = compio_tx
+                .send(Box::pin(async move {
+                    let msg = match operation.perform(&msg_tx_clone, controller).await {
+                        Ok(result_paths) => Message::PendingComplete(id, result_paths),
+                        Err(err) => Message::PendingError(id, err),
+                    };
 
-                        _ = tx.send(msg);
-                    }))
-                    .await;
+                    _ = tx.send(msg);
+                }))
+                .await;
 
-                if let Ok(msg) = rx.await {
-                    let _ = msg_tx.lock().await.send(msg).await;
-                }
-            },
-        ))
+            if let Ok(msg) = rx.await {
+                let _ = msg_tx.lock().await.send(msg).await;
+            }
+        }))
         .map(cosmic::Action::App)
     }
 
@@ -1990,7 +2007,7 @@ impl App {
 
         nav_model = nav_model.insert(|b| {
             b.text(fl!("trash"))
-                .icon(icon::icon(tab::trash_helpers::trash_icon_symbolic(16)))
+                .icon(icon::icon(Trash::icon_symbolic(16)))
                 .data(Location::Trash)
                 .divider_above()
         });
@@ -2348,7 +2365,8 @@ impl App {
                 let progress = controller.progress();
                 section = section.add(widget::column::with_children([
                     widget::row::with_children([
-                        widget::progress_bar(0.0..=1.0, progress)
+                        widget::determinate_linear(progress)
+                            .width(Length::Fill)
                             .girth(progress_bar_height)
                             .into(),
                         if controller.is_paused() {
@@ -2475,7 +2493,10 @@ impl App {
                                     } else if item.metadata.is_tbprofiler_json() {
                                         Some(item.preview_tbprofiler_json())
                                     } else {
-                                        Some(item.preview_view(Some(&self.mime_app_cache), military_time))
+                                        Some(item.preview_view(
+                                            Some(&self.mime_app_cache),
+                                            military_time,
+                                        ))
                                     }
                                 }
                                 // No selected items
@@ -2583,22 +2604,30 @@ impl App {
                             .on_input(Message::SetTbScriptPath),
                     ),
                 )
-                .add(widget::settings::item::builder("TB Profiler output directory").control(
-                    widget::text_input("", &self.config.tb_config.out_dir)
+                .add(
+                    widget::settings::item::builder("TB Profiler output directory").control(
+                        widget::text_input("", &self.config.tb_config.out_dir)
                             .on_input(Message::SetTbOutDir),
-                ))
-                .add(widget::settings::item::builder("TB DOCX Template Path").control(
-                    widget::text_input("", &self.config.tb_config.docx_template_path).
-                            on_input(Message::SetTbDocxTemplatePath),
-                ))
-                .add(widget::settings::item::builder("Pair 1 suffix").control(
-                    widget::text_input("", &self.config.tb_config.pair1_suffix)
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("TB DOCX Template Path").control(
+                        widget::text_input("", &self.config.tb_config.docx_template_path)
+                            .on_input(Message::SetTbDocxTemplatePath),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Pair 1 suffix").control(
+                        widget::text_input("", &self.config.tb_config.pair1_suffix)
                             .on_input(Message::SetTbPair1Suffix),
-                ))
-                .add(widget::settings::item::builder("Pair 2 suffix").control(
-                    widget::text_input("", &self.config.tb_config.pair2_suffix)
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Pair 2 suffix").control(
+                        widget::text_input("", &self.config.tb_config.pair2_suffix)
                             .on_input(Message::SetTbPair2Suffix),
-                ))
+                    ),
+                )
                 .into(),
         ])
         .into()
@@ -2949,6 +2978,28 @@ impl Application for App {
                 NavMenuAction::OpenInNewWindow(entity),
             ));
         }
+        if let Some(path) = location_opt.and_then(Location::path_opt) {
+            let selected_dir = usize::from(path.is_dir());
+            let action_items: Vec<_> = self
+                .config
+                .context_actions
+                .iter()
+                .enumerate()
+                .filter(|(_, action)| action.matches_selection(1, selected_dir))
+                .map(|(i, action)| {
+                    cosmic::widget::menu::Item::Button(
+                        action.name.clone(),
+                        None,
+                        NavMenuAction::RunContextAction(entity, i),
+                    )
+                })
+                .collect();
+
+            if !action_items.is_empty() {
+                items.push(cosmic::widget::menu::Item::Divider);
+                items.extend(action_items);
+            }
+        }
         items.push(cosmic::widget::menu::Item::Divider);
         if matches!(location_opt, Some(Location::Path(..))) {
             items.push(cosmic::widget::menu::Item::Button(
@@ -2974,9 +3025,7 @@ impl Application for App {
             ));
         }
 
-        if matches!(location_opt, Some(Location::Trash))
-            && !trash::os_limited::is_empty().unwrap_or(true)
-        {
+        if matches!(location_opt, Some(Location::Trash)) && !Trash::is_empty() {
             items.push(cosmic::widget::menu::Item::Button(
                 fl!("empty-trash"),
                 None,
@@ -3063,13 +3112,12 @@ impl Application for App {
                             // TODO do we need to choose the correct mounter?
                             self.client_items.keys().copied().next()
                         })
-                        && let Some(client) = CLIENTS.get(&key) {
-                            return client.remote_drive(uri.clone()).map(move |()| {
-                                cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount {
-                                    entity,
-                                })
-                            });
-                        }
+                        && let Some(client) = CLIENTS.get(&key)
+                    {
+                        return client.remote_drive(uri.clone()).map(move |()| {
+                            cosmic::Action::App(Message::RemoteDriveOpenEntityAfterMount { entity })
+                        });
+                    }
 
                     log::warn!(
                         "failed to open favorite, path does not exist: {}",
@@ -3647,18 +3695,14 @@ impl Application for App {
                             job_id: _,
                             tasks: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::RunTbProfilerError {
                             client_key: _,
                             uri: _,
                             error: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::TbProfilerConfigError => {}
                         DialogPage::DeleteRemoteFilesSuccess {
@@ -3666,18 +3710,14 @@ impl Application for App {
                             uri: _,
                             result: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::DeleteRemoteFilesError {
                             client_key: _,
                             uri: _,
                             error: _,
                         } => {
-                            tasks.push(Task::future(async move {
-                                cosmic::action::none()
-                            }));
+                            tasks.push(Task::future(async move { cosmic::action::none() }));
                         }
                         DialogPage::NewItem { parent, name, dir } => {
                             let path = parent.join(name);
@@ -3686,6 +3726,9 @@ impl Application for App {
                             } else {
                                 Operation::NewFile { path }
                             }));
+                        }
+                        DialogPage::RunContextAction { action, paths } => {
+                            context_action::run(&self.config.context_actions, action, &paths);
                         }
                         DialogPage::OpenWith {
                             path,
@@ -3827,45 +3870,47 @@ impl Application for App {
                         let mut from_paths_and_uris = None;
                         if let Some(file_dialog) = &self.file_dialog_opt
                             && let Some(window) = self.windows.remove(&file_dialog.window_id())
-                                && let WindowKind::DownloadDialog(paths_and_uris) = window.kind {
-                                    from_paths_and_uris = paths_and_uris;
-                                }
+                            && let WindowKind::DownloadDialog(paths_and_uris) = window.kind
+                        {
+                            from_paths_and_uris = paths_and_uris;
+                        }
                         if let Some((download_paths, download_uris, save_as_zip)) =
                             from_paths_and_uris
-                            && !selected_paths.is_empty() {
-                                self.file_dialog_opt = None;
-                                // When save_as_zip, selected_paths[0] is the full
-                                // "dir/name.zip" path chosen by the user; otherwise
-                                // it is the destination directory.
-                                let (to, zip_output) = if save_as_zip {
-                                    let full = selected_paths[0].clone();
-                                    let dir = full
-                                        .parent()
-                                        .map(Path::to_path_buf)
-                                        .unwrap_or_else(|| full.clone());
-                                    (dir, Some(full))
-                                } else {
-                                    (selected_paths[0].clone(), None)
-                                };
-                                if let Some((_key, client)) = CLIENTS.iter().next() {
-                                    self.download_files_total += download_paths.len();
-                                    return client
-                                        .download_file(
-                                            download_paths.clone(),
-                                            download_uris.clone(),
-                                            to.clone(),
-                                            zip_output.clone(),
-                                        )
-                                        .map(|event| match event {
-                                            crate::russh::DownloadEvent::FileCompleted => {
-                                                cosmic::action::app(Message::DownloadFileProgress)
-                                            }
-                                            crate::russh::DownloadEvent::Complete(r) => {
-                                                cosmic::action::app(Message::DownloadComplete(r))
-                                            }
-                                        });
-                                }
+                            && !selected_paths.is_empty()
+                        {
+                            self.file_dialog_opt = None;
+                            // When save_as_zip, selected_paths[0] is the full
+                            // "dir/name.zip" path chosen by the user; otherwise
+                            // it is the destination directory.
+                            let (to, zip_output) = if save_as_zip {
+                                let full = selected_paths[0].clone();
+                                let dir = full
+                                    .parent()
+                                    .map(Path::to_path_buf)
+                                    .unwrap_or_else(|| full.clone());
+                                (dir, Some(full))
+                            } else {
+                                (selected_paths[0].clone(), None)
+                            };
+                            if let Some((_key, client)) = CLIENTS.iter().next() {
+                                self.download_files_total += download_paths.len();
+                                return client
+                                    .download_file(
+                                        download_paths.clone(),
+                                        download_uris.clone(),
+                                        to.clone(),
+                                        zip_output.clone(),
+                                    )
+                                    .map(|event| match event {
+                                        crate::russh::DownloadEvent::FileCompleted => {
+                                            cosmic::action::app(Message::DownloadFileProgress)
+                                        }
+                                        crate::russh::DownloadEvent::Complete(r) => {
+                                            cosmic::action::app(Message::DownloadComplete(r))
+                                        }
+                                    });
                             }
+                        }
                     }
                 }
                 self.file_dialog_opt = None;
@@ -4062,19 +4107,22 @@ impl Application for App {
                 if let Some(old_items) = self.client_items.get(&client_key) {
                     for old_item in old_items {
                         if let Some(old_path) = old_item.path()
-                            && old_item.is_connected() {
-                                let mut still_connected = false;
-                                for item in &client_items {
-                                    if let Some(path) = item.path()
-                                        && path == old_path && item.is_connected() {
-                                            still_connected = true;
-                                            break;
-                                        }
-                                }
-                                if !still_connected {
-                                    disconnected.push(old_path);
+                            && old_item.is_connected()
+                        {
+                            let mut still_connected = false;
+                            for item in &client_items {
+                                if let Some(path) = item.path()
+                                    && path == old_path
+                                    && item.is_connected()
+                                {
+                                    still_connected = true;
+                                    break;
                                 }
                             }
+                            if !still_connected {
+                                disconnected.push(old_path);
+                            }
+                        }
                     }
                 }
 
@@ -4320,7 +4368,11 @@ impl Application for App {
                     let selected_paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                     let selected_uris: Vec<_> = self.selected_uris(entity_opt).collect();
                     return client
-                        .run_tb_profiler(selected_paths, selected_uris, self.config.tb_config.clone())
+                        .run_tb_profiler(
+                            selected_paths,
+                            selected_uris,
+                            self.config.tb_config.clone(),
+                        )
                         .map(|()| cosmic::action::none());
                 }
             }
@@ -4339,54 +4391,66 @@ impl Application for App {
                         .map(|()| cosmic::action::none());
                 }
             }
-            Message::RunTbProfilerResult(client_key, uri, res) => {
-                match res {
-                    Ok(slurm_job_id) => {
-                        log::info!("TbProfiler started successfully for {uri:?}: job_id={}, tasks={}, running={}", slurm_job_id.array_id, slurm_job_id.tasks, slurm_job_id.running_tasks);
-                        self.running_tasks.insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
-                        self.job_total_tasks.insert(slurm_job_id.array_id, slurm_job_id.tasks);
-                        let poll_task = CLIENTS
-                            .get(&client_key)
-                            .map(|c| c.poll_job_status(slurm_job_id.array_id, uri.clone()).map(|()| cosmic::action::none()))
-                            .unwrap_or_else(Task::none);
-                        let dialog_task = self.dialog_pages.push_back(DialogPage::RunTbProfilerStarted {
-                            client_key,
-                            uri,
-                            job_id: slurm_job_id.array_id,
-                            tasks: slurm_job_id.tasks,
-                        });
-                        return Task::batch([poll_task, dialog_task]);
-                    }
-                    Err(error) => {
-                        log::warn!("failed to run TbProfiler for {uri:?}: {error}");
-                        return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
-                            client_key,
-                            uri,
-                            error,
-                        });
-                    }
+            Message::RunTbProfilerResult(client_key, uri, res) => match res {
+                Ok(slurm_job_id) => {
+                    log::info!(
+                        "TbProfiler started successfully for {uri:?}: job_id={}, tasks={}, running={}",
+                        slurm_job_id.array_id,
+                        slurm_job_id.tasks,
+                        slurm_job_id.running_tasks
+                    );
+                    self.running_tasks
+                        .insert(slurm_job_id.array_id, slurm_job_id.running_tasks);
+                    self.job_total_tasks
+                        .insert(slurm_job_id.array_id, slurm_job_id.tasks);
+                    let poll_task = CLIENTS
+                        .get(&client_key)
+                        .map(|c| {
+                            c.poll_job_status(slurm_job_id.array_id, uri.clone())
+                                .map(|()| cosmic::action::none())
+                        })
+                        .unwrap_or_else(Task::none);
+                    let dialog_task =
+                        self.dialog_pages
+                            .push_back(DialogPage::RunTbProfilerStarted {
+                                client_key,
+                                uri,
+                                job_id: slurm_job_id.array_id,
+                                tasks: slurm_job_id.tasks,
+                            });
+                    return Task::batch([poll_task, dialog_task]);
                 }
-            }
-            Message::DeleteRemoteFilesResult(client_key, uri, res) => {
-                match res {
-                    Ok(result) => {
-                        log::info!("Remote files deleted successfully for {uri:?}: {result}");
-                        return self.dialog_pages.push_back(DialogPage::DeleteRemoteFilesSuccess {
+                Err(error) => {
+                    log::warn!("failed to run TbProfiler for {uri:?}: {error}");
+                    return self.dialog_pages.push_back(DialogPage::RunTbProfilerError {
+                        client_key,
+                        uri,
+                        error,
+                    });
+                }
+            },
+            Message::DeleteRemoteFilesResult(client_key, uri, res) => match res {
+                Ok(result) => {
+                    log::info!("Remote files deleted successfully for {uri:?}: {result}");
+                    return self
+                        .dialog_pages
+                        .push_back(DialogPage::DeleteRemoteFilesSuccess {
                             client_key,
                             uri,
                             result,
                         });
-                    }
-                    Err(error) => {
-                        log::warn!("failed to delete remote files for {uri:?}: {error}");
-                        return self.dialog_pages.push_back(DialogPage::DeleteRemoteFilesError {
+                }
+                Err(error) => {
+                    log::warn!("failed to delete remote files for {uri:?}: {error}");
+                    return self
+                        .dialog_pages
+                        .push_back(DialogPage::DeleteRemoteFilesError {
                             client_key,
                             uri,
                             error,
                         });
-                    }
                 }
-            }
+            },
             Message::JobStatusUpdate(_client_key, _uri, array_id, running_tasks) => {
                 log::info!("Job {array_id} running tasks: {running_tasks}");
                 if running_tasks == 0 {
@@ -4399,9 +4463,9 @@ impl Application for App {
             }
             Message::DeleteTbProfilerResults(uri, tb_config) => {
                 if let Some((_client_key, client)) = CLIENTS.iter().next() {
-                    return client
-                        .delete_tb_profiler_results(uri, tb_config)
-                        .map(|()| cosmic::action::app(Message::TabMessage(None, tab::Message::Reload)));
+                    return client.delete_tb_profiler_results(uri, tb_config).map(|()| {
+                        cosmic::action::app(Message::TabMessage(None, tab::Message::Reload))
+                    });
                 }
             }
             Message::NewItem(entity_opt, dir) => {
@@ -4649,6 +4713,24 @@ impl Application for App {
                     // Use cached clipboard data if available (needed for Wayland popups)
                     match &self.clipboard_cache {
                         ClipboardCache::Files(contents) => {
+                            if contents.paths.is_empty() {
+                                return iced::Task::future(tokio::time::sleep(
+                                    std::time::Duration::from_millis(300),
+                                ))
+                                .discard()
+                                .chain(
+                                    clipboard::read_data::<ClipboardPaste>().map(
+                                        move |contents_opt| match contents_opt {
+                                            Some(contents) => cosmic::action::app(
+                                                Message::PasteContents(to.clone(), contents),
+                                            ),
+                                            None => {
+                                                cosmic::action::app(Message::PasteImage(to.clone()))
+                                            }
+                                        },
+                                    ),
+                                );
+                            }
                             return self
                                 .update(Message::PasteContents(to.clone(), contents.clone()));
                         }
@@ -4796,9 +4878,12 @@ impl Application for App {
                 // Check if clipboard has any paste-able content and cache it
                 return clipboard::read_data::<ClipboardPaste>().map(|contents_opt| {
                     match contents_opt {
-                        Some(contents) if !contents.paths.is_empty() => cosmic::action::app(
-                            Message::ClipboardCached(ClipboardCache::Files(contents)),
+                        Some(contents) if contents.paths.is_empty() => cosmic::action::app(
+                            Message::RetryCheckClipboard(ClipboardCache::Files(contents)),
                         ),
+                        Some(contents) => cosmic::action::app(Message::ClipboardCached(
+                            ClipboardCache::Files(contents),
+                        )),
                         _ => cosmic::action::app(Message::CheckClipboardImage),
                     }
                 });
@@ -4830,6 +4915,28 @@ impl Application for App {
                         None => ClipboardCache::Empty,
                     }))
                 });
+            }
+            Message::RetryCheckClipboard(cache) => {
+                let mut cmds = Vec::new();
+                cmds.push(self.update(Message::ClipboardCached(cache)));
+
+                cmds.push(
+                    iced::Task::future(tokio::time::sleep(Duration::from_millis(300)))
+                        .discard()
+                        .chain(
+                            clipboard::read_data::<ClipboardPaste>().map(|contents_opt| {
+                                match contents_opt {
+                                    Some(contents) if !contents.paths.is_empty() => {
+                                        cosmic::action::app(Message::ClipboardCached(
+                                            ClipboardCache::Files(contents),
+                                        ))
+                                    }
+                                    _ => cosmic::action::app(Message::CheckClipboardImage),
+                                }
+                            }),
+                        ),
+                );
+                return Task::batch(cmds);
             }
             Message::ClipboardCached(cache) => {
                 self.clipboard_cache = cache;
@@ -4953,10 +5060,8 @@ impl Application for App {
                         .is_some_and(|loc| matches!(loc, Location::Trash))
                 });
                 if let Some(entity) = maybe_entity {
-                    self.nav_model.icon_set(
-                        entity,
-                        icon::icon(tab::trash_helpers::trash_icon_symbolic(16)),
-                    );
+                    self.nav_model
+                        .icon_set(entity, icon::icon(Trash::icon_symbolic(16)));
                 }
 
                 return Task::batch([self.rescan_trash(), self.update_desktop()]);
@@ -4978,12 +5083,14 @@ impl Application for App {
                         .collect();
                     if !selected.is_empty() {
                         //TODO: batch rename
-                        let tasks = selected
+                        let mut last_name = String::new();
+                        let tasks: Vec<_> = selected
                             .into_iter()
                             .filter_map(|path| {
                                 let parent = path.parent()?.to_path_buf();
                                 let name = path.file_name()?.to_str()?.to_string();
                                 let dir = path.is_dir();
+                                last_name = name.clone();
                                 Some(self.dialog_pages.push_back(DialogPage::RenameItem {
                                     from: path,
                                     parent,
@@ -4991,9 +5098,15 @@ impl Application for App {
                                     dir,
                                 }))
                             })
-                            .chain(std::iter::once(widget::text_input::focus(
+                            .collect();
+                        let tasks = tasks.into_iter().chain([
+                            widget::text_input::focus(self.dialog_text_input.clone()),
+                            widget::text_input::select_until_last(
                                 self.dialog_text_input.clone(),
-                            )));
+                                &last_name,
+                                '.',
+                            ),
+                        ]);
                         return Task::batch(tasks);
                     }
                 }
@@ -5204,7 +5317,9 @@ impl Application for App {
                             self.set_show_context(true);
                         }
                         tab::Command::DeleteTbProfilerResults(uri, tb_config) => {
-                            commands.push(self.update(Message::DeleteTbProfilerResults(uri, tb_config)));
+                            commands.push(
+                                self.update(Message::DeleteTbProfilerResults(uri, tb_config)),
+                            );
                         }
                         tab::Command::AddToSidebar(path) => {
                             let mut favorites = self.config.favorites.clone();
@@ -5244,7 +5359,7 @@ impl Application for App {
                                     use cctk::wayland_protocols::xdg::shell::client::xdg_positioner::{
                                         Anchor, Gravity,
                                     };
-                                    use cosmic::iced_runtime::platform_specific::wayland::popup::{
+                                    use cosmic::iced::runtime::platform_specific::wayland::popup::{
                                         SctkPopupSettings, SctkPositioner,
                                     };
                                     let window_id = WindowId::unique();
@@ -5255,6 +5370,7 @@ impl Application for App {
                                             widget::Id::unique(),
                                         )),
                                     );
+                                    commands.push(self.update(Message::CheckClipboard));
                                     commands.push(self.update(Message::Surface(
                                         cosmic::surface::action::app_popup(
                                             move |app: &mut Self| -> SctkPopupSettings {
@@ -5323,6 +5439,25 @@ impl Application for App {
                         #[cfg(feature = "desktop")]
                         tab::Command::ExecEntryAction(entry, action) => {
                             Self::exec_entry_action(&entry, action);
+                        }
+                        tab::Command::RunContextAction(action) => {
+                            let paths: Box<[_]> = self.selected_paths(Some(entity)).collect();
+                            if let Some(preset) = self.config.context_actions.get(action) {
+                                if preset.confirm {
+                                    commands.push(self.push_dialog(
+                                        DialogPage::RunContextAction { action, paths },
+                                        Some(CONFIRM_CONTEXT_ACTION_BUTTON_ID.clone()),
+                                    ));
+                                } else {
+                                    context_action::run(
+                                        &self.config.context_actions,
+                                        action,
+                                        &paths,
+                                    );
+                                }
+                            } else {
+                                log::warn!("invalid context action index `{action}`");
+                            }
                         }
                         tab::Command::Iced(iced_command) => {
                             commands.push(iced_command.0.map(move |x| {
@@ -5413,7 +5548,9 @@ impl Application for App {
                                         log::warn!("failed to open alignment viewer: {err}");
                                     }
                                 }
-                                Err(err) => log::warn!("failed to create temp file for alignment: {err}"),
+                                Err(err) => {
+                                    log::warn!("failed to create temp file for alignment: {err}")
+                                }
                             }
                         }
                         tab::Command::OpenSpeciesAlignment(hit) => {
@@ -5432,7 +5569,9 @@ impl Application for App {
                                         log::warn!("failed to open alignment viewer: {err}");
                                     }
                                 }
-                                Err(err) => log::warn!("failed to create temp file for alignment: {err}"),
+                                Err(err) => {
+                                    log::warn!("failed to create temp file for alignment: {err}")
+                                }
                             }
                         }
                         tab::Command::SetSort(location, heading_options, direction) => {
@@ -5886,6 +6025,30 @@ impl Application for App {
                         }
                     }
                 }
+                NavMenuAction::RunContextAction(entity, action) => {
+                    if let Some(path) = self
+                        .nav_model
+                        .data::<Location>(entity)
+                        .and_then(Location::path_opt)
+                        .cloned()
+                    {
+                        let paths = vec![path];
+                        if let Some(preset) = self.config.context_actions.get(action) {
+                            if preset.confirm {
+                                return self.push_dialog(
+                                    DialogPage::RunContextAction {
+                                        action,
+                                        paths: paths.into_boxed_slice(),
+                                    },
+                                    Some(CONFIRM_CONTEXT_ACTION_BUTTON_ID.clone()),
+                                );
+                            }
+                            context_action::run(&self.config.context_actions, action, &paths);
+                        } else {
+                            log::warn!("invalid context action index `{action}`");
+                        }
+                    }
+                }
                 NavMenuAction::OpenInNewTab(entity) => {
                     let open_task = match self.nav_model.data::<Location>(entity) {
                         Some(Location::Network(uri, display_name, path)) => self.open_tab(
@@ -6145,11 +6308,11 @@ impl Application for App {
                                     && let Some(item) = client_items
                                         .iter()
                                         .find(|&item| item.path().is_some_and(|path| path == p))
-                                    {
-                                        return client
-                                            .disconnect(item.clone())
-                                            .map(|()| cosmic::action::none());
-                                    }
+                                {
+                                    return client
+                                        .disconnect(item.clone())
+                                        .map(|()| cosmic::action::none());
+                                }
                             }
                         }
                     }
@@ -6164,7 +6327,11 @@ impl Application for App {
                     };
                 }
                 // Check clipboard when window gains focus
-                return self.update(Message::CheckClipboard);
+                // HACK: Wait a moment for the data to be available.
+                return cosmic::task::future(async {
+                    _ = tokio::time::sleep(Duration::from_millis(300)).await;
+                    cosmic::action::app(Message::CheckClipboard)
+                });
             }
             Message::Surface(action) => {
                 return cosmic::task::message(cosmic::Action::Cosmic(
@@ -6967,6 +7134,26 @@ impl Application for App {
                         .spacing(space_xxs),
                     )
             }
+            DialogPage::RunContextAction { action, paths } => {
+                let name = self
+                    .config
+                    .context_actions
+                    .get(*action)
+                    .map_or_else(|| fl!("context-action"), |preset| preset.name.clone());
+
+                widget::dialog()
+                    .title(fl!("context-action-confirm-title", name = name))
+                    .body(fl!("context-action-confirm-warning", items = paths.len()))
+                    .icon(icon::from_name("dialog-error").size(64))
+                    .primary_action(
+                        widget::button::suggested(fl!("run"))
+                            .on_press(Message::DialogComplete)
+                            .id(CONFIRM_CONTEXT_ACTION_BUTTON_ID.clone()),
+                    )
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    )
+            }
             DialogPage::OpenWith {
                 path,
                 mime,
@@ -7179,6 +7366,7 @@ impl Application for App {
                             .into(),
                             widget::text_input("", name.as_str())
                                 .id(self.dialog_text_input.clone())
+                                .double_click_select_delimiter('.')
                                 .on_input(move |name| {
                                     Message::DialogUpdate(DialogPage::RenameItem {
                                         from: from.clone(),
@@ -7300,7 +7488,10 @@ impl Application for App {
     }
 
     fn footer(&self) -> Option<Element<'_, Message>> {
-        if self.progress_operations.is_empty() && self.running_tasks.is_empty() && self.download_files_total == 0 {
+        if self.progress_operations.is_empty()
+            && self.running_tasks.is_empty()
+            && self.download_files_total == 0
+        {
             return None;
         }
 
@@ -7357,8 +7548,9 @@ impl Application for App {
                 }
             }
 
-            let progress_bar =
-                widget::progress_bar(0.0..=1.0, total_progress).girth(progress_bar_height);
+            let progress_bar = widget::determinate_linear(total_progress)
+                .width(Length::Fill)
+                .girth(progress_bar_height);
 
             children.push(
                 widget::row::with_children([
@@ -7438,8 +7630,9 @@ impl Application for App {
                 )
             };
 
-            let progress_bar =
-                widget::progress_bar(0.0..=1.0, progress).girth(progress_bar_height);
+            let progress_bar = widget::determinate_linear(progress)
+                .width(Length::Fill)
+                .girth(progress_bar_height);
 
             children.push(
                 widget::row::with_children([progress_bar.into()])
@@ -7462,8 +7655,9 @@ impl Application for App {
             } else {
                 format!("Downloading {total} files... ({done}/{total})")
             };
-            let progress_bar =
-                widget::progress_bar(0.0..=1.0, progress).girth(progress_bar_height);
+            let progress_bar = widget::determinate_linear(progress)
+                .width(Length::Fill)
+                .girth(progress_bar_height);
             children.push(
                 widget::row::with_children([progress_bar.into()])
                     .align_y(Alignment::Center)
@@ -7579,6 +7773,7 @@ impl Application for App {
                     &self.key_binds,
                     &self.modifiers,
                     self.clipboard_has_content(),
+                    &self.config.context_actions,
                 )
                 .map(move |message| Message::TabMessage(Some(entity), message));
             tab_column = tab_column.push(tab_view);
@@ -7608,6 +7803,7 @@ impl Application for App {
                                 &window.modifiers,
                                 self.clipboard_has_content(),
                                 &self.config.tb_config,
+                                &self.config.context_actions,
                             )
                             .map(|x| Message::TabMessage(Some(*entity), x)),
                             id.clone(),
@@ -7625,6 +7821,7 @@ impl Application for App {
                                 &self.key_binds,
                                 &window.modifiers,
                                 self.clipboard_has_content(),
+                                &self.config.context_actions,
                             )
                             .map(move |message| Message::TabMessage(Some(*entity), message)),
                         None => widget::space::vertical().into(),
@@ -7861,7 +8058,7 @@ impl Application for App {
                 stream::channel(
                     1,
                     |mut output: futures::channel::mpsc::Sender<Message>| async move {
-                        let _watcher_res = new_debouncer(
+                        let watcher_res = new_debouncer(
                             time::Duration::from_millis(250),
                             Some(time::Duration::from_millis(250)),
                             move |event_res: notify_debouncer_full::DebounceEventResult| {
@@ -7890,14 +8087,7 @@ impl Application for App {
                             },
                         );
 
-                        // TODO: Trash watching support for Windows, macOS, and other OSes
-                        #[cfg(all(
-                            unix,
-                            not(target_os = "macos"),
-                            not(target_os = "ios"),
-                            not(target_os = "android")
-                        ))]
-                        match (watcher_res, trash::os_limited::trash_folders()) {
+                        match (watcher_res, Trash::folders()) {
                             (Ok(mut watcher), Ok(trash_bins)) => {
                                 // Watch the "bins" themselves as well as the files folder where
                                 // trashed items are placed. This allows us to avoid recursively
@@ -8082,8 +8272,7 @@ impl Application for App {
                         |_| {
                             stream::channel(
                                 1,
-                                move |msg_tx: futures::channel::mpsc::Sender<_>| async move {
-                                    let msg_tx = Arc::new(tokio::sync::Mutex::new(msg_tx));
+                                move |mut msg_tx: futures::channel::mpsc::Sender<_>| async move {
                                     tokio::task::spawn_blocking(move || {
                                         match notify_rust::Notification::new()
                                             .summary(&fl!("notification-in-progress"))
@@ -8093,8 +8282,6 @@ impl Application for App {
                                             Ok(notification) => {
                                                 let _ = futures::executor::block_on(async {
                                                     msg_tx
-                                                        .lock()
-                                                        .await
                                                         .send(Message::Notification(Arc::new(
                                                             Mutex::new(notification),
                                                         )))

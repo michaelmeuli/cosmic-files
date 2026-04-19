@@ -5,6 +5,9 @@ use cosmic::{
     Application, ApplicationExt, Element,
     app::{Core, Task, context_drawer, cosmic::Cosmic},
     cosmic_config, cosmic_theme, executor,
+    iced::core::widget::operation,
+    iced::platform_specific::shell::{self as iced_winit, SurfaceIdWrapper},
+    iced::widget::scrollable::AbsoluteOffset,
     iced::{
         self, Alignment, Event, Length, Size, Subscription,
         core::SmolStr,
@@ -15,8 +18,6 @@ use cosmic::{
         widget::scrollable,
         window,
     },
-    iced_core::widget::operation,
-    iced_widget::scrollable::AbsoluteOffset,
     theme,
     widget::{
         self, Operation,
@@ -203,7 +204,7 @@ impl<T: AsRef<str>> From<T> for DialogLabel {
 
 impl<'a, M: Clone + 'static> From<&'a DialogLabel> for Element<'a, M> {
     fn from(label: &'a DialogLabel) -> Self {
-        let mut iced_spans: Vec<cosmic::iced_core::text::Span<'_, ()>> =
+        let mut iced_spans: Vec<cosmic::iced::core::text::Span<'_, ()>> =
             Vec::with_capacity(label.spans.len());
         for span in &label.spans {
             iced_spans.push(cosmic::iced::widget::span(&span.text).underline(span.underline));
@@ -598,6 +599,7 @@ impl App {
             col = col.push(
                 widget::text_input("", filename)
                     .id(self.filename_id.clone())
+                    .double_click_select_delimiter('.')
                     .on_input(Message::Filename)
                     .on_submit(|_| Message::Save(false)),
             );
@@ -1859,7 +1861,7 @@ impl Application for App {
                                         use cctk::wayland_protocols::xdg::shell::client::xdg_positioner::{
                                             Anchor, Gravity,
                                         };
-                                        use cosmic::iced_runtime::platform_specific::wayland::popup::{
+                                        use cosmic::iced::runtime::platform_specific::wayland::popup::{
                                             SctkPopupSettings, SctkPositioner,
                                         };
                                         use cosmic::iced::Rectangle;
@@ -1902,6 +1904,7 @@ impl Application for App {
                                                             &app.modifiers,
                                                             false, // Paste not used in dialogs
                                                             &app.config.tb_config,
+                                                            &app.flags.config.context_actions,
                                                         )
                                                         .map(Message::TabMessage)
                                                         .map(cosmic::Action::App),
@@ -2025,6 +2028,16 @@ impl Application for App {
                     if self.search_get().is_some() {
                         return widget::text_input::focus(self.search_id.clone());
                     }
+                    if let DialogKind::SaveFile { filename } = &self.flags.kind {
+                        return Task::batch([
+                            widget::text_input::focus(self.filename_id.clone()),
+                            widget::text_input::select_until_last(
+                                self.filename_id.clone(),
+                                filename,
+                                '.',
+                            ),
+                        ]);
+                    }
                     return widget::text_input::focus(self.filename_id.clone());
                 }
             }
@@ -2095,7 +2108,7 @@ impl Application for App {
 
         col = col.push(
             self.tab
-                .view(&self.key_binds, &self.modifiers, false)
+                .view(&self.key_binds, &self.modifiers, false, &[])
                 .map(Message::TabMessage),
         );
 

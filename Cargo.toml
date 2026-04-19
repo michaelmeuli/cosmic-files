@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-files"
-version = "1.0.9"
+version = "1.0.11"
 authors = ["Jeremy Soller <jeremy@system76.com>"]
 edition = "2024"
 license = "GPL-3.0-only"
@@ -14,7 +14,6 @@ icu = { version = "2.1.1", features = ["compiled_data"] }
 cctk = { git = "https://github.com/pop-os/cosmic-protocols", package = "cosmic-client-toolkit", rev = "160b086", optional = true }
 cosmic-mime-apps = { git = "https://github.com/pop-os/cosmic-mime-apps.git", optional = true }
 dirs = "6.0.0"
-env_logger = "0.11"
 gio = { version = "0.21", optional = true }
 glib = { version = "0.21", optional = true }
 glob = "0.3"
@@ -54,7 +53,7 @@ i18n-embed-fl = "0.10"
 rust-embed = "8"
 slotmap = "1.1.1"
 recently-used-xbel = "1.2.0"
-zip = "7"
+zip = "8"
 md-5 = "0.10.6"
 png = "0.18"
 jxl-oxide = { version = "0.12.5", features = ["image"] }
@@ -67,6 +66,11 @@ csv = "1.4.0"
 reqwest = "0.13.2"
 
 filetime = "0.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+thiserror = "2.0.18"
+atomic_float = "1.1.0"
+num_enum = "0.7.6"
 
 # Completion-based IO runtime to enable io_uring / IOCP file IO support.
 [dependencies.compio]
@@ -81,7 +85,6 @@ features = [
     "about",
     "advanced-shaping",
     "autosize",
-    "desktop",
     "multi-window",
     "tokio",
     "winit",
@@ -117,7 +120,7 @@ default = [
     "russh",
 ]
 dbus-config = ["libcosmic/dbus-config"]
-desktop = ["dep:cosmic-mime-apps", "dep:xdg"]
+desktop = ["libcosmic/desktop", "dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
 gvfs = ["dep:gio", "dep:glib"]
 russh = ["dep:async-ssh2-tokio", "dep:russh-sftp"]
@@ -136,6 +139,7 @@ debug = true
 
 [target.'cfg(unix)'.dependencies]
 fork = "0.7"
+uzers = "0.12.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"

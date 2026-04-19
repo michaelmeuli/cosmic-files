@@ -337,6 +337,7 @@ async fn remote_sftp_list(
             metadata,
             hidden,
             location_opt: Some(location),
+            image_dimensions: None,
             mime,
             icon_handle_grid,
             icon_handle_list,
@@ -443,6 +444,7 @@ async fn remote_sftp_list(
             metadata,
             hidden: false,
             location_opt: Some(location),
+            image_dimensions: None,
             mime: "application/json".parse().unwrap(),
             icon_handle_grid: widget::icon::from_name("text-x-generic")
                 .size(sizes.grid())
@@ -584,6 +586,7 @@ async fn remote_sftp_parent(
         metadata: item_metadata,
         hidden,
         location_opt: Some(location),
+        image_dimensions: None,
         mime,
         icon_handle_grid,
         icon_handle_list,
