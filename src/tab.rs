@@ -28,7 +28,6 @@ use cosmic::{
         space,
     },
 };
-use i18n_embed::LanguageLoader;
 use icu::{
     datetime::{
         DateTimeFormatter, DateTimeFormatterPreferences, fieldsets, input::DateTime,
@@ -41,11 +40,9 @@ use jiff_icu::ConvertFrom;
 use mime_guess::{Mime, mime};
 use regex::Regex;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize, de};
+use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
 use std::{
     borrow::Cow,
     cell::Cell,
@@ -87,7 +84,7 @@ use crate::{
     operation::{Controller, OperationError},
     russh::CLIENTS,
     sequencing::{
-        Ab1Channels, RrlSnpCall, SeqData, SeqIdHit, SpeciesHit,
+        Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
         erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,

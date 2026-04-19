@@ -6,11 +6,9 @@ use cosmic::desktop::fde::GenericEntry;
 use mime_guess::Mime;
 use rustc_hash::FxHashMap;
 use std::{
-    fs,
     path::Path,
     process,
     sync::{LazyLock, Mutex},
-    time::Instant,
 };
 
 #[derive(Clone, Debug)]

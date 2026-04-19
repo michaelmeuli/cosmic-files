@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use cosmic::{app::Settings, iced::{Limits, Size}};
-use std::{env, fs, path::PathBuf, process};
+use std::{env, fs, path::PathBuf};
 
 use app::{App, Flags};
 pub mod app;

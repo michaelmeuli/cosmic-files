@@ -21,7 +21,7 @@ use cosmic::{
     cosmic_theme,
     executor,
     iced::{
-        self, Alignment, Event, Length, Rectangle, Size, Subscription,
+        self, Alignment, Event, Length, Size, Subscription,
         clipboard::dnd::DndAction,
         core::SmolStr,
         event,
@@ -63,9 +63,11 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     process,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
     time::{self, Duration, Instant},
 };
+#[cfg(feature = "notify")]
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 use trash::TrashItem;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -86,7 +88,7 @@ use crate::{
     key_bind::key_binds,
     localize::LANGUAGE_SORTER,
     menu,
-    mime_app::{self, MimeApp, MimeAppCache},
+    mime_app::{MimeApp, MimeAppCache},
     mime_icon,
     mounter::{MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage},
     operation::{

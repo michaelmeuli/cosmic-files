@@ -17,7 +17,6 @@ use cosmic::{
     },
     iced_core::widget::operation,
     iced_widget::scrollable::AbsoluteOffset,
-    iced_winit::{self, SurfaceIdWrapper},
     theme,
     widget::{
         self, Operation,
@@ -44,7 +43,7 @@ use crate::{
     app::{
         Action, ContextPage, Message as AppMessage, PreviewItem, PreviewKind, REPLACE_BUTTON_ID,
     },
-    config::{Config, DialogConfig, Favorite, TBConfig, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch},
+    config::{Config, DialogConfig, Favorite, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch},
     fl, home_dir,
     key_bind::key_binds,
     localize::LANGUAGE_SORTER,

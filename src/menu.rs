@@ -14,7 +14,6 @@ use cosmic::{
         responsive_menu_bar, space, text,
     },
 };
-use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
 use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::LazyLock};
 

@@ -7,12 +7,9 @@ use cosmic::widget;
 pub use mime_guess::Mime;
 use rustc_hash::FxHashMap;
 use std::{
-    cmp::Ordering,
     ffi::OsStr,
-    fs, io,
     path::{Path, PathBuf},
     process,
-    time::Instant,
 };
 
 // Supported exec key field codes

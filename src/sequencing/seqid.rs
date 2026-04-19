@@ -1,5 +1,3 @@
-use cosmic::cosmic_theme::palette::white_point::B;
-
 use super::erm41::reverse_complement;
 use super::rrl::{call_rrl_snps, RrlSnpCall};
 
