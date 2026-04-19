@@ -1,7 +1,8 @@
+#[cfg(feature = "desktop")]
+use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use cosmic::{
-    Apply, Element, cosmic_theme,
-    desktop::fde::{DesktopEntry, get_languages_from_env},
-    font,
+    Apply, Element, cosmic_theme, font,
+    iced::core::{mouse::ScrollDelta, widget::tree},
     iced::{
         Alignment, Border, Color, ContentFit, Length, Point, Rectangle, Size, Subscription, Vector,
         advanced::{
@@ -20,7 +21,6 @@ use cosmic::{
         },
         window,
     },
-    iced_core::{mouse::ScrollDelta, widget::tree},
     theme,
     widget::{
         self, DndDestination, DndSource, Id, RcElementWrapper, Widget,
@@ -39,9 +39,10 @@ use icu::{
 use image::{DynamicImage, ImageReader};
 use jiff_icu::ConvertFrom;
 use mime_guess::{Mime, mime};
-use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::{
     borrow::Cow,
     cell::Cell,
@@ -52,7 +53,6 @@ use std::{
     fs::{self, File, Metadata},
     hash::Hash,
     io::{BufRead, BufReader},
-    os::unix::fs::MetadataExt,
     path::{self, Path, PathBuf},
     sync::{Arc, LazyLock, RwLock, atomic},
     time::{Duration, Instant, SystemTime},
@@ -66,7 +66,10 @@ use crate::{
     FxOrderMap,
     app::{Action, PreviewItem, PreviewKind},
     clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
-    config::{DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig, ThumbCfg},
+    config::{
+        ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig,
+        ThumbCfg,
+    },
     dialog::DialogKind,
     fl,
     large_image::{
@@ -81,8 +84,8 @@ use crate::{
     operation::{Controller, OperationError},
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
     thumbnailer::thumbnailer,
+    trash::{Trash, TrashExt},
 };
-use uzers::{get_group_by_gid, get_user_by_uid};
 
 pub const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
 pub const HOVER_DURATION: Duration = Duration::from_millis(1600);
@@ -554,6 +557,12 @@ pub fn fs_kind(_metadata: &Metadata) -> FsKind {
     FsKind::Local
 }
 
+#[cfg(not(feature = "desktop"))]
+fn get_desktop_file_display_name(path: &Path) -> Option<String> {
+    None
+}
+
+#[cfg(feature = "desktop")]
 fn get_desktop_file_display_name(path: &Path) -> Option<String> {
     let locales = get_languages_from_env();
     let entry = match DesktopEntry::from_path(path, Some(&locales)) {
@@ -567,6 +576,12 @@ fn get_desktop_file_display_name(path: &Path) -> Option<String> {
     entry.name(&locales).map(|s| s.into_owned())
 }
 
+#[cfg(not(feature = "desktop"))]
+fn get_desktop_file_icon(path: &Path) -> Option<String> {
+    None
+}
+
+#[cfg(feature = "desktop")]
 fn get_desktop_file_icon(path: &Path) -> Option<String> {
     let entry = match DesktopEntry::from_path::<&str>(path, None) {
         Ok(ok) => ok,
@@ -590,6 +605,7 @@ fn desktop_icon_handle(icon: &str, size: u16) -> widget::icon::Handle {
     }
 }
 
+#[cfg(feature = "desktop")]
 pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
     let locales = get_languages_from_env();
     let entry = match DesktopEntry::from_path(path, Some(&locales)) {
@@ -705,6 +721,9 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
             children_opt,
         },
         hidden,
+        image_dimensions: (!remote && mime.type_() == mime::IMAGE)
+            .then(|| image::image_dimensions(&path).ok())
+            .flatten(),
         location_opt: Some(Location::Path(path)),
         mime,
         icon_handle_grid,
@@ -840,6 +859,7 @@ pub fn item_from_entry(
         },
         hidden,
         location_opt: Some(Location::Path(path)),
+        image_dimensions: None,
         mime,
         icon_handle_grid,
         icon_handle_list,
@@ -893,6 +913,9 @@ pub fn item_from_trash_entry(
         metadata: ItemMetadata::Trash { metadata, entry },
         hidden: false,
         location_opt: None,
+        image_dimensions: (mime.type_() == mime::IMAGE)
+            .then(|| image::image_dimensions(&original_path).ok())
+            .flatten(),
         mime,
         icon_handle_grid,
         icon_handle_list,
@@ -1158,133 +1181,7 @@ pub fn scan_search<F: Fn(SearchItem) -> bool + Sync>(
             }
         }
         SearchLocation::Trash => {
-            trash_helpers::scan_search_trash(callback, &regex);
-        }
-    }
-}
-
-// This config statement is from trash::os_limited, inverted
-#[cfg(not(any(
-    target_os = "windows",
-    all(
-        unix,
-        not(target_os = "macos"),
-        not(target_os = "ios"),
-        not(target_os = "android")
-    )
-)))]
-mod trash_helpers {
-    use super::*;
-
-    pub fn trash_entries() -> usize {
-        0
-    }
-
-    pub fn trash_icon(icon_size: u16) -> widget::icon::Handle {
-        widget::icon::from_name("user-trash")
-            .size(icon_size)
-            .handle()
-    }
-
-    pub fn trash_icon_symbolic(icon_size: u16) -> widget::icon::Handle {
-        widget::icon::from_name("user-trash-symbolic")
-            .size(icon_size)
-            .handle()
-    }
-
-    pub fn scan_trash(_sizes: IconSizes) -> Vec<Item> {
-        log::warn!("viewing trash not supported on this platform");
-        Vec::new()
-    }
-
-    pub fn scan_search_trash<F: Fn(SearchItem) -> bool + Sync>(callback: F, regex: &Regex) {}
-}
-
-// This config statement is from trash::os_limited
-#[cfg(any(
-    target_os = "windows",
-    all(
-        unix,
-        not(target_os = "macos"),
-        not(target_os = "ios"),
-        not(target_os = "android")
-    )
-))]
-pub mod trash_helpers {
-    use super::*;
-
-    pub fn trash_entries() -> usize {
-        match trash::os_limited::list() {
-            Ok(entries) => entries.len(),
-            Err(_err) => 0,
-        }
-    }
-
-    pub fn trash_icon(icon_size: u16) -> widget::icon::Handle {
-        widget::icon::from_name(if trash::os_limited::is_empty().unwrap_or(true) {
-            "user-trash"
-        } else {
-            "user-trash-full"
-        })
-        .size(icon_size)
-        .handle()
-    }
-
-    pub fn trash_icon_symbolic(icon_size: u16) -> widget::icon::Handle {
-        widget::icon::from_name(if trash::os_limited::is_empty().unwrap_or(true) {
-            "user-trash-symbolic"
-        } else {
-            "user-trash-full-symbolic"
-        })
-        .size(icon_size)
-        .handle()
-    }
-
-    pub fn scan_trash(sizes: IconSizes) -> Vec<Item> {
-        let entries = match trash::os_limited::list() {
-            Ok(entry) => entry,
-            Err(err) => {
-                log::warn!("failed to read trash items: {err}");
-                return Vec::new();
-            }
-        };
-        let mut items: Vec<_> = entries
-            .into_iter()
-            .filter_map(|entry| {
-                let metadata = trash::os_limited::metadata(&entry)
-                    .inspect_err(|err| {
-                        log::warn!("failed to get metadata for trash item {entry:?}: {err}")
-                    })
-                    .ok()?;
-                Some(item_from_trash_entry(entry, metadata, sizes))
-            })
-            .collect();
-        items.sort_by(|a, b| match (a.metadata.is_dir(), b.metadata.is_dir()) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => LANGUAGE_SORTER.compare(&a.display_name, &b.display_name),
-        });
-        items
-    }
-
-    pub fn scan_search_trash<F: Fn(SearchItem) -> bool + Sync>(callback: F, regex: &Regex) {
-        let entries = match trash::os_limited::list() {
-            Ok(entries) => entries,
-            Err(err) => {
-                log::warn!("failed to read trash items: {err}");
-                return;
-            }
-        };
-
-        for entry in entries {
-            if let Ok(metadata) = trash::os_limited::metadata(&entry).inspect_err(|err| {
-                log::warn!("failed to get metadata for trash item {entry:?}: {err}")
-            }) {
-                let name = entry.name.to_string_lossy();
-                if regex.is_match(&name) && !callback(SearchItem::Trash(entry, metadata)) {
-                    break;
-                }
-            }
+            Trash::scan_search(callback, &regex);
         }
     }
 }
@@ -1422,15 +1319,15 @@ pub fn scan_desktop(
         let display_name = Item::display_name(&name);
 
         let metadata = ItemMetadata::SimpleDir {
-            entries: trash_helpers::trash_entries() as u64,
+            entries: Trash::entries() as u64,
         };
 
         let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
             (
                 "inode/directory".parse().unwrap(),
-                trash_helpers::trash_icon(sizes.grid()),
-                trash_helpers::trash_icon(sizes.list()),
-                trash_helpers::trash_icon(sizes.list_condensed()),
+                Trash::icon(sizes.grid()),
+                Trash::icon(sizes.list()),
+                Trash::icon(sizes.list_condensed()),
             )
         };
 
@@ -1441,6 +1338,7 @@ pub fn scan_desktop(
             metadata,
             hidden: false,
             location_opt: Some(Location::Trash),
+            image_dimensions: None,
             mime,
             icon_handle_grid,
             icon_handle_list,
@@ -1670,7 +1568,7 @@ impl Location {
                 // Search is done incrementally
                 Vec::new()
             }
-            Self::Trash => trash_helpers::scan_trash(sizes),
+            Self::Trash => Trash::scan(sizes),
             Self::Recents => scan_recents(sizes),
             Self::Network(uri, _, _) => scan_network(uri, sizes),
         };
@@ -1794,6 +1692,7 @@ pub enum Command {
     OpenInNewWindow(PathBuf),
     OpenTrash,
     Preview(PreviewKind),
+    RunContextAction(usize),
     SetOpenWith(Mime, String),
     SetPermissions(PathBuf, u32),
     SetMultiplePermissions(Vec<(PathBuf, u32)>),
@@ -1852,6 +1751,7 @@ pub enum Message {
     SelectFirst,
     SelectLast,
     SetOpenWith(Mime, String),
+    RunContextAction(usize),
     SetPermissions(PathBuf, u32),
     ShiftPermissions(Option<(PathBuf, u32)>, u32, u32),
     SetSort(HeadingOptions, bool),
@@ -2314,6 +2214,7 @@ pub struct Item {
     pub hidden: bool,
     pub location_opt: Option<Location>,
     pub mime: Mime,
+    pub image_dimensions: Option<(u32, u32)>,
     pub icon_handle_grid: widget::icon::Handle,
     pub icon_handle_list: widget::icon::Handle,
     pub icon_handle_list_condensed: widget::icon::Handle,
@@ -2528,7 +2429,7 @@ impl Item {
 
                 let mode = metadata.mode();
 
-                let user_name = get_user_by_uid(metadata.uid())
+                let user_name = uzers::get_user_by_uid(metadata.uid())
                     .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
                     .unwrap_or_default();
                 let user_path = path.clone();
@@ -2551,7 +2452,7 @@ impl Item {
                         )),
                 );
 
-                let group_name = get_group_by_gid(metadata.gid())
+                let group_name = uzers::get_group_by_gid(metadata.gid())
                     .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
                     .unwrap_or_default();
                 let group_path = path.clone();
@@ -3012,7 +2913,7 @@ impl Tab {
     /// Returns true if an item was selected.
     pub fn select_by_prefix(&mut self, prefix: &str) -> bool {
         let prefix_lower = prefix.to_lowercase();
-        self.select_focus = None;
+        let focus = self.select_focus.take();
 
         if let Some(ref mut items) = self.items_opt {
             // First, deselect all items
@@ -3020,16 +2921,102 @@ impl Tab {
                 item.selected = false;
             }
 
-            // Find first matching item
-            for (i, item) in items.iter_mut().enumerate() {
-                if item.name.to_lowercase().starts_with(&prefix_lower) {
-                    item.selected = true;
-                    self.select_focus = Some(i);
-                    return true;
-                }
+            // Determine the start index of the search. When the index is before the currently focused item, it will be
+            // considered first, otherwise last. Consider the focused item last when only a single character has been
+            // typed, so we eagerly switch focus on the first character and stay on the same item as long as the prefix
+            // matches.
+            let single_char = prefix_lower.chars().count() == 1;
+            let start = if single_char {
+                Self::index_after_focus(focus, self.sort_direction)
+            } else {
+                Self::index_before_focus(focus, self.sort_direction)
+            };
+            self.select_focus = Self::select_first_prefix_from_index(
+                &prefix_lower,
+                items,
+                start,
+                self.sort_direction,
+            );
+
+            if self.select_focus.is_some() || single_char {
+                return self.select_focus.is_some();
             }
+
+            let mut chars = prefix_lower.chars();
+            let Some(first) = chars.next() else {
+                log::error!("search term is empty");
+                return self.select_focus.is_some();
+            };
+
+            // Check if all entered characters are the same
+            if !chars.all(|c| c == first) {
+                return self.select_focus.is_some();
+            }
+
+            // Search for a single character when all entered characters are the same.
+            // This allows cycling through items starting with the same character by repeatedly pressing a key.
+            let start = Self::index_after_focus(focus, self.sort_direction);
+            self.select_focus = Self::select_first_prefix_from_index(
+                &first.to_string(),
+                items,
+                start,
+                self.sort_direction,
+            );
+
+            return self.select_focus.is_some();
         }
         false
+    }
+
+    fn index_before_focus(current_focus: Option<usize>, forward: bool) -> usize {
+        current_focus.map_or(0, |i| if forward { i } else { i + 1 })
+    }
+
+    fn index_after_focus(current_focus: Option<usize>, forward: bool) -> usize {
+        current_focus.map_or(0, |i| if forward { i + 1 } else { i })
+    }
+
+    fn select_first_prefix_from_index(
+        prefix_lower: &str,
+        items: &mut [Item],
+        start: usize,
+        forward: bool,
+    ) -> Option<usize> {
+        // Order the search item so they begin at `start`.
+        let Some((until, after)) = items.split_at_mut_checked(start) else {
+            log::error!(
+                "invalid start index {start} for items of length {}",
+                items.len()
+            );
+            return None;
+        };
+        let search_items = after
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| (i + start, item))
+            .chain(until.into_iter().enumerate());
+
+        if forward {
+            Self::select_first_prefix_match(prefix_lower, search_items)
+        } else {
+            Self::select_first_prefix_match(prefix_lower, search_items.rev())
+        }
+    }
+
+    /// Selects the first item in the given iterator whose name starts with the given prefix.
+    ///
+    /// The `prefix` must be lowercase.
+    fn select_first_prefix_match<'a>(
+        prefix: &str,
+        items: impl Iterator<Item = (usize, &'a mut Item)>,
+    ) -> Option<usize> {
+        for (i, item) in items {
+            if item.name.to_lowercase().starts_with(&prefix) {
+                item.selected = true;
+                return Some(i);
+            }
+        }
+        None
     }
 
     pub fn select_paths(&mut self, paths: Vec<PathBuf>) {
@@ -3565,6 +3552,11 @@ impl Tab {
                 self.context_menu = None;
 
                 commands.push(Command::Action(action));
+            }
+            Message::RunContextAction(action) => {
+                self.context_menu = None;
+
+                commands.push(Command::RunContextAction(action));
             }
             Message::ContextMenu(point_opt, _) => {
                 self.edit_location = None;
@@ -4348,6 +4340,7 @@ impl Tab {
                     for item in self.items_opt().map_or(Vec::new(), |items| {
                         items.iter().filter(|item| item.selected).collect()
                     }) {
+                        #[cfg(unix)]
                         if let (Some(path), Some(mode)) = (
                             item.path_opt(),
                             item.file_metadata()
@@ -6083,6 +6076,7 @@ impl Tab {
         modifiers: &'a Modifiers,
         size: Size,
         clipboard_paste_available: bool,
+        context_actions: &'a [ContextActionPreset],
     ) -> Element<'a, Message> {
         // Update cached size
         self.size_opt.set(Some(size));
@@ -6170,8 +6164,13 @@ impl Tab {
         if let Some(point) = self.context_menu
             && (!cfg!(feature = "wayland") || !crate::is_wayland())
         {
-            let context_menu =
-                menu::context_menu(self, key_binds, modifiers, clipboard_paste_available);
+            let context_menu = menu::context_menu(
+                self,
+                key_binds,
+                modifiers,
+                clipboard_paste_available,
+                context_actions,
+            );
             popover = popover
                 .popup(context_menu)
                 .position(widget::popover::Position::Point(point));
@@ -6244,7 +6243,7 @@ impl Tab {
             tab_view = tab_view.style(|t| {
                 let mut a = widget::container::Style::default();
                 let c = t.cosmic();
-                a.border = cosmic::iced_core::Border {
+                a.border = cosmic::iced::core::Border {
                     color: (c.accent_color()).into(),
                     width: 1.,
                     radius: c.radius_0().into(),
@@ -6359,20 +6358,23 @@ impl Tab {
                 } else {
                     total_size = total_size.saturating_add(metadata.len());
                 }
-                let mode = metadata.mode();
-                user_name.insert(
-                    get_user_by_uid(metadata.uid())
-                        .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
-                        .unwrap_or_default(),
-                );
-                mode_user.insert(get_mode_part(mode, MODE_SHIFT_USER));
-                group_name.insert(
-                    get_group_by_gid(metadata.gid())
-                        .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
-                        .unwrap_or_default(),
-                );
-                mode_group.insert(get_mode_part(mode, MODE_SHIFT_GROUP));
-                mode_other.insert(get_mode_part(mode, MODE_SHIFT_OTHER));
+                #[cfg(unix)]
+                {
+                    let mode = metadata.mode();
+                    user_name.insert(
+                        uzers::get_user_by_uid(metadata.uid())
+                            .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
+                            .unwrap_or_default(),
+                    );
+                    mode_user.insert(get_mode_part(mode, MODE_SHIFT_USER));
+                    group_name.insert(
+                        uzers::get_group_by_gid(metadata.gid())
+                            .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
+                            .unwrap_or_default(),
+                    );
+                    mode_group.insert(get_mode_part(mode, MODE_SHIFT_GROUP));
+                    mode_other.insert(get_mode_part(mode, MODE_SHIFT_OTHER));
+                }
             }
         }
         let mut mime_types: Vec<(String, u64)> = mime_type_counts.into_iter().collect();
@@ -6536,10 +6538,17 @@ impl Tab {
         key_binds: &'a HashMap<KeyBind, Action>,
         modifiers: &'a Modifiers,
         clipboard_paste_available: bool,
+        context_actions: &'a [ContextActionPreset],
     ) -> Element<'a, Message> {
         widget::responsive(move |size| {
             widget::id_container(
-                self.view_responsive(key_binds, modifiers, size, clipboard_paste_available),
+                self.view_responsive(
+                    key_binds,
+                    modifiers,
+                    size,
+                    clipboard_paste_available,
+                    context_actions,
+                ),
                 Id::new(format!(
                     "tab-{}-{}",
                     self.scrollable_id, self.location_title
@@ -6604,13 +6613,13 @@ impl Tab {
 
                     // Determine effective memory budget based on image size
                     let (effective_max_mb, effective_jobs) = if mime.type_() == mime::IMAGE {
-                        match image::image_dimensions(&path) {
-                            Ok((width, height)) => {
+                        match item.image_dimensions {
+                            Some((width, height)) => {
                                 let (_use_dedicated, eff_mb, eff_jobs) =
                                     should_use_dedicated_worker(width, height, max_mb, max_jobs);
                                 (eff_mb, eff_jobs)
                             }
-                            Err(_) => (max_mb, max_jobs),
+                            None => (max_mb, max_jobs),
                         }
                     } else {
                         (max_mb, max_jobs)
@@ -6653,6 +6662,10 @@ impl Tab {
                             stream::channel(
                                 1,
                                 move |mut output: futures::channel::mpsc::Sender<_>| async move {
+                                    while crate::operation::is_actively_writing_to(&path) {
+                                        crate::operation::actively_writing_tick().await;
+                                    }
+
                                     let message = {
                                         let path = path.clone();
 
@@ -6837,9 +6850,8 @@ impl Tab {
                                 .await
                                 .unwrap();
 
-                            let output = Arc::new(tokio::sync::Mutex::new(output));
+                            let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(true);
                             {
-                                let output = output.clone();
                                 tokio::task::spawn_blocking(move || {
                                     scan_search(
                                         &search_location,
@@ -6867,14 +6879,7 @@ impl Tab {
                                                         true
                                                     } else {
                                                         // Wake up update method
-                                                        futures::executor::block_on(async {
-                                                            output
-                                                                .lock()
-                                                                .await
-                                                                .send(Message::SearchReady(false))
-                                                                .await
-                                                        })
-                                                        .is_ok()
+                                                        watch_tx.send(false).is_ok()
                                                     }
                                                 }
                                                 Err(_) => false,
@@ -6887,13 +6892,16 @@ impl Tab {
                                         search_location,
                                         start.elapsed(),
                                     );
-                                })
-                                .await
-                                .unwrap();
+                                });
+                            }
+
+                            while watch_rx.changed().await.is_ok() {
+                                let is_ready = *watch_rx.borrow_and_update();
+                                let _ = output.send(Message::SearchReady(is_ready)).await;
                             }
 
                             // Send final ready
-                            let _ = output.lock().await.send(Message::SearchReady(true)).await;
+                            let _ = output.send(Message::SearchReady(true)).await;
 
                             std::future::pending().await
                         },
@@ -6992,7 +7000,7 @@ pub fn respond_to_scroll_direction(delta: ScrollDelta, modifiers: &Modifiers) ->
 fn text_editor_class(
     theme: &cosmic::Theme,
     status: cosmic::widget::text_editor::Status,
-) -> cosmic::iced_widget::text_editor::Style {
+) -> cosmic::iced::widget::text_editor::Style {
     let cosmic = theme.cosmic();
     let container = theme.current_container();
 
@@ -7005,9 +7013,9 @@ fn text_editor_class(
     let placeholder = placeholder.into();
 
     match status {
-        cosmic::iced_widget::text_editor::Status::Active
-        | cosmic::iced_widget::text_editor::Status::Disabled => {
-            cosmic::iced_widget::text_editor::Style {
+        cosmic::iced::widget::text_editor::Status::Active
+        | cosmic::iced::widget::text_editor::Status::Disabled => {
+            cosmic::iced::widget::text_editor::Style {
                 background: background.into(),
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_m.into(),
@@ -7019,9 +7027,9 @@ fn text_editor_class(
                 selection,
             }
         }
-        cosmic::iced_widget::text_editor::Status::Hovered
-        | cosmic::iced_widget::text_editor::Status::Focused { .. } => {
-            cosmic::iced_widget::text_editor::Style {
+        cosmic::iced::widget::text_editor::Status::Hovered
+        | cosmic::iced::widget::text_editor::Status::Focused { .. } => {
+            cosmic::iced::widget::text_editor::Style {
                 background: background.into(),
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_m.into(),
@@ -7040,7 +7048,7 @@ fn text_editor_class(
 mod tests {
     use std::{fs, io, path::PathBuf};
 
-    use cosmic::{iced::mouse::ScrollDelta, iced_runtime::keyboard::Modifiers, widget};
+    use cosmic::{iced::mouse::ScrollDelta, iced::runtime::keyboard::Modifiers, widget};
     use log::{debug, trace};
     use tempfile::TempDir;
     use test_log::test;
