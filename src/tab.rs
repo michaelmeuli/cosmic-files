@@ -3701,13 +3701,10 @@ impl Item {
                 "23S rRNA macrolide resistance SNPs (rrl):",
             ));
             let best = &hits[0];
-            let mut last_snp_line = String::new();
             for snp in &best.rrl_snp_calls {
-                let line = format!("  pos {}: {}", snp.ref_pos + 1, snp.call_tag());
-                if line != last_snp_line {
-                    details = details.push(widget::text::body(line.clone()));
-                    last_snp_line = line;
-                }
+                details = details.push(widget::text::body(
+                    format!("  pos {}: {}", snp.ref_pos + 1, snp.call_tag()),
+                ));
             }
             details = details.push(widget::text::body(""));
 

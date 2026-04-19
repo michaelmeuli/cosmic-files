@@ -238,35 +238,35 @@ pub struct RrlSnpCall {
     pub query_base: Option<u8>,
     /// Wild-type base at this position.
     pub wt_base: u8,
-    /// Resistance-conferring base.
-    pub resistance_base: u8,
+    /// All resistance-conferring bases at this position (sorted).
+    pub resistance_bases: Vec<u8>,
 }
 
 impl RrlSnpCall {
-    /// "wt", "NA", or the observed mutant base as a char string.
+    /// "NA", "<base> (wt)", "<base> (resistance)", or "<base> (mutation)".
     pub fn call_tag(&self) -> String {
         match self.query_base {
             None => "NA".to_string(),
             Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
-            Some(b) if b == self.resistance_base => format!("{} (resistance)", self.resistance_base as char),
+            Some(b) if self.resistance_bases.contains(&b) => format!("{} (resistance)", b as char),
             Some(b) => format!("{} (mutation)", b as char),
         }
     }
 }
 
 /// Compute a call for every rrl resistance SNP position.
-/// Returns one entry per position; `query_base` is `None` when not covered.
+/// Returns one entry per unique position; `query_base` is `None` when not covered.
 fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
     RRL_RESISTANCE_SNPS
         .iter()
-        .map(|&(ref_pos, wt_base, resistance_base)| {
+        .map(|(&ref_pos, (wt_base, resistance_bases))| {
             let query_pos = ref_pos as isize - alignment_offset;
             let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
                 Some(query[query_pos as usize].to_ascii_uppercase())
             } else {
                 None
             };
-            RrlSnpCall { ref_pos, query_base, wt_base, resistance_base }
+            RrlSnpCall { ref_pos, query_base, wt_base: *wt_base, resistance_bases: resistance_bases.clone() }
         })
         .collect()
 }
