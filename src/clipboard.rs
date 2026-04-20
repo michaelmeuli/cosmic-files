@@ -132,7 +132,6 @@ impl TryFrom<(Vec<u8>, String)> for ClipboardPaste {
         match mime.as_str() {
             "text/uri-list" => {
                 let text = str::from_utf8(&data)?;
-                let lines = text.lines();
                 
                 for line in text.lines() {
                     let url = Url::parse(line)?;

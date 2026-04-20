@@ -27,21 +27,13 @@ impl std::fmt::Display for Erm41Position28 {
     }
 }
 
-/// Find position 28 in a raw read by scanning for the conserved left anchor.
-/// Returns the base at position 28 if the anchor is found.
 pub fn call_position28(read: &[u8]) -> Option<u8> {
     let anchor_len = ERM41_ANCHOR_L.len();
-
-    // Slide window looking for left anchor
     let hit = read
         .windows(anchor_len)
         .position(|w| w.eq_ignore_ascii_case(ERM41_ANCHOR_L))?;
-
-    // Position 28 is the base immediately after the left anchor
     let pos28 = hit + anchor_len;
     let base = read.get(pos28).copied()?.to_ascii_uppercase();
-
-    // Validate right anchor is also present for confidence
     let right_start = pos28 + 1;
     let right_end   = right_start + ERM41_ANCHOR_R.len();
     if right_end > read.len() {
@@ -52,7 +44,6 @@ pub fn call_position28(read: &[u8]) -> Option<u8> {
     if !right_ok {
         return None;
     }
-
     Some(base)
 }
 

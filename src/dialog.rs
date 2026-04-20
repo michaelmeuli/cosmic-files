@@ -6,7 +6,6 @@ use cosmic::{
     app::{Core, Task, context_drawer, cosmic::Cosmic},
     cosmic_config, cosmic_theme, executor,
     iced::core::widget::operation,
-    iced::platform_specific::shell::{self as iced_winit, SurfaceIdWrapper},
     iced::widget::scrollable::AbsoluteOffset,
     iced::{
         self, Alignment, Event, Length, Size, Subscription,
@@ -25,6 +24,8 @@ use cosmic::{
         segmented_button,
     },
 };
+#[cfg(feature = "wayland")]
+use cosmic::iced::platform_specific::shell::{self as iced_winit, SurfaceIdWrapper};
 use mime_guess::{Mime, mime};
 use notify_debouncer_full::{
     DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,

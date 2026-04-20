@@ -8592,30 +8592,4 @@ pub(crate) mod test_utils {
             path.display()
         );
     }
-
-    /// Assert that tab's items are equal to a path's entries.
-    pub fn assert_eq_tab_path_contents(tab: &Tab, path: &Path) {
-        let Some(tab_path) = tab.location.path_opt() else {
-            panic!("Expected tab's location to be a path");
-        };
-
-        // Tab items are sorted so paths from read_dir must be too
-        let entries = read_dir_sorted(path).expect("should be able to read paths from temp dir");
-
-        // Check lengths.
-        // `items_opt` is optional and the directory at `path` may have zero entries
-        // Therefore, this doesn't panic if `items_opt` is None
-        let items_len = tab.items_opt().map(Vec::len).unwrap_or_default();
-        assert_eq!(entries.len(), items_len);
-
-        assert!(
-            entries
-                .into_iter()
-                .zip(tab.items_opt().map_or([].as_slice(), Vec::as_slice))
-                .all(|(a, b)| eq_path_item(&a, b)),
-            "Path ({}) and Tab path ({}) don't have equal contents",
-            path.display(),
-            tab_path.display()
-        );
-    }
 }
