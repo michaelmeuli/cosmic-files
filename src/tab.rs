@@ -3333,12 +3333,7 @@ impl Item {
         let mut column = widget::column::with_capacity(4).spacing(space_m);
         column = column.push(widget::text::heading(self.name.clone()));
         let call = self.metadata.erm41position28_call();
-        let label = match &call {
-            Erm41Position28::C28 => "erm(41) C28",
-            Erm41Position28::T28 => "erm(41) T28",
-            _ => "erm(41) Undetermined",
-        };
-        column = column.push(widget::text::heading(label));
+        column = column.push(widget::text::heading(format!("erm(41) {}", call)));
 
         let mut details = widget::column::with_capacity(5).spacing(space_xxxs);
         if let Some(chrom) = self.metadata.ab1_chromatogram() {
