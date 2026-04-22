@@ -1,3 +1,10 @@
 {
     "editor.inlayHints.enabled": "offUnlessPressed",
+    "workbench.colorCustomizations": {
+        
+        "editor.wordHighlightBackground": "#ff000055",
+        "editor.wordHighlightBorder": "#ff0000ff",
+        "editor.wordHighlightStrongBackground": "#ff000055",
+        "editor.wordHighlightStrongBorder": "#ff0000ff"
+    }
 }

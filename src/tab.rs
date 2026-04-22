@@ -85,7 +85,8 @@ use crate::{
     russh::CLIENTS,
     sequencing::{
         Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
-        erm41::{Erm41Position28, erm41_from_single_read, parse_ab1_chromatogram},
+        erm41::{Erm41Position28, erm41_from_single_read},
+        parse_ab1_chromatogram,
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
         seqid::{
@@ -3340,7 +3341,7 @@ impl Item {
             details = details.push(widget::text::body(
                 "Shown are bases 19-39, with position 28 in bold.",
             ));
-            if chrom.is_reverse {
+            if chrom.erm41.is_some_and(|e| e.is_reverse) {
                 details = details.push(widget::text::body("reverse complement"));
             }
             details = details.push(widget::text::body(""));
@@ -3671,7 +3672,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         use widget::canvas::{Frame, Path, Stroke};
 
         let chrom = self.chrom;
-        let is_rev = chrom.is_reverse;
+        let is_rev = chrom.erm41.is_some_and(|e| e.is_reverse);
 
         // Standard Sanger palette: colour by the base the dye represents.
         // For a reverse read the channel physically contains the complement base,
@@ -3702,8 +3703,8 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         if total_scans == 0 {
             return vec![];
         }
-        let (scan_start, scan_end) = chrom
-            .display_window
+        let (scan_start, scan_end) = chrom.erm41
+            .map(|e| e.window)
             .unwrap_or((0, total_scans.saturating_sub(1)));
         let scan_end = scan_end.min(total_scans.saturating_sub(1));
         let window_len = (scan_end + 1).saturating_sub(scan_start).max(1);
@@ -3790,9 +3791,8 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         }
 
         // Scan index of position 28 — used to select the bold font below.
-        let pos28_scan = chrom
-            .pos28_base_idx
-            .and_then(|idx| chrom.peak_locs.get(idx).copied())
+        let pos28_scan = chrom.erm41
+            .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx).copied())
             .map(|v| v as usize);
 
         // Draw base call letters only for bases whose peak falls in the window.
