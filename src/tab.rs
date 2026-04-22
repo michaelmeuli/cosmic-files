@@ -3345,7 +3345,15 @@ impl Item {
                 details = details.push(widget::text::body("reverse complement"));
             }
             details = details.push(widget::text::body(""));
-            let canvas = widget::Canvas::new(ChromatogramProgram { chrom })
+            let canvas = widget::Canvas::new(ChromatogramProgram {
+                is_reverse: chrom.erm41.is_some_and(|e| e.is_reverse),
+                display_window: chrom.erm41.map(|e| e.window),
+                highlighted_scans: chrom.erm41
+                    .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx).copied())
+                    .map(|v| vec![v as usize])
+                    .unwrap_or_default(),
+                chrom,
+            })
                 .width(Length::Fill)
                 .height(Length::Fixed(200.0));
             details = details.push(canvas);
@@ -3653,6 +3661,9 @@ impl Item {
 /// Base call letters are drawn at their peak scan positions along the top.
 struct ChromatogramProgram<'a> {
     chrom: &'a crate::sequencing::Ab1Channels,
+    is_reverse: bool,
+    display_window: Option<(usize, usize)>,
+    highlighted_scans: Vec<usize>,
 }
 
 impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
@@ -3672,7 +3683,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         use widget::canvas::{Frame, Path, Stroke};
 
         let chrom = self.chrom;
-        let is_rev = chrom.erm41.is_some_and(|e| e.is_reverse);
+        let is_rev = self.is_reverse;
 
         // Standard Sanger palette: colour by the base the dye represents.
         // For a reverse read the channel physically contains the complement base,
@@ -3703,8 +3714,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         if total_scans == 0 {
             return vec![];
         }
-        let (scan_start, scan_end) = chrom.erm41
-            .map(|e| e.window)
+        let (scan_start, scan_end) = self.display_window
             .unwrap_or((0, total_scans.saturating_sub(1)));
         let scan_end = scan_end.min(total_scans.saturating_sub(1));
         let window_len = (scan_end + 1).saturating_sub(scan_start).max(1);
@@ -3790,15 +3800,10 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             frame.stroke(&path, Stroke::default().with_color(color).with_width(1.2));
         }
 
-        // Scan index of position 28 — used to select the bold font below.
-        let pos28_scan = chrom.erm41
-            .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx).copied())
-            .map(|v| v as usize);
-
         // Draw base call letters only for bases whose peak falls in the window.
         // For reverse reads show the complement letter so the label matches the
         // plus-strand base at each position.
-        // Position 28 is drawn in bold.
+        // Highlighted scan positions are drawn in bold.
         for (base, &peak) in chrom.bases.iter().zip(chrom.peak_locs.iter()) {
             let scan = peak as usize;
             if scan < scan_start || scan > scan_end {
@@ -3807,13 +3812,13 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             let display_base = if is_rev { dna_complement(*base) } else { *base };
             let x = scan_to_x(scan);
             let color = base_color(display_base);
-            let is_pos28 = pos28_scan == Some(scan);
+            let is_highlighted = self.highlighted_scans.contains(&scan);
             frame.fill_text(widget::canvas::Text {
                 content: String::from(display_base as char),
                 position: Point { x, y: 2.0 },
                 max_width: f32::INFINITY,
                 color,
-                size: cosmic::iced::Pixels(if is_pos28 { 20.0 } else { 11.0 }),
+                size: cosmic::iced::Pixels(if is_highlighted { 20.0 } else { 11.0 }),
                 line_height: cosmic::iced::advanced::text::LineHeight::default(),
                 font: cosmic::iced::Font::default(),
                 align_x: cosmic::iced::advanced::text::Alignment::Center,
