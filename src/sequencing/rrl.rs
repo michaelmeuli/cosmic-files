@@ -3,12 +3,68 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use super::reverse_complement;
+use super::seqid::{SeqIdHit, best_alignment, parse_fasta_seq};
 
-/// Conserved left flank — ends immediately before position 28
+pub(super) const REF_MAB_R5052: &str = include_str!("../../res/sequences/MAB_r5052.fasta");
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
-
-/// Conserved right flank — starts immediately after position 28  
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
+
+#[derive(Debug, Deserialize, Clone)]
+struct AbscessusResistanceVariants {
+    #[serde(rename = "Gene")]
+    gene: String,
+    #[serde(rename = "Mutation")]
+    mutation: String,
+    #[serde(rename = "Drug")]
+    drug: String,
+    #[serde(rename = "Confers")]
+    confers: String,
+}
+
+
+/// Maps each 0-based ref_pos to `(wt_base, alt_to_drugs)` for rrl entries in
+/// abscessus_resistance_variants.csv. Parsed from HGVS strings like "n.2270A>C".
+/// Multiple alts at the same position (e.g. A>C, A>G, A>T) are grouped under one key.
+pub static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
+    LazyLock::new(|| {
+        let mut rdr = csv::Reader::from_reader(
+            include_str!("../../res/abscessus_resistance_variants.csv").as_bytes(),
+        );
+        let mut map: BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)> = BTreeMap::new();
+        for row in rdr.deserialize::<AbscessusResistanceVariants>() {
+            let row = row.unwrap();
+            if row.gene.trim() != "rrl" {
+                continue;
+            }
+            if row.confers.trim() != "resistance" {
+                continue;
+            }
+            let drug = row.drug.trim();
+            let m = row.mutation.trim();
+            if let Some(rest) = m.strip_prefix("n.") {
+                let digits_end =
+                    rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                if let Ok(pos1) = rest[..digits_end].parse::<usize>() {
+                    let after_pos = &rest[digits_end..];
+                    if let (Some(wt), Some(alt)) = (
+                        after_pos.bytes().next(),
+                        after_pos
+                            .strip_prefix(|_: char| true)
+                            .and_then(|s| s.strip_prefix('>'))
+                            .and_then(|s| s.bytes().next()),
+                    ) {
+                        let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
+                        let drugs = entry.1.entry(alt).or_default();
+                        if !drugs.contains(&drug.to_string()) {
+                            drugs.push(drug.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        map
+    });
+
 
 /// A single macrolide-resistance SNP position in the M. abscessus 23S rRNA (rrl).
 /// `query_base` is `None` when the position is not covered by the read.
@@ -56,57 +112,34 @@ pub fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
         .collect()
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct AbscessusResistanceVariants {
-    #[serde(rename = "Gene")]
-    gene: String,
-    #[serde(rename = "Mutation")]
-    mutation: String,
-    #[serde(rename = "Drug")]
-    drug: String,
-    #[serde(rename = "Confers")]
-    confers: String,
-}
 
-/// Maps each 0-based ref_pos to `(wt_base, alt_to_drugs)` for rrl entries in
-/// abscessus_resistance_variants.csv. Parsed from HGVS strings like "n.2270A>C".
-/// Multiple alts at the same position (e.g. A>C, A>G, A>T) are grouped under one key.
-pub static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
-    LazyLock::new(|| {
-        let mut rdr = csv::Reader::from_reader(
-            include_str!("../../res/abscessus_resistance_variants.csv").as_bytes(),
-        );
-        let mut map: BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)> = BTreeMap::new();
-        for row in rdr.deserialize::<AbscessusResistanceVariants>() {
-            let row = row.unwrap();
-            if row.gene.trim() != "rrl" {
-                continue;
-            }
-            if row.confers.trim() != "resistance" {
-                continue;
-            }
-            let drug = row.drug.trim();
-            let m = row.mutation.trim();
-            if let Some(rest) = m.strip_prefix("n.") {
-                let digits_end =
-                    rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-                if let Ok(pos1) = rest[..digits_end].parse::<usize>() {
-                    let after_pos = &rest[digits_end..];
-                    if let (Some(wt), Some(alt)) = (
-                        after_pos.bytes().next(),
-                        after_pos
-                            .strip_prefix(|_: char| true)
-                            .and_then(|s| s.strip_prefix('>'))
-                            .and_then(|s| s.bytes().next()),
-                    ) {
-                        let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
-                        let drugs = entry.1.entry(alt).or_default();
-                        if !drugs.contains(&drug.to_string()) {
-                            drugs.push(drug.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        map
-    });
+/// Align `query` against the M. abscessus rrl (23S rRNA) reference (MAB_r5052) and return
+/// the single hit with resistance SNP calls for all positions from abscessus_resistance_variants.csv
+/// (Gene == rrl).
+pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
+    let refseq = parse_fasta_seq(REF_MAB_R5052);
+    let rc = reverse_complement(query);
+
+    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+        (rev_id, true, rc.as_slice(), rev_off)
+    } else {
+        (fwd_id, false, query, fwd_off)
+    };
+
+    let rrl_snp_calls = call_rrl_snps(aligned_query, offset);
+
+    vec![SeqIdHit {
+        accession: "MAB_r5052".to_string(),
+        description: "M. abscessus".to_string(),
+        identity,
+        is_reverse,
+        kansasii_gastri_snp_calls: vec![],
+        marinum_ulcerans_snp_calls: vec![],
+        rrl_snp_calls,
+        aligned_query: aligned_query.to_vec(),
+        alignment_offset: offset,
+        erm41position28_opt: None,
+    }]
+}

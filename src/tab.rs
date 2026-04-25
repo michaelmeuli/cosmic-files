@@ -89,8 +89,9 @@ use crate::{
         parse_ab1_chromatogram,
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
+        rrl::identify_sequence_23s_ntm,
         seqid::{
-            identify_hsp65_sequence, identify_sequence_23s_ntm, identify_sequence_erm41,
+            identify_hsp65_sequence, identify_sequence_erm41,
             identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
             identify_species_rpob,
         },

@@ -1,6 +1,6 @@
 use super::erm41::{erm41_from_single_read, Erm41Position28};
 use super::reverse_complement;
-use super::rrl::{call_rrl_snps, RrlSnpCall};
+use super::rrl::RrlSnpCall;
 
 /// Best-hit species identification from aligning against a multi-FASTA reference database.
 #[derive(Clone, Debug)]
@@ -307,7 +307,7 @@ const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fast
 const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
 const REF_MAB2297: &str = include_str!("../../res/sequences/erm41/MAB_2297.fasta");
 const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
-const REF_MAB_R5052: &str = include_str!("../../res/sequences/MAB_r5052.fasta");
+use super::rrl::REF_MAB_R5052;
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
 fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
@@ -365,7 +365,7 @@ fn kmer_hash(kmer: &[u8]) -> u64 {
 /// by counting identical bases over the full window; the highest-scoring diagonal wins.
 /// When no seeds are found (sequences shorter than the word size, or zero k-mer overlap)
 /// every valid diagonal is evaluated, preserving correctness.
-fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
+pub(super) fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
     const WORD_SIZE: usize = 11;
 
     if query.is_empty() || reference.is_empty() {
@@ -481,7 +481,7 @@ fn call_marinum_ulcerans_snps(
 }
 
 /// Parse a FASTA string, returning just the sequence bytes (ignores header).
-fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
+pub(super) fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
     fasta
         .lines()
         .filter(|l| !l.starts_with('>'))
@@ -597,36 +597,6 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     }]
 }
 
-/// Align `query` against the M. abscessus rrl (23S rRNA) reference (MAB_r5052) and return
-/// the single hit with resistance SNP calls for all positions from abscessus_resistance_variants.csv
-/// (Gene == rrl).
-pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
-    let refseq = parse_fasta_seq(REF_MAB_R5052);
-    let rc = reverse_complement(query);
-
-    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-        (rev_id, true, rc.as_slice(), rev_off)
-    } else {
-        (fwd_id, false, query, fwd_off)
-    };
-
-    let rrl_snp_calls = call_rrl_snps(aligned_query, offset);
-
-    vec![SeqIdHit {
-        accession: "MAB_r5052".to_string(),
-        description: "M. abscessus".to_string(),
-        identity,
-        is_reverse,
-        kansasii_gastri_snp_calls: vec![],
-        marinum_ulcerans_snp_calls: vec![],
-        rrl_snp_calls,
-        aligned_query: aligned_query.to_vec(),
-        alignment_offset: offset,
-        erm41position28_opt: None,
-    }]
-}
 
 /// Parse a simple multi-FASTA (`>accession description\nSEQ...`) into
 /// `(accession, "Genus species", sequence)` tuples.
