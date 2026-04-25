@@ -4,11 +4,12 @@ Forked from [cosmic-files](https://github.com/pop-os/cosmic-files.git)
 
 For now, SSH connections must be configured using a private and public key pair (password authentication is not supported).
 
-## Databases
-
 
 
 ## References
+IMM:  
+[Mycobacteroides abscessus subsp. bolletii BD, whole genome shotgun sequencing project](https://www.ncbi.nlm.nih.gov/nucleotide/AHAS00000000)  
+  
 hsp65:  
 [Web-accessible database of hsp65 sequences from Mycobacterium reference strains.](https://europepmc.org/article/pmc/pmc3122750)  
 

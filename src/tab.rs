@@ -85,7 +85,7 @@ use crate::{
     russh::CLIENTS,
     sequencing::{
         Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
-        erm41::{Erm41Position28, erm41_from_single_read},
+        erm41::Erm41Position28,
         parse_ab1_chromatogram,
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
@@ -902,7 +902,6 @@ pub fn item_from_entry(
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
-            let erm41position28_opt = ab1_seq.as_ref().map(|seq| erm41_from_single_read(seq));
             let (seq_id, species_hit_opt, trimmed_length, trimmed_avg_quality) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let trimmed: &[u8] = match &ab1_qual {
@@ -950,7 +949,6 @@ pub fn item_from_entry(
                 };
             let chromatogram = parse_ab1_chromatogram(&bytes);
             SeqData {
-                erm41position28_opt,
                 chromatogram,
                 seq_id,
                 species_hit_opt,
@@ -2314,7 +2312,7 @@ impl ItemMetadata {
         match self {
             Self::Path { sequence, .. } => sequence
                 .as_ref()
-                .and_then(|s| s.erm41position28_opt.clone())
+                .and_then(|s| s.seq_id.first()?.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             _ => Erm41Position28::Undetermined,
         }

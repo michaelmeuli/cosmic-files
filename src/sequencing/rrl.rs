@@ -2,6 +2,13 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
+use super::reverse_complement;
+
+/// Conserved left flank — ends immediately before position 28
+const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
+
+/// Conserved right flank — starts immediately after position 28  
+const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
 
 /// A single macrolide-resistance SNP position in the M. abscessus 23S rRNA (rrl).
 /// `query_base` is `None` when the position is not covered by the read.

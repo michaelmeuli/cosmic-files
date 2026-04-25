@@ -275,7 +275,6 @@ impl Ab1Channels {
 
 #[derive(Clone, Debug)]
 pub struct SeqData {
-    pub erm41position28_opt: Option<Erm41Position28>,
     pub chromatogram: Option<Ab1Channels>,
     pub seq_id: Vec<SeqIdHit>,
     pub species_hit_opt: Option<SpeciesHit>,

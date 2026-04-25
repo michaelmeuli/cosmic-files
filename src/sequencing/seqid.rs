@@ -1,3 +1,4 @@
+use super::erm41::{erm41_from_single_read, Erm41Position28};
 use super::reverse_complement;
 use super::rrl::{call_rrl_snps, RrlSnpCall};
 
@@ -53,6 +54,8 @@ pub struct SeqIdHit {
     pub aligned_query: Vec<u8>,
     /// Signed offset such that `query_index = ref_index - alignment_offset`.
     pub alignment_offset: isize,
+    /// Erm41 position 28 call; `None` for non-erm41 targets.
+    pub erm41position28_opt: Option<Erm41Position28>,
 }
 
 impl SeqIdHit {
@@ -302,7 +305,8 @@ const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fast
 const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
 const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
 const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
-const REF_MAB2297: &str = include_str!("../../res/sequences/MAB_2297.fasta");
+const REF_MAB2297: &str = include_str!("../../res/sequences/erm41/MAB_2297.fasta");
+const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
 const REF_MAB_R5052: &str = include_str!("../../res/sequences/MAB_r5052.fasta");
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
@@ -553,6 +557,7 @@ pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
                 rrl_snp_calls: vec![],
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
+                erm41position28_opt: None,
             }
         })
         .collect();
@@ -588,6 +593,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         rrl_snp_calls: vec![],
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
+        erm41position28_opt: Some(erm41_from_single_read(query)),
     }]
 }
 
@@ -618,6 +624,7 @@ pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
         rrl_snp_calls,
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
+        erm41position28_opt: None,
     }]
 }
 
