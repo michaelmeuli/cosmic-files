@@ -1,4 +1,4 @@
-use super::erm41::{erm41_from_single_read, Erm41Position28};
+use super::erm41::Erm41Position28;
 use super::reverse_complement;
 use super::rrl::RrlSnpCall;
 
@@ -68,7 +68,9 @@ impl SeqIdHit {
             "AY299134" => REF_AY299134,
             "AY299145" => REF_AY299145,
             // For erm(41)
-            "MAB_2297" => REF_MAB2297,
+            "REF_ERM41_ABSCESSUS" => REF_ERM41_ABSCESSUS,
+            "REF_ERM41_BOLLETII" => REF_ERM41_BOLLETII,
+            "REF_ERM41_MASSILENSE" => REF_ERM41_MASSILENSE,
             // For 23S rRNA NTM
             "MAB_r5052" => REF_MAB_R5052,
             _ => return format!("Unknown reference accession: {}\n", self.accession),
@@ -305,8 +307,9 @@ const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fast
 const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
 const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
 const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
-const REF_MAB2297: &str = include_str!("../../res/sequences/erm41/MAB_2297.fasta");
+pub(super) const REF_ERM41_ABSCESSUS: &str = include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
 const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
+const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
 use super::rrl::REF_MAB_R5052;
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
@@ -568,33 +571,6 @@ pub fn identify_hsp65_sequence(query: &[u8]) -> Vec<SeqIdHit> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     hits
-}
-
-/// Align `query` against the erm(41) reference (MAB_2297) and return the single hit.
-pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
-    let refseq = parse_fasta_seq(REF_MAB2297);
-    let rc = reverse_complement(query);
-
-    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-        (rev_id, true, rc.as_slice(), rev_off)
-    } else {
-        (fwd_id, false, query, fwd_off)
-    };
-
-    vec![SeqIdHit {
-        accession: "MAB_2297".to_string(),
-        description: "M. abscessus".to_string(),
-        identity,
-        is_reverse,
-        kansasii_gastri_snp_calls: vec![],
-        marinum_ulcerans_snp_calls: vec![],
-        rrl_snp_calls: vec![],
-        aligned_query: aligned_query.to_vec(),
-        alignment_offset: offset,
-        erm41position28_opt: Some(erm41_from_single_read(query)),
-    }]
 }
 
 

@@ -120,6 +120,27 @@ pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8
     if start >= end { &[] } else { &seq[start..end] }
 }
 
+/// Convert a base-array position + left/right flank counts to a scan-index range.
+/// Returns `None` if the indices would go out of bounds or produce an empty range.
+pub(super) fn scan_window(
+    center: usize,
+    left: usize,
+    right: usize,
+    peak_locs: &[u16],
+) -> Option<(usize, usize)> {
+    let base_start = center.checked_sub(left)?;
+    let base_end   = center + right;
+    if base_end >= peak_locs.len() {
+        return None;
+    }
+    let start_scan = peak_locs[base_start] as usize;
+    let end_scan   = peak_locs[base_end]   as usize;
+    if start_scan >= end_scan {
+        return None;
+    }
+    Some((start_scan, end_scan))
+}
+
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter().rev().map(|&b| match b.to_ascii_uppercase() {
         b'A' => b'T', b'T' => b'A',
@@ -128,11 +149,6 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     }).collect()
 }
 
-/// Parse an AB1 file and return chromatogram channel data plus basecalls.
-///
-/// Collects DATA tags 9-12 (analyzed, preferred) or 1-4 (raw fallback),
-/// PBAS tag 2/1 (basecalls), PLOC tag 2/1 (peak locations), and FWO_ tag 1
-/// (filter wheel order mapping channel index → base letter).
 pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
     if data.len() < 34 || &data[0..4] != b"ABIF" {
         return None;
@@ -272,14 +288,11 @@ impl Ab1Channels {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub struct SeqData {
     pub chromatogram: Option<Ab1Channels>,
     pub seq_id: Vec<SeqIdHit>,
     pub species_hit_opt: Option<SpeciesHit>,
-    /// Length of the quality-trimmed basecall sequence used for identification.
     pub trimmed_length: usize,
-    /// Mean Phred quality score over the trimmed region. `None` when no quality data is available.
     pub trimmed_avg_quality: Option<f32>,
 }
