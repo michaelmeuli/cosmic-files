@@ -3707,7 +3707,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             }
         };
 
-        // Restrict to the display window (region around erm41 position 28).
+        // Restrict to the display window.
         // Fall back to the full scan range if the anchor was not found.
         let total_scans = chrom.channels.iter().map(|c| c.len()).max().unwrap_or(1);
         if total_scans == 0 {

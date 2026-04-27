@@ -2,17 +2,62 @@ pub mod erm41;
 pub mod tb_data;
 pub mod rrl;
 pub mod seqid;
+pub mod bed;
 
 use erm41::Erm41Position28;
 pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall, SpeciesHit};
 pub use rrl::RrlSnpCall;
 
-/// Parse an AB1 (ABIF) Sanger sequencing file and return the primary basecall sequence.
-///
+pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+    seq.iter().rev().map(|&b| match b.to_ascii_uppercase() {
+        b'A' => b'T', b'T' => b'A',
+        b'G' => b'C', b'C' => b'G',
+        _    => b'N',
+    }).collect()
+}
+
+pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8] {
+    let start = seq
+        .iter()
+        .enumerate()
+        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
+        .map(|(i, _)| i)
+        .unwrap_or(seq.len());
+
+    let end = seq
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
+        .map(|(i, _)| i + 1)
+        .unwrap_or(0);
+
+    if start >= end { &[] } else { &seq[start..end] }
+}
+
+pub(super) fn scan_window(
+    center: usize,
+    left: usize,
+    right: usize,
+    peak_locs: &[u16],
+) -> Option<(usize, usize)> {
+    let base_start = center.checked_sub(left)?;
+    let base_end   = center + right;
+    if base_end >= peak_locs.len() {
+        return None;
+    }
+    let start_scan = peak_locs[base_start] as usize;
+    let end_scan   = peak_locs[base_end]   as usize;
+    if start_scan >= end_scan {
+        return None;
+    }
+    Some((start_scan, end_scan))
+}
+
+
+
 /// Tries the edited basecalls (PBAS tag 2) first, falling back to raw basecalls (PBAS tag 1).
-/// Returns `None` if the magic bytes are missing or no PBAS tag is found.
 pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
-    // Validate ABIF magic and minimum header size
     if data.len() < 34 || &data[0..4] != b"ABIF" {
         return None;
     }
@@ -54,11 +99,8 @@ pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
     pbas1
 }
 
-/// Parse an AB1 (ABIF) file and return the quality scores (PCON tag).
-///
 /// Tries edited quality scores (PCON tag 2) first, falling back to raw (PCON tag 1).
 /// Each byte is a Phred quality score corresponding to the base at the same index in PBAS.
-/// Returns `None` if the file is invalid or no PCON tag is found.
 pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
     if data.len() < 34 || &data[0..4] != b"ABIF" {
         return None;
@@ -94,59 +136,6 @@ pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
     }
 
     pcon1
-}
-
-/// Trim a basecall sequence to the high-quality region.
-///
-/// Removes leading and trailing bases whose Phred quality score is below
-/// `min_q`.  If `qual` is shorter than `seq` the excess bases are treated as
-/// quality 0.  Returns an empty slice when no base meets the threshold.
-pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8] {
-    let start = seq
-        .iter()
-        .enumerate()
-        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
-        .map(|(i, _)| i)
-        .unwrap_or(seq.len());
-
-    let end = seq
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
-        .map(|(i, _)| i + 1)
-        .unwrap_or(0);
-
-    if start >= end { &[] } else { &seq[start..end] }
-}
-
-/// Convert a base-array position + left/right flank counts to a scan-index range.
-/// Returns `None` if the indices would go out of bounds or produce an empty range.
-pub(super) fn scan_window(
-    center: usize,
-    left: usize,
-    right: usize,
-    peak_locs: &[u16],
-) -> Option<(usize, usize)> {
-    let base_start = center.checked_sub(left)?;
-    let base_end   = center + right;
-    if base_end >= peak_locs.len() {
-        return None;
-    }
-    let start_scan = peak_locs[base_start] as usize;
-    let end_scan   = peak_locs[base_end]   as usize;
-    if start_scan >= end_scan {
-        return None;
-    }
-    Some((start_scan, end_scan))
-}
-
-pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b.to_ascii_uppercase() {
-        b'A' => b'T', b'T' => b'A',
-        b'G' => b'C', b'C' => b'G',
-        _    => b'N',
-    }).collect()
 }
 
 pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
