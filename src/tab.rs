@@ -3600,8 +3600,13 @@ impl Item {
                 is_reverse: chrom.rrl_ntm_view_state.is_some_and(|e| e.is_reverse),
                 display_window: chrom.rrl_ntm_view_state.map(|e| e.window),
                 highlighted_scans: chrom.rrl_ntm_view_state
-                    .and_then(|e| chrom.peak_locs.get(e.snp_base_idx as usize).copied())
-                    .map(|v| vec![v, v + 1])
+                    .map(|e| {
+                        let idx = e.snp_base_idx as usize;
+                        [idx, idx + 1]
+                            .iter()
+                            .filter_map(|&i| chrom.peak_locs.get(i).copied())
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 chrom,
             })
