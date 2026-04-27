@@ -39,14 +39,14 @@ pub(super) fn scan_window(
     left: usize,
     right: usize,
     peak_locs: &[u16],
-) -> Option<(usize, usize)> {
+) -> Option<(u16, u16)> {
     let base_start = center.checked_sub(left)?;
     let base_end   = center + right;
     if base_end >= peak_locs.len() {
         return None;
     }
-    let start_scan = peak_locs[base_start] as usize;
-    let end_scan   = peak_locs[base_end]   as usize;
+    let start_scan = peak_locs[base_start];
+    let end_scan   = peak_locs[base_end];
     if start_scan >= end_scan {
         return None;
     }
@@ -246,16 +246,16 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RrlNtmViewState {
-    pub window: (usize, usize),
+    pub window: (u16, u16),
     pub is_reverse: bool,
-    pub snp_base_idx: usize,
+    pub snp_base_idx: u16,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Erm41ViewState {
-    pub window: (usize, usize),
+    pub window: (u16, u16),
     pub is_reverse: bool,
-    pub pos28_base_idx: usize,
+    pub pos28_base_idx: u16,
 }
 
 /// Parsed channel intensity data from an AB1 chromatogram.

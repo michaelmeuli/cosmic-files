@@ -60,21 +60,21 @@ fn base_to_call(base: Option<u8>) -> Option<Erm41Position28> {
     }
 }
 
-pub(super) fn find_erm41_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize, bool, usize)> {
+pub(super) fn find_erm41_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(u16, u16, bool, u16)> {
     // Flanking bases to show: 9 before pos28, 11 after (pos28 is the first of the 11)
     const LEFT: usize  = 9;
     const RIGHT: usize = 11;
 
-    let anchor_len = ERM41_ANCHOR_L.len();
+    let anchor_len: u16 = ERM41_ANCHOR_L.len() as u16;
 
     // --- Forward orientation: ANCHOR_L directly in PBAS ---
     if let Some(hit) = bases
-        .windows(anchor_len)
+        .windows(anchor_len as usize)
         .position(|w| w.eq_ignore_ascii_case(ERM41_ANCHOR_L))
     {
-        let pos28 = hit + anchor_len;
+        let pos28 = hit + anchor_len as usize;
         if let Some(window) = super::scan_window(pos28, LEFT, RIGHT, peak_locs) {
-            return Some((window.0, window.1, false, pos28));
+            return Some((window.0, window.1, false, pos28 as u16));
         }
     }
 
@@ -85,7 +85,7 @@ pub(super) fn find_erm41_display_window(bases: &[u8], peak_locs: &[u16]) -> Opti
     {
         let pos28_comp = hit + rc_anchor_r.len();
         if let Some(window) = super::scan_window(pos28_comp, RIGHT, LEFT, peak_locs) {
-            return Some((window.0, window.1, true, pos28_comp));
+            return Some((window.0, window.1, true, pos28_comp as u16));
         }
     }
 

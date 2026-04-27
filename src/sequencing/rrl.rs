@@ -113,19 +113,19 @@ pub fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
 }
 
 
-pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize, bool, usize)> {
+pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(u16, u16, bool, u16)> {
     const LEFT: usize  = 10;
     const RIGHT: usize = 10;
 
-    let anchor_len = RRL_ANCHOR_L.len();
+    let anchor_len: u16 = RRL_ANCHOR_L.len() as u16;
 
     if let Some(hit) = bases
-        .windows(anchor_len)
+        .windows(anchor_len as usize)
         .position(|w| w.eq_ignore_ascii_case(RRL_ANCHOR_L))
     {
-        let snp_pos = hit + anchor_len;
+        let snp_pos = hit + anchor_len as usize;
         if let Some(window) = super::scan_window(snp_pos, LEFT, RIGHT, peak_locs) {
-            return Some((window.0, window.1, false, snp_pos));
+            return Some((window.0, window.1, false, snp_pos as u16));
         }
     }
 
@@ -136,7 +136,7 @@ pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Op
     {
         let snp_pos_comp = hit + rc_anchor_r.len();
         if let Some(window) = super::scan_window(snp_pos_comp, RIGHT, LEFT, peak_locs) {
-            return Some((window.0, window.1, true, snp_pos_comp));
+            return Some((window.0, window.1, true, snp_pos_comp as u16));
         }
     }
 

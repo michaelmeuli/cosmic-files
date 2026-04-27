@@ -3348,8 +3348,8 @@ impl Item {
                 is_reverse: chrom.erm41_view_state.is_some_and(|e| e.is_reverse),
                 display_window: chrom.erm41_view_state.map(|e| e.window),
                 highlighted_scans: chrom.erm41_view_state
-                    .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx).copied())
-                    .map(|v| vec![v as usize])
+                    .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx as usize).copied())
+                    .map(|v| vec![v])
                     .unwrap_or_default(),
                 chrom,
             })
@@ -3587,6 +3587,30 @@ impl Item {
             );
         }
 
+        if let Some(chrom) = self.metadata.ab1_chromatogram() {
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::body(
+                "Shown in bold are bases coresponding to E. coli positions 2058/2059",
+            ));
+            if chrom.rrl_ntm_view_state.is_some_and(|e| e.is_reverse) {
+                details = details.push(widget::text::body("reverse complement"));
+            }
+            details = details.push(widget::text::body(""));
+            let canvas = widget::Canvas::new(ChromatogramProgram {
+                is_reverse: chrom.rrl_ntm_view_state.is_some_and(|e| e.is_reverse),
+                display_window: chrom.rrl_ntm_view_state.map(|e| e.window),
+                highlighted_scans: chrom.rrl_ntm_view_state
+                    .and_then(|e| chrom.peak_locs.get(e.snp_base_idx as usize).copied())
+                    .map(|v| vec![v, v + 1])
+                    .unwrap_or_default(),
+                chrom,
+            })
+                .width(Length::Fill)
+                .height(Length::Fixed(200.0));
+            details = details.push(canvas);
+            details = details.push(widget::text::body(""));
+        }
+
         if let Some(hit) = self.metadata.ab1_species_hit() {
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body("Species identification (23S database):"));
@@ -3661,8 +3685,8 @@ impl Item {
 struct ChromatogramProgram<'a> {
     chrom: &'a crate::sequencing::Ab1Channels,
     is_reverse: bool,
-    display_window: Option<(usize, usize)>,
-    highlighted_scans: Vec<usize>,
+    display_window: Option<(u16, u16)>,
+    highlighted_scans: Vec<u16>,
 }
 
 impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
@@ -3709,7 +3733,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
 
         // Restrict to the display window.
         // Fall back to the full scan range if the anchor was not found.
-        let total_scans = chrom.channels.iter().map(|c| c.len()).max().unwrap_or(1);
+        let total_scans : u16 = chrom.channels.iter().map(|c| c.len() as u16).max().unwrap_or(1);
         if total_scans == 0 {
             return vec![];
         }
@@ -3722,7 +3746,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         let mut y_min = i16::MAX;
         let mut y_max = i16::MIN;
         for channel in &chrom.channels {
-            for &v in &channel[scan_start.min(channel.len())..scan_end.min(channel.len())] {
+            for &v in &channel[(scan_start as usize).min(channel.len())..(scan_end as usize).min(channel.len())] {
                 if v < y_min {
                     y_min = v;
                 }
@@ -3749,7 +3773,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         // For reverse reads we flip the x-axis so the plus-strand 5′→3′ direction
         // always runs left to right, identical to a forward read.
         let scan_to_x = |scan: usize| -> f32 {
-            let t = (scan.saturating_sub(scan_start)) as f32 / (window_len - 1).max(1) as f32;
+            let t = (scan.saturating_sub(scan_start as usize)) as f32 / ((window_len as usize) - 1).max(1) as f32;
             if is_rev {
                 (1.0 - t) * plot_w
             } else {
@@ -3776,21 +3800,21 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             };
             let color = base_color(display_base);
 
-            let slice_end = (scan_end + 1).min(channel.len());
+            let slice_end = (scan_end + 1).min(channel.len() as u16);
             let slice_start = scan_start.min(slice_end);
             if slice_start >= slice_end {
                 continue;
             }
-            let window_slice = &channel[slice_start..slice_end];
+            let window_slice = &channel[slice_start as usize..slice_end as usize];
 
             let path = Path::new(|builder| {
                 builder.move_to(Point {
-                    x: scan_to_x(slice_start),
+                    x: scan_to_x(slice_start as usize),
                     y: intensity_to_y(window_slice[0]),
                 });
                 for (i, &v) in window_slice.iter().enumerate().skip(1) {
                     builder.line_to(Point {
-                        x: scan_to_x(slice_start + i),
+                        x: scan_to_x(slice_start as usize + i),
                         y: intensity_to_y(v),
                     });
                 }
@@ -3804,12 +3828,12 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         // plus-strand base at each position.
         // Highlighted scan positions are drawn in bold.
         for (base, &peak) in chrom.bases.iter().zip(chrom.peak_locs.iter()) {
-            let scan = peak as usize;
+            let scan = peak;
             if scan < scan_start || scan > scan_end {
                 continue;
             }
             let display_base = if is_rev { dna_complement(*base) } else { *base };
-            let x = scan_to_x(scan);
+            let x = scan_to_x(scan as usize);
             let color = base_color(display_base);
             let is_highlighted = self.highlighted_scans.contains(&scan);
             frame.fill_text(widget::canvas::Text {
