@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use super::reverse_complement;
-use super::seqid::{SeqIdHit, best_alignment, parse_fasta_seq};
+use super::{SeqIdHit, best_alignment, parse_fasta_seq};
 
 pub(super) const REF_MAB_R5052: &str = include_str!("../../res/sequences/MAB_r5052.fasta");
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
@@ -114,7 +114,7 @@ pub fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
 
 
 pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(u16, u16, bool, u16)> {
-    const LEFT: usize  = 10;
+    const LEFT: usize  = 9;
     const RIGHT: usize = 10;
 
     let anchor_len: u16 = RRL_ANCHOR_L.len() as u16;

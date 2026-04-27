@@ -1,5 +1,5 @@
 use super::reverse_complement;
-use super::seqid::{best_alignment, parse_fasta_seq, SeqIdHit};
+use super::{best_alignment, parse_fasta_seq, SeqIdHit};
 
 /// Conserved left flank — ends immediately before position 28
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
@@ -116,27 +116,35 @@ pub fn erm41position28_from_single_read(read: &[u8]) -> Erm41Position28 {
 }
 
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
-    let refseq = parse_fasta_seq(super::seqid::REF_ERM41_ABSCESSUS);
     let rc = reverse_complement(query);
+    let erm41_pos28 = erm41position28_from_single_read(query);
 
-    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-        (rev_id, true, rc.as_slice(), rev_off)
-    } else {
-        (fwd_id, false, query, fwd_off)
-    };
+    let refs: &[(&str, &str, &str)] = &[
+        (super::REF_ERM41_ABSCESSUS,  "REF_ERM41_ABSCESSUS",  "M. abscessus"),
+        (super::REF_ERM41_BOLLETII,   "REF_ERM41_BOLLETII",   "M. bolletii"),
+        (super::REF_ERM41_MASSILENSE, "REF_ERM41_MASSILENSE", "M. massiliense"),
+    ];
 
-    vec![SeqIdHit {
-        accession: "REF_ERM41_ABSCESSUS".to_string(),
-        description: "M. abscessus".to_string(),
-        identity,
-        is_reverse,
-        kansasii_gastri_snp_calls: vec![],
-        marinum_ulcerans_snp_calls: vec![],
-        rrl_snp_calls: vec![],
-        aligned_query: aligned_query.to_vec(),
-        alignment_offset: offset,
-        erm41position28_opt: Some(erm41position28_from_single_read(query)),
-    }]
+    refs.iter().map(|(fasta, accession, description)| {
+        let refseq = parse_fasta_seq(fasta);
+        let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+        let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+        let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+            (rev_id, true, rc.as_slice(), rev_off)
+        } else {
+            (fwd_id, false, query, fwd_off)
+        };
+        SeqIdHit {
+            accession: accession.to_string(),
+            description: description.to_string(),
+            identity,
+            is_reverse,
+            kansasii_gastri_snp_calls: vec![],
+            marinum_ulcerans_snp_calls: vec![],
+            rrl_snp_calls: vec![],
+            aligned_query: aligned_query.to_vec(),
+            alignment_offset: offset,
+            erm41position28_opt: Some(erm41_pos28.clone()),
+        }
+    }).collect()
 }

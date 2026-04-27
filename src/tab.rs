@@ -90,11 +90,9 @@ use crate::{
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         parse_ab1_quality, parse_ab1_sequence,
         rrl::identify_sequence_23s_ntm,
-        seqid::{
-            identify_hsp65_sequence,
-            identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
-            identify_species_rpob,
-        },
+        hsp65::identify_sequence_hsp65,
+        identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
+        identify_species_rpob,
         trim_to_min_quality,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
@@ -925,7 +923,7 @@ pub fn item_from_entry(
                     let seq_id = if is_erm41 {
                         identify_sequence_erm41(trimmed)
                     } else if is_hsp65 {
-                        identify_hsp65_sequence(trimmed)
+                        identify_sequence_hsp65(trimmed)
                     } else if is_23s_ntm {
                         identify_sequence_23s_ntm(trimmed)
                     } else {
