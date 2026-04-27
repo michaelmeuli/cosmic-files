@@ -113,6 +113,36 @@ pub fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
 }
 
 
+pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(usize, usize, bool, usize)> {
+    const LEFT: usize  = 10;
+    const RIGHT: usize = 10;
+
+    let anchor_len = RRL_ANCHOR_L.len();
+
+    if let Some(hit) = bases
+        .windows(anchor_len)
+        .position(|w| w.eq_ignore_ascii_case(RRL_ANCHOR_L))
+    {
+        let snp_pos = hit + anchor_len;
+        if let Some(window) = super::scan_window(snp_pos, LEFT, RIGHT, peak_locs) {
+            return Some((window.0, window.1, false, snp_pos));
+        }
+    }
+
+    let rc_anchor_r: Vec<u8> = reverse_complement(RRL_ANCHOR_R);
+    if let Some(hit) = bases
+        .windows(rc_anchor_r.len())
+        .position(|w| w.eq_ignore_ascii_case(&rc_anchor_r))
+    {
+        let snp_pos_comp = hit + rc_anchor_r.len();
+        if let Some(window) = super::scan_window(snp_pos_comp, RIGHT, LEFT, peak_locs) {
+            return Some((window.0, window.1, true, snp_pos_comp));
+        }
+    }
+
+    None
+}
+
 /// Align `query` against the M. abscessus rrl (23S rRNA) reference (MAB_r5052) and return
 /// the single hit with resistance SNP calls for all positions from abscessus_resistance_variants.csv
 /// (Gene == rrl).

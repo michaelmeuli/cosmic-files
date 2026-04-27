@@ -3340,14 +3340,14 @@ impl Item {
             details = details.push(widget::text::body(
                 "Shown are bases 19-39, with position 28 in bold.",
             ));
-            if chrom.erm41.is_some_and(|e| e.is_reverse) {
+            if chrom.erm41_view_state.is_some_and(|e| e.is_reverse) {
                 details = details.push(widget::text::body("reverse complement"));
             }
             details = details.push(widget::text::body(""));
             let canvas = widget::Canvas::new(ChromatogramProgram {
-                is_reverse: chrom.erm41.is_some_and(|e| e.is_reverse),
-                display_window: chrom.erm41.map(|e| e.window),
-                highlighted_scans: chrom.erm41
+                is_reverse: chrom.erm41_view_state.is_some_and(|e| e.is_reverse),
+                display_window: chrom.erm41_view_state.map(|e| e.window),
+                highlighted_scans: chrom.erm41_view_state
                     .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx).copied())
                     .map(|v| vec![v as usize])
                     .unwrap_or_default(),

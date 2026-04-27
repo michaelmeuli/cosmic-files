@@ -4,7 +4,6 @@ pub mod rrl;
 pub mod seqid;
 pub mod bed;
 
-use erm41::Erm41Position28;
 pub use seqid::{SeqIdHit, KansasiiGastriSnpCall, MarinumUlceransSnpCall, SpeciesHit};
 pub use rrl::RrlSnpCall;
 
@@ -221,11 +220,18 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
         .unwrap_or_else(|| vec![0u16; bases.len()]);
     let base_order = fwo.unwrap_or(*b"ACGT");
 
-    let erm41 = erm41::find_erm41_display_window(&bases, &peak_locs)
+    let erm41_view_state = erm41::find_erm41_display_window(&bases, &peak_locs)
         .map(|(start, end, is_reverse, pos28_base_idx)| Erm41ViewState {
             window: (start, end),
             is_reverse,
             pos28_base_idx,
+        });
+
+    let rrl_ntm_view_state = rrl::find_rrl_ntm_display_window(&bases, &peak_locs)
+        .map(|(start, end, is_reverse, snp_base_idx)| RrlNtmViewState {
+            window: (start, end),
+            is_reverse,
+            snp_base_idx,
         });
 
     Some(Ab1Channels {
@@ -233,22 +239,22 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
         bases,
         peak_locs,
         base_order,
-        erm41,
+        erm41_view_state,
+        rrl_ntm_view_state,
     })
 }
 
-/// Erm41-specific view state derived from the chromatogram basecalls.
-/// `None` on `Ab1Channels::erm41` when the anchor sequence was not found.
+#[derive(Clone, Copy, Debug)]
+pub struct RrlNtmViewState {
+    pub window: (usize, usize),
+    pub is_reverse: bool,
+    pub snp_base_idx: usize,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Erm41ViewState {
-    /// Scan range `(start, end)` covering the 9 bases before position 28,
-    /// position 28 itself, and the 11 bases after — "cgacgccag[X]ggggctggtat".
     pub window: (usize, usize),
-    /// `true` when the anchor was found in the reverse-complement orientation.
-    /// The canvas flips the x-axis and complements bases/colors so the display
-    /// always reads 5′→3′ on the plus strand.
     pub is_reverse: bool,
-    /// Index into `Ab1Channels::bases` / `peak_locs` of position 28.
     pub pos28_base_idx: usize,
 }
 
@@ -265,7 +271,9 @@ pub struct Ab1Channels {
     /// Which base each channel corresponds to, e.g. b"ACGT" (from FWO_ tag).
     pub base_order: [u8; 4],
     /// Erm41 view state; `None` when the anchor was not found in the basecall sequence.
-    pub erm41: Option<Erm41ViewState>,
+    pub erm41_view_state: Option<Erm41ViewState>,
+    /// Rrl/NTM view state; `None` when the anchor was not found in the basecall sequence.
+    pub rrl_ntm_view_state: Option<RrlNtmViewState>,
 }
 
 impl Ab1Channels {
