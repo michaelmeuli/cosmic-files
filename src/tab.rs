@@ -901,14 +901,14 @@ pub fn item_from_entry(
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
-            let (seq_id, species_hit_opt, trimmed_length, trimmed_avg_quality) =
+            let (seq_id_hits, species_hit_opt, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let trimmed: &[u8] = match &ab1_qual {
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
                         None => seq.as_slice(),
                     };
                     let trimmed_length = trimmed.len();
-                    let trimmed_avg_quality =
+                    let trimmed_avg_quality_opt =
                         ab1_qual
                             .as_ref()
                             .filter(|_| trimmed_length > 0)
@@ -920,7 +920,7 @@ pub fn item_from_entry(
                                     .sum();
                                 sum as f32 / trimmed_length as f32
                             });
-                    let seq_id = if is_erm41 {
+                    let seq_id_hits = if is_erm41 {
                         identify_sequence_erm41(trimmed)
                     } else if is_hsp65 {
                         identify_sequence_hsp65(trimmed)
@@ -942,17 +942,17 @@ pub fn item_from_entry(
                     } else {
                         None
                     };
-                    (seq_id, species_hit_opt, trimmed_length, trimmed_avg_quality)
+                    (seq_id_hits, species_hit_opt, trimmed_length, trimmed_avg_quality_opt)
                 } else {
                     (Vec::new(), None, 0, None)
                 };
-            let chromatogram = parse_ab1_chromatogram(&bytes);
+            let chromatogram_opt = parse_ab1_chromatogram(&bytes);
             SeqData {
-                chromatogram,
-                seq_id,
+                chromatogram_opt,
+                seq_id_hits,
                 species_hit_opt,
                 trimmed_length,
-                trimmed_avg_quality,
+                trimmed_avg_quality_opt,
             }
         })
     } else {
@@ -971,7 +971,7 @@ pub fn item_from_entry(
             children_opt,
             tbprofilerjson_opt,
             is_ab1,
-            sequence,
+            sequence_opt: sequence,
             is_tb_result: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
@@ -1286,7 +1286,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             children_opt: None,
             tbprofilerjson_opt,
             is_ab1: false,
-            sequence: None,
+            sequence_opt: None,
             is_tb_result: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json,
@@ -2189,7 +2189,7 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         tbprofilerjson_opt: Option<TbProfilerJson>,
         is_ab1: bool,
-        sequence: Option<SeqData>,
+        sequence_opt: Option<SeqData>,
         is_tb_result: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
@@ -2309,9 +2309,9 @@ impl ItemMetadata {
 
     pub fn erm41position28_call(&self) -> Erm41Position28 {
         match self {
-            Self::Path { sequence, .. } => sequence
+            Self::Path { sequence_opt: sequence, .. } => sequence
                 .as_ref()
-                .and_then(|s| s.seq_id.first()?.erm41position28_opt.clone())
+                .and_then(|s| s.seq_id_hits.first()?.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             _ => Erm41Position28::Undetermined,
         }
@@ -2323,16 +2323,16 @@ impl ItemMetadata {
 
     pub fn ab1_chromatogram(&self) -> Option<&Ab1Channels> {
         match self {
-            Self::Path { sequence, .. } => sequence.as_ref()?.chromatogram.as_ref(),
+            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.chromatogram_opt.as_ref(),
             _ => None,
         }
     }
 
     pub fn ab1_seq_id(&self) -> &[SeqIdHit] {
         match self {
-            Self::Path { sequence, .. } => sequence
+            Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .map(|s| s.seq_id.as_slice())
+                .map(|s| s.seq_id_hits.as_slice())
                 .unwrap_or(&[]),
             _ => &[],
         }
@@ -2340,7 +2340,7 @@ impl ItemMetadata {
 
     pub fn ab1_species_hit(&self) -> Option<&SpeciesHit> {
         match self {
-            Self::Path { sequence, .. } => sequence.as_ref()?.species_hit_opt.as_ref(),
+            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.species_hit_opt.as_ref(),
             _ => None,
         }
     }
@@ -2353,14 +2353,14 @@ impl ItemMetadata {
 
     pub fn sequence_length(&self) -> Option<usize> {
         match self {
-            Self::Path { sequence, .. } => sequence.as_ref().map(|s| s.trimmed_length),
+            Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.trimmed_length),
             _ => None,
         }
     }
 
     pub fn sequence_avg_quality(&self) -> Option<f32> {
         match self {
-            Self::Path { sequence, .. } => sequence.as_ref()?.trimmed_avg_quality,
+            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.trimmed_avg_quality_opt,
             _ => None,
         }
     }
@@ -3338,14 +3338,14 @@ impl Item {
             details = details.push(widget::text::body(
                 "Shown are bases 19-39, with position 28 in bold.",
             ));
-            if chrom.erm41_view_state.is_some_and(|e| e.is_reverse) {
+            if chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse) {
                 details = details.push(widget::text::body("reverse complement"));
             }
             details = details.push(widget::text::body(""));
             let canvas = widget::Canvas::new(ChromatogramProgram {
-                is_reverse: chrom.erm41_view_state.is_some_and(|e| e.is_reverse),
-                display_window: chrom.erm41_view_state.map(|e| e.window),
-                highlighted_scans: chrom.erm41_view_state
+                is_reverse: chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse),
+                display_window: chrom.erm41_view_state_opt.map(|e| e.window),
+                highlighted_scans: chrom.erm41_view_state_opt
                     .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx as usize).copied())
                     .map(|v| vec![v])
                     .unwrap_or_default(),
@@ -3590,14 +3590,14 @@ impl Item {
             details = details.push(widget::text::body(
                 "Shown in bold are bases coresponding to E. coli positions 2058/2059",
             ));
-            if chrom.rrl_ntm_view_state.is_some_and(|e| e.is_reverse) {
+            if chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse) {
                 details = details.push(widget::text::body("reverse complement"));
             }
             details = details.push(widget::text::body(""));
             let canvas = widget::Canvas::new(ChromatogramProgram {
-                is_reverse: chrom.rrl_ntm_view_state.is_some_and(|e| e.is_reverse),
-                display_window: chrom.rrl_ntm_view_state.map(|e| e.window),
-                highlighted_scans: chrom.rrl_ntm_view_state
+                is_reverse: chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse),
+                display_window: chrom.rrl_ntm_view_state_opt.map(|e| e.window),
+                highlighted_scans: chrom.rrl_ntm_view_state_opt
                     .map(|e| {
                         let idx = e.snp_base_idx as usize;
                         [idx, idx + 1]

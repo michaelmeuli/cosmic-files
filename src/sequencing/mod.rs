@@ -489,14 +489,14 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
         .unwrap_or_else(|| vec![0u16; bases.len()]);
     let base_order = fwo.unwrap_or(*b"ACGT");
 
-    let erm41_view_state = erm41::find_erm41_display_window(&bases, &peak_locs)
+    let erm41_view_state_opt = erm41::find_erm41_display_window(&bases, &peak_locs)
         .map(|(start, end, is_reverse, pos28_base_idx)| Erm41ViewState {
             window: (start, end),
             is_reverse,
             pos28_base_idx,
         });
 
-    let rrl_ntm_view_state = rrl::find_rrl_ntm_display_window(&bases, &peak_locs)
+    let rrl_ntm_view_state_opt = rrl::find_rrl_ntm_display_window(&bases, &peak_locs)
         .map(|(start, end, is_reverse, snp_base_idx)| RrlNtmViewState {
             window: (start, end),
             is_reverse,
@@ -508,8 +508,8 @@ pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
         bases,
         peak_locs,
         base_order,
-        erm41_view_state,
-        rrl_ntm_view_state,
+        erm41_view_state_opt,
+        rrl_ntm_view_state_opt,
     })
 }
 
@@ -543,9 +543,9 @@ pub struct Ab1Channels {
     /// Which base each channel corresponds to, e.g. b"ACGT" (from FWO_ tag).
     pub base_order: [u8; 4],
     /// Erm41 view state; `None` when the anchor was not found in the basecall sequence.
-    pub erm41_view_state: Option<Erm41ViewState>,
+    pub erm41_view_state_opt: Option<Erm41ViewState>,
     /// Rrl/NTM view state; `None` when the anchor was not found in the basecall sequence.
-    pub rrl_ntm_view_state: Option<RrlNtmViewState>,
+    pub rrl_ntm_view_state_opt: Option<RrlNtmViewState>,
 }
 
 impl Ab1Channels {
@@ -692,9 +692,9 @@ impl SpeciesHit {
 
 #[derive(Clone, Debug)]
 pub struct SeqData {
-    pub chromatogram: Option<Ab1Channels>,
-    pub seq_id: Vec<SeqIdHit>,
+    pub chromatogram_opt: Option<Ab1Channels>,
+    pub seq_id_hits: Vec<SeqIdHit>,
     pub species_hit_opt: Option<SpeciesHit>,
     pub trimmed_length: usize,
-    pub trimmed_avg_quality: Option<f32>,
+    pub trimmed_avg_quality_opt: Option<f32>,
 }
