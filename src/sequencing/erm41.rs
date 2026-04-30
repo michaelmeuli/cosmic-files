@@ -1,5 +1,5 @@
 use super::reverse_complement;
-use super::{best_alignment, parse_fasta_seq, SeqIdHit};
+use super::{SeqIdHit, best_alignment, parse_fasta_seq};
 
 /// Conserved left flank — ends immediately before position 28
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
@@ -20,11 +20,11 @@ pub enum Erm41Position28 {
 impl std::fmt::Display for Erm41Position28 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::C28          => write!(f, "C28"),
-            Self::T28          => write!(f, "T28 — inducible macrolide resistance"),
-            Self::G28          => write!(f, "G28"),
-            Self::A28          => write!(f, "A28"),
-            Self::Ambiguous    => write!(f, "Ambiguous (strand disagreement)"),
+            Self::C28 => write!(f, "C28"),
+            Self::T28 => write!(f, "T28 — inducible macrolide resistance"),
+            Self::G28 => write!(f, "G28"),
+            Self::A28 => write!(f, "A28"),
+            Self::Ambiguous => write!(f, "Ambiguous (strand disagreement)"),
             Self::Undetermined => write!(f, "Undetermined (anchor not found)"),
         }
     }
@@ -42,8 +42,7 @@ pub fn call_position28(read: &[u8]) -> Option<u8> {
     if right_end > read.len() {
         return None;
     }
-    let right_ok = read[right_start..right_end]
-        .eq_ignore_ascii_case(ERM41_ANCHOR_R);
+    let right_ok = read[right_start..right_end].eq_ignore_ascii_case(ERM41_ANCHOR_R);
     if !right_ok {
         return None;
     }
@@ -55,14 +54,17 @@ fn base_to_call(base: Option<u8>) -> Option<Erm41Position28> {
         Some(b'C') => Some(Erm41Position28::C28),
         Some(b'T') => Some(Erm41Position28::T28),
         Some(b'G') => Some(Erm41Position28::G28),
-        Some(b'A') => Some(Erm41Position28::A28), 
-        _          => None,
+        Some(b'A') => Some(Erm41Position28::A28),
+        _ => None,
     }
 }
 
-pub(super) fn find_erm41_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(u16, u16, bool, u16)> {
+pub(super) fn find_erm41_display_window(
+    bases: &[u8],
+    peak_locs: &[u16],
+) -> Option<(u16, u16, bool, u16)> {
     // Flanking bases to show: 9 before pos28, 11 after (pos28 is the first of the 11)
-    const LEFT: usize  = 9;
+    const LEFT: usize = 9;
     const RIGHT: usize = 11;
 
     let anchor_len: u16 = ERM41_ANCHOR_L.len() as u16;
@@ -95,15 +97,15 @@ pub(super) fn find_erm41_display_window(bases: &[u8], peak_locs: &[u16]) -> Opti
 // TODO: consider fw and rev sequences. Function is unused at the moment.
 pub fn erm41position28_from_fw_rev(fwd_read: &[u8], rev_read: &[u8]) -> Erm41Position28 {
     let fwd = base_to_call(call_position28(fwd_read));
-    let rc  = reverse_complement(rev_read);
+    let rc = reverse_complement(rev_read);
     let rev = base_to_call(call_position28(&rc));
 
     match (fwd, rev) {
-        (Some(a), Some(b)) if a == b => a,          // both agree
-        (Some(a), None)              => a,           // only fwd found
-        (None,    Some(b))           => b,           // only rev found
-        (Some(_), Some(_))           => Erm41Position28::Ambiguous,
-        (None,    None)              => Erm41Position28::Undetermined,
+        (Some(a), Some(b)) if a == b => a, // both agree
+        (Some(a), None) => a,              // only fwd found
+        (None, Some(b)) => b,              // only rev found
+        (Some(_), Some(_)) => Erm41Position28::Ambiguous,
+        (None, None) => Erm41Position28::Undetermined,
     }
 }
 
@@ -120,31 +122,52 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     let erm41_pos28 = erm41position28_from_single_read(query);
 
     let refs: &[(&str, &str, &str)] = &[
-        (super::REF_ERM41_ABSCESSUS,  "REF_ERM41_ABSCESSUS",  "M. abscessus"),
-        (super::REF_ERM41_BOLLETII,   "REF_ERM41_BOLLETII",   "M. bolletii"),
-        (super::REF_ERM41_MASSILENSE, "REF_ERM41_MASSILENSE", "M. massiliense"),
+        (
+            super::REF_ERM41_ABSCESSUS,
+            "REF_ERM41_ABSCESSUS",
+            "Mycobacteroides abscessus subsp. abscessus",
+        ),
+        (
+            super::REF_ERM41_BOLLETII,
+            "REF_ERM41_BOLLETII",
+            "Mycobacteroides abscessus subsp. bolletii",
+        ),
+        (
+            super::REF_ERM41_MASSILENSE,
+            "REF_ERM41_MASSILENSE",
+            "Mycobacteroides abscessus subsp. massiliense",
+        ),
     ];
 
-    refs.iter().map(|(fasta, accession, description)| {
-        let refseq = parse_fasta_seq(fasta);
-        let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-        let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-        let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-            (rev_id, true, rc.as_slice(), rev_off)
-        } else {
-            (fwd_id, false, query, fwd_off)
-        };
-        SeqIdHit {
-            accession: accession.to_string(),
-            description: description.to_string(),
-            identity,
-            is_reverse,
-            kansasii_gastri_snp_calls: vec![],
-            marinum_ulcerans_snp_calls: vec![],
-            rrl_snp_calls: vec![],
-            aligned_query: aligned_query.to_vec(),
-            alignment_offset: offset,
-            erm41position28_opt: Some(erm41_pos28.clone()),
-        }
-    }).collect()
+    let mut hits: Vec<SeqIdHit> = refs
+        .iter()
+        .map(|(fasta, accession, description)| {
+            let refseq = parse_fasta_seq(fasta);
+            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+                (rev_id, true, rc.as_slice(), rev_off)
+            } else {
+                (fwd_id, false, query, fwd_off)
+            };
+            SeqIdHit {
+                accession: accession.to_string(),
+                description: description.to_string(),
+                identity,
+                is_reverse,
+                kansasii_gastri_snp_calls: vec![],
+                marinum_ulcerans_snp_calls: vec![],
+                rrl_snp_calls: vec![],
+                aligned_query: aligned_query.to_vec(),
+                alignment_offset: offset,
+                erm41position28_opt: Some(erm41_pos28.clone()),
+            }
+        })
+        .collect();
+    hits.sort_by(|a, b| {
+        b.identity
+            .partial_cmp(&a.identity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits
 }
