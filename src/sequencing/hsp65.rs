@@ -73,7 +73,7 @@ fn call_marinum_ulcerans_snps(
 }
 
 fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
-    const FWD_START: &[&[u8]] = &[b"ATGGTGTGTCCATCGCCAAG", b"GAGGACCCGTACGAGAAGAT"];
+    const FWD_START: &[&[u8]] = &[b"ATGGTGTGTCCATCGCCAAG", b"GAGGACCCGTACGAGAAGATCGGCGCTGA"];
     const FWD_END: &[&[u8]] = &[b"GAGCTCACCGAGGGTATGCG", b"CGCTGTCCACCCTGGTCGTC"];
 
     // On an RC-strand query the start primers appear as RC(end primers) and vice versa,

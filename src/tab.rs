@@ -67,8 +67,8 @@ use crate::{
     app::{Action, PreviewItem, PreviewKind},
     clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
     config::{
-        ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig,
-        ThumbCfg, TBConfig,
+        ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig,
+        TabConfig, ThumbCfg,
     },
     dialog::DialogKind,
     fl,
@@ -85,14 +85,13 @@ use crate::{
     russh::CLIENTS,
     sequencing::{
         Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
-        erm41::{identify_sequence_erm41, Erm41Position28},
-        parse_ab1_chromatogram,
-        tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
-        parse_ab1_quality, parse_ab1_sequence,
-        rrl::identify_sequence_23s_ntm,
+        erm41::{Erm41Position28, identify_sequence_erm41},
         hsp65::identify_sequence_hsp65,
-        identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
-        identify_species_rpob,
+        identify_species_16s, identify_species_23s_ntm, identify_species_erm41,
+        identify_species_hsp65, identify_species_rpob, parse_ab1_chromatogram, parse_ab1_quality,
+        parse_ab1_sequence,
+        rrl::identify_sequence_23s_ntm,
+        tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         trim_to_min_quality,
     },
     thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
@@ -908,18 +907,17 @@ pub fn item_from_entry(
                         None => seq.as_slice(),
                     };
                     let trimmed_length = trimmed.len();
-                    let trimmed_avg_quality_opt =
-                        ab1_qual
-                            .as_ref()
-                            .filter(|_| trimmed_length > 0)
-                            .map(|qual| {
-                                let start = trimmed.as_ptr() as usize - seq.as_ptr() as usize;
-                                let sum: u32 = qual[start..start + trimmed_length]
-                                    .iter()
-                                    .map(|&q| q as u32)
-                                    .sum();
-                                sum as f32 / trimmed_length as f32
-                            });
+                    let trimmed_avg_quality_opt = ab1_qual
+                        .as_ref()
+                        .filter(|_| trimmed_length > 0)
+                        .map(|qual| {
+                            let start = trimmed.as_ptr() as usize - seq.as_ptr() as usize;
+                            let sum: u32 = qual[start..start + trimmed_length]
+                                .iter()
+                                .map(|&q| q as u32)
+                                .sum();
+                            sum as f32 / trimmed_length as f32
+                        });
                     let seq_id_hits = if is_erm41 {
                         identify_sequence_erm41(trimmed)
                     } else if is_hsp65 {
@@ -942,7 +940,12 @@ pub fn item_from_entry(
                     } else {
                         None
                     };
-                    (seq_id_hits, species_hit_opt, trimmed_length, trimmed_avg_quality_opt)
+                    (
+                        seq_id_hits,
+                        species_hit_opt,
+                        trimmed_length,
+                        trimmed_avg_quality_opt,
+                    )
                 } else {
                     (Vec::new(), None, 0, None)
                 };
@@ -1204,36 +1207,36 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         if let ItemMetadata::Path {
             is_raw_sample_file, ..
         } = &mut item.metadata
-            && let Some((sample_id, suffix)) = name.split_once(".results.") {
-                let entry = samples
-                    .entry(sample_id.to_string())
-                    .or_insert(LocalSampleFiles {
-                        json: None,
-                        csv: None,
-                        docx: None,
-                    });
-                match suffix {
-                    "json" => entry.json = path,
-                    "csv" => entry.csv = path,
-                    "docx" => entry.docx = path,
-                    _ => {}
-                }
-                *is_raw_sample_file = true;
+            && let Some((sample_id, suffix)) = name.split_once(".results.")
+        {
+            let entry = samples
+                .entry(sample_id.to_string())
+                .or_insert(LocalSampleFiles {
+                    json: None,
+                    csv: None,
+                    docx: None,
+                });
+            match suffix {
+                "json" => entry.json = path,
+                "csv" => entry.csv = path,
+                "docx" => entry.docx = path,
+                _ => {}
             }
+            *is_raw_sample_file = true;
+        }
     }
     for item in &mut items {
         let name = item.name.clone();
         if let ItemMetadata::Path {
             is_raw_sample_file, ..
         } = &mut item.metadata
-            && *is_raw_sample_file {
-                let sample_id = name.find('.').map(|i| &name[..i]);
-                if sample_id.is_none_or(|id| {
-                    samples.get(id).is_none_or(|f| f.json.is_none())
-                }) {
-                    *is_raw_sample_file = false;
-                }
+            && *is_raw_sample_file
+        {
+            let sample_id = name.find('.').map(|i| &name[..i]);
+            if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none())) {
+                *is_raw_sample_file = false;
             }
+        }
     }
     // Propagate susceptibility to raw sample files so filtering works in file view too
     let sample_susceptibility: HashMap<String, bool> = samples
@@ -1257,10 +1260,11 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             ..
         } = &mut item.metadata
             && *is_raw_sample_file
-                && let Some(id) = name.find('.').map(|i| &name[..i])
-                    && let Some(&sus) = sample_susceptibility.get(id) {
-                        *is_susceptible = sus;
-                    }
+            && let Some(id) = name.find('.').map(|i| &name[..i])
+            && let Some(&sus) = sample_susceptibility.get(id)
+        {
+            *is_susceptible = sus;
+        }
     }
 
     for (sample_id, files) in samples {
@@ -1887,15 +1891,16 @@ impl Location {
             ),
             Self::Remote(uri, ..) => {
                 if let Ok(mut url) = url::Url::parse(uri)
-                    && let Some(path_str) = path.to_str() {
-                        url.set_path(path_str);
-                        let name = path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("/")
-                            .to_string();
-                        return Self::Remote(url.to_string(), name, Some(path));
-                    }
+                    && let Some(path_str) = path.to_str()
+                {
+                    url.set_path(path_str);
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("/")
+                        .to_string();
+                    return Self::Remote(url.to_string(), name, Some(path));
+                }
                 self.clone()
             }
 
@@ -2309,7 +2314,10 @@ impl ItemMetadata {
 
     pub fn erm41position28_call(&self) -> Erm41Position28 {
         match self {
-            Self::Path { sequence_opt: sequence, .. } => sequence
+            Self::Path {
+                sequence_opt: sequence,
+                ..
+            } => sequence
                 .as_ref()
                 .and_then(|s| s.seq_id_hits.first()?.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
@@ -2362,6 +2370,39 @@ impl ItemMetadata {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.trimmed_avg_quality_opt,
             _ => None,
+        }
+    }
+
+    pub fn is_abscessus(&self) -> bool {
+        match self {
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()
+                .and_then(|s| s.species_hit_opt.as_ref())
+                .map(|h| h.description == "Mycobacteroides abscessus subsp. abscessus")
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    pub fn is_bolletii(&self) -> bool {
+        match self {
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()
+                .and_then(|s| s.species_hit_opt.as_ref())
+                .map(|h| h.description == "Mycobacteroides abscessus subsp. bolletii")
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    pub fn is_massiliense(&self) -> bool {
+        match self {
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()
+                .and_then(|s| s.species_hit_opt.as_ref())
+                .map(|h| h.description == "Mycobacteroides abscessus subsp. massiliense")
+                .unwrap_or(false),
+            _ => false,
         }
     }
 
@@ -3152,19 +3193,22 @@ impl Item {
 
                 if self.metadata.is_dir() {
                     if let Some(_path) = self.path_opt()
-                        && self.selected {
-                            column = column.push(
-                                widget::button::standard(fl!("open")).on_press(Message::Open(None)),
-                            );
-                        }
+                        && self.selected
+                    {
+                        column = column.push(
+                            widget::button::standard(fl!("open")).on_press(Message::Open(None)),
+                        );
+                    }
                 } else {
                     if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
-                        && self.selected && path_opt.is_some() {
-                            column =
-                                column.push(widget::button::standard(fl!("download")).on_press(
-                                    Message::Download(Some((path_opt.unwrap(), uri.clone()))),
-                                ));
-                        }
+                        && self.selected
+                        && path_opt.is_some()
+                    {
+                        column =
+                            column.push(widget::button::standard(fl!("download")).on_press(
+                                Message::Download(Some((path_opt.unwrap(), uri.clone()))),
+                            ));
+                    }
                 }
             }
             _ => {
@@ -3251,13 +3295,14 @@ impl Item {
 
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata
-            && self.metadata.is_dir() {
-                if self.selected {
-                    column = column
-                        .push(widget::button::standard(fl!("open")).on_press(Message::Open(None)));
-                }
-                return column.into();
+            && self.metadata.is_dir()
+        {
+            if self.selected {
+                column = column
+                    .push(widget::button::standard(fl!("open")).on_press(Message::Open(None)));
             }
+            return column.into();
+        }
 
         if let Some(json) = tbprofilerjson_opt {
             column = column.push(widget::text::heading(format!(
@@ -3272,20 +3317,21 @@ impl Item {
         }
 
         if let ItemMetadata::Path { .. } = &self.metadata
-            && self.metadata.is_tb_result() {
-                for (label, opt_path) in [
-                    ("Open .results.csv", self.metadata.csv_path()),
-                    ("Open .results.json", self.metadata.json_path()),
-                    ("Open .results.docx", self.metadata.docx_path()),
-                ] {
-                    if let Some(p) = opt_path {
-                        column = column.push(
-                            widget::button::standard(label)
-                                .on_press(Message::Open(Some(p.to_path_buf()))),
-                        );
-                    }
+            && self.metadata.is_tb_result()
+        {
+            for (label, opt_path) in [
+                ("Open .results.csv", self.metadata.csv_path()),
+                ("Open .results.json", self.metadata.json_path()),
+                ("Open .results.docx", self.metadata.docx_path()),
+            ] {
+                if let Some(p) = opt_path {
+                    column = column.push(
+                        widget::button::standard(label)
+                            .on_press(Message::Open(Some(p.to_path_buf()))),
+                    );
                 }
             }
+        }
 
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata {
@@ -3302,20 +3348,21 @@ impl Item {
                 }
             }
             if let Some(Location::Remote(uri, _, _)) = &self.location_opt
-                && self.metadata.is_tb_result() {
-                    for (label, opt_path) in [
-                        ("Download .results.csv", self.metadata.csv_path()),
-                        ("Download .results.json", self.metadata.json_path()),
-                        ("Download .results.docx", self.metadata.docx_path()),
-                    ] {
-                        if let Some(p) = opt_path {
-                            column =
-                                column.push(widget::button::standard(label).on_press(
-                                    Message::Download(Some((p.to_path_buf(), uri.clone()))),
-                                ));
-                        }
+                && self.metadata.is_tb_result()
+            {
+                for (label, opt_path) in [
+                    ("Download .results.csv", self.metadata.csv_path()),
+                    ("Download .results.json", self.metadata.json_path()),
+                    ("Download .results.docx", self.metadata.docx_path()),
+                ] {
+                    if let Some(p) = opt_path {
+                        column = column.push(
+                            widget::button::standard(label)
+                                .on_press(Message::Download(Some((p.to_path_buf(), uri.clone())))),
+                        );
                     }
                 }
+            }
         }
 
         column.into()
@@ -3328,13 +3375,26 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let mut column = widget::column::with_capacity(4).spacing(space_m);
+        let hits = self.metadata.ab1_seq_id();
+        let mut column = widget::column::with_capacity(5).spacing(space_m);
         column = column.push(widget::text::heading(self.name.clone()));
-        let call = self.metadata.erm41position28_call();
-        column = column.push(widget::text::heading(format!("erm(41) {}", call)));
-
+        if let Some(best_id_hit) = hits.first() {
+            column = column.push(widget::text::heading(format!(
+                "Best match between abscessus subspecies: {} ({:.1}%)",
+                best_id_hit.description, best_id_hit.identity,
+            )));
+        } else {
+            column = column.push(widget::text::body("No sequence match found"));
+        }
+        if self.metadata.is_abscessus() || self.metadata.is_bolletii() {
+            let call = self.metadata.erm41position28_call();
+            column = column.push(widget::text::heading(format!("erm(41) {}", call)));
+        }
         let mut details = widget::column::with_capacity(5).spacing(space_xxxs);
-        if let Some(chrom) = self.metadata.ab1_chromatogram() {
+        if let Some(chrom) = self.metadata.ab1_chromatogram()
+            && chrom.erm41_view_state_opt.is_some()
+            && !self.metadata.is_massiliense()
+        {
             details = details.push(widget::text::body(
                 "Shown are bases 19-39, with position 28 in bold.",
             ));
@@ -3345,24 +3405,24 @@ impl Item {
             let canvas = widget::Canvas::new(ChromatogramProgram {
                 is_reverse: chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse),
                 display_window: chrom.erm41_view_state_opt.map(|e| e.window),
-                highlighted_scans: chrom.erm41_view_state_opt
+                highlighted_scans: chrom
+                    .erm41_view_state_opt
                     .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx as usize).copied())
                     .map(|v| vec![v])
                     .unwrap_or_default(),
                 chrom,
             })
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0));
+            .width(Length::Fill)
+            .height(Length::Fixed(200.0));
             details = details.push(canvas);
             details = details.push(widget::text::body(""));
         }
         column = column.push(details);
 
-        let hits = self.metadata.ab1_seq_id();
-        if let Some(best) = hits.first() {
+        if let Some(best_id_hit) = hits.first() {
             column = column.push(
                 widget::button::standard("View alignment")
-                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
+                    .on_press(Message::OpenSeqAlignment(Box::new(best_id_hit.clone()))),
             );
         }
         column.into()
@@ -3554,7 +3614,9 @@ impl Item {
             details = details.push(widget::text::body("Could not align sequence to reference"));
         } else {
             if !self.metadata.is_seq_id() {
-                details = details.push(widget::text::body("Percent identity to reference is less than 60%."));
+                details = details.push(widget::text::body(
+                    "Percent identity to reference is less than 60%.",
+                ));
             }
             details = details.push(widget::text::body(format!(
                 "Sequence length: {}",
@@ -3573,9 +3635,11 @@ impl Item {
             ));
             let best = &hits[0];
             for snp in &best.rrl_snp_calls {
-                details = details.push(widget::text::body(
-                    format!("  pos {}: {}", snp.ref_pos + 1, snp.call_tag()),
-                ));
+                details = details.push(widget::text::body(format!(
+                    "  pos {}: {}",
+                    snp.ref_pos + 1,
+                    snp.call_tag()
+                )));
             }
             details = details.push(widget::text::body(""));
 
@@ -3597,7 +3661,8 @@ impl Item {
             let canvas = widget::Canvas::new(ChromatogramProgram {
                 is_reverse: chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse),
                 display_window: chrom.rrl_ntm_view_state_opt.map(|e| e.window),
-                highlighted_scans: chrom.rrl_ntm_view_state_opt
+                highlighted_scans: chrom
+                    .rrl_ntm_view_state_opt
                     .map(|e| {
                         let idx = e.snp_base_idx as usize;
                         [idx, idx + 1]
@@ -3608,8 +3673,8 @@ impl Item {
                     .unwrap_or_default(),
                 chrom,
             })
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0));
+            .width(Length::Fill)
+            .height(Length::Fixed(200.0));
             details = details.push(canvas);
             details = details.push(widget::text::body(""));
         }
@@ -3736,11 +3801,17 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
 
         // Restrict to the display window.
         // Fall back to the full scan range if the anchor was not found.
-        let total_scans : u16 = chrom.channels.iter().map(|c| c.len() as u16).max().unwrap_or(1);
+        let total_scans: u16 = chrom
+            .channels
+            .iter()
+            .map(|c| c.len() as u16)
+            .max()
+            .unwrap_or(1);
         if total_scans == 0 {
             return vec![];
         }
-        let (scan_start, scan_end) = self.display_window
+        let (scan_start, scan_end) = self
+            .display_window
             .unwrap_or((0, total_scans.saturating_sub(1)));
         let scan_end = scan_end.min(total_scans.saturating_sub(1));
         let window_len = (scan_end + 1).saturating_sub(scan_start).max(1);
@@ -3749,7 +3820,9 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         let mut y_min = i16::MAX;
         let mut y_max = i16::MIN;
         for channel in &chrom.channels {
-            for &v in &channel[(scan_start as usize).min(channel.len())..(scan_end as usize).min(channel.len())] {
+            for &v in &channel
+                [(scan_start as usize).min(channel.len())..(scan_end as usize).min(channel.len())]
+            {
                 if v < y_min {
                     y_min = v;
                 }
@@ -3776,7 +3849,8 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         // For reverse reads we flip the x-axis so the plus-strand 5′→3′ direction
         // always runs left to right, identical to a forward read.
         let scan_to_x = |scan: usize| -> f32 {
-            let t = (scan.saturating_sub(scan_start as usize)) as f32 / ((window_len as usize) - 1).max(1) as f32;
+            let t = (scan.saturating_sub(scan_start as usize)) as f32
+                / ((window_len as usize) - 1).max(1) as f32;
             if is_rev {
                 (1.0 - t) * plot_w
             } else {
@@ -4916,9 +4990,11 @@ impl Tab {
                     }
                 }
             }
-            Message::Download(path_uri_opt) => if let Some(path_uri) = path_uri_opt {
-                commands.push(Command::DownloadFile(vec![path_uri.0], vec![path_uri.1]));
-            },
+            Message::Download(path_uri_opt) => {
+                if let Some(path_uri) = path_uri_opt {
+                    commands.push(Command::DownloadFile(vec![path_uri.0], vec![path_uri.1]));
+                }
+            }
             Message::DownloadMany(paths, uris) => {
                 commands.push(Command::DownloadFile(paths, uris));
             }
@@ -7927,9 +8003,10 @@ impl Tab {
                     // (they carry their downloadable paths in sample_*_path_opt fields)
                     #[cfg(feature = "russh")]
                     if item.metadata.is_tb_result()
-                        && let Some(Location::Remote(..)) = &item.location_opt {
-                            return true;
-                        }
+                        && let Some(Location::Remote(..)) = &item.location_opt
+                    {
+                        return true;
+                    }
                     item.location_opt
                         .as_ref()
                         .and_then(Location::path_opt)
@@ -8054,24 +8131,24 @@ impl Tab {
                         .flat_map(|item| {
                             if let ItemMetadata::RusshPath { .. } = &item.metadata
                                 && let Some(Location::Remote(uri, _, path_opt)) = &item.location_opt
-                                {
-                                    if item.metadata.is_tb_result() {
-                                        // Expand sample items into their individual file paths
-                                        let mut result = Vec::new();
-                                        if let Some(p) = item.metadata.json_path() {
-                                            result.push((p.clone(), uri.clone()));
-                                        }
-                                        if let Some(p) = item.metadata.csv_path() {
-                                            result.push((p.clone(), uri.clone()));
-                                        }
-                                        if let Some(p) = item.metadata.docx_path() {
-                                            result.push((p.clone(), uri.clone()));
-                                        }
-                                        return result;
-                                    } else if let Some(path) = path_opt {
-                                        return vec![(path.clone(), uri.clone())];
+                            {
+                                if item.metadata.is_tb_result() {
+                                    // Expand sample items into their individual file paths
+                                    let mut result = Vec::new();
+                                    if let Some(p) = item.metadata.json_path() {
+                                        result.push((p.clone(), uri.clone()));
                                     }
+                                    if let Some(p) = item.metadata.csv_path() {
+                                        result.push((p.clone(), uri.clone()));
+                                    }
+                                    if let Some(p) = item.metadata.docx_path() {
+                                        result.push((p.clone(), uri.clone()));
+                                    }
+                                    return result;
+                                } else if let Some(path) = path_opt {
+                                    return vec![(path.clone(), uri.clone())];
                                 }
+                            }
                             vec![]
                         })
                         .filter(|(path, _)| seen.insert(path.clone()))
@@ -8101,30 +8178,32 @@ impl Tab {
         let mut settings = Vec::new();
         // Only allow modifying open-with if all mime types are the same
         if mime_types.len() == 1
-            && let Some(mime) = mime_types.first()
+            && let Some(mime) = mime_types
+                .first()
                 .and_then(|(mime, _)| mime.parse::<Mime>().ok())
-                && let Some(mime_app_cache) = mime_app_cache_opt {
-                    let mime_apps = mime_app_cache.get(&mime);
-                    if !mime_apps.is_empty() {
-                        let mime_closure = mime.clone();
-                        settings.push(
-                            widget::settings::item::builder(fl!("open-with")).control(
-                                Element::from(
-                                    widget::dropdown(
-                                        mime_apps,
-                                        mime_apps.iter().position(|x| x.is_default),
-                                        move |index| (index, mime_closure.clone()),
-                                    )
-                                    .icons(Cow::Borrowed(mime_app_cache.icons(&mime))),
-                                )
-                                .map(|(index, mime)| {
-                                    let mime_app = &mime_apps[index];
-                                    Message::SetOpenWith(mime, mime_app.id.clone())
-                                }),
-                            ),
-                        );
-                    }
-                }
+            && let Some(mime_app_cache) = mime_app_cache_opt
+        {
+            let mime_apps = mime_app_cache.get(&mime);
+            if !mime_apps.is_empty() {
+                let mime_closure = mime.clone();
+                settings.push(
+                    widget::settings::item::builder(fl!("open-with")).control(
+                        Element::from(
+                            widget::dropdown(
+                                mime_apps,
+                                mime_apps.iter().position(|x| x.is_default),
+                                move |index| (index, mime_closure.clone()),
+                            )
+                            .icons(Cow::Borrowed(mime_app_cache.icons(&mime))),
+                        )
+                        .map(|(index, mime)| {
+                            let mime_app = &mime_apps[index];
+                            Message::SetOpenWith(mime, mime_app.id.clone())
+                        }),
+                    ),
+                );
+            }
+        }
 
         #[cfg(unix)]
         {
