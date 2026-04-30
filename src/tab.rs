@@ -2373,33 +2373,33 @@ impl ItemMetadata {
         }
     }
 
-    pub fn is_abscessus(&self) -> bool {
+    pub fn is_abscessus_seq_id(&self) -> bool {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .and_then(|s| s.species_hit_opt.as_ref())
+                .and_then(|s| s.seq_id_hits.first())
                 .map(|h| h.description == "Mycobacteroides abscessus subsp. abscessus")
                 .unwrap_or(false),
             _ => false,
         }
     }
 
-    pub fn is_bolletii(&self) -> bool {
+    pub fn is_bolletii_seq_id(&self) -> bool {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .and_then(|s| s.species_hit_opt.as_ref())
+                .and_then(|s| s.seq_id_hits.first())
                 .map(|h| h.description == "Mycobacteroides abscessus subsp. bolletii")
                 .unwrap_or(false),
             _ => false,
         }
     }
 
-    pub fn is_massiliense(&self) -> bool {
+    pub fn is_massiliense_seq_id(&self) -> bool {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .and_then(|s| s.species_hit_opt.as_ref())
+                .and_then(|s| s.seq_id_hits.first())
                 .map(|h| h.description == "Mycobacteroides abscessus subsp. massiliense")
                 .unwrap_or(false),
             _ => false,
@@ -3376,24 +3376,30 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.metadata.ab1_seq_id();
-        let mut column = widget::column::with_capacity(5).spacing(space_m);
+        let mut column = widget::column::with_capacity(6).spacing(space_m);
         column = column.push(widget::text::heading(self.name.clone()));
-        if let Some(best_id_hit) = hits.first() {
-            column = column.push(widget::text::heading(format!(
-                "Best match between abscessus subspecies: {} ({:.1}%)",
-                best_id_hit.description, best_id_hit.identity,
-            )));
-        } else {
+        if hits.is_empty() {
             column = column.push(widget::text::body("No sequence match found"));
+        } else {
+            column = column.push(widget::text::heading(
+                "Percent identity to erm(41) references of abscessus subspecies:",
+            ));
+            let hits_column = hits.into_iter().fold(
+                widget::column::with_capacity(hits.len()).spacing(space_xxxs),
+                |col, hit| col.push(widget::text::body(format!(
+                    "{}: {:.1}%", hit.description, hit.identity,
+                ))),
+            );
+            column = column.push(hits_column);
         }
-        if self.metadata.is_abscessus() || self.metadata.is_bolletii() {
+        if self.metadata.is_abscessus_seq_id() || self.metadata.is_bolletii_seq_id() {
             let call = self.metadata.erm41position28_call();
             column = column.push(widget::text::heading(format!("erm(41) {}", call)));
         }
         let mut details = widget::column::with_capacity(5).spacing(space_xxxs);
         if let Some(chrom) = self.metadata.ab1_chromatogram()
             && chrom.erm41_view_state_opt.is_some()
-            && !self.metadata.is_massiliense()
+            && !self.metadata.is_massiliense_seq_id()
         {
             details = details.push(widget::text::body(
                 "Shown are bases 19-39, with position 28 in bold.",
