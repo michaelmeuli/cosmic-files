@@ -4,10 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use super::reverse_complement;
 use super::{SeqIdHit, best_alignment, parse_fasta_seq};
-
-pub(super) const REF_MAB_R5052: &str = include_str!("../../res/sequences/MAB_r5052.fasta");
-const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
-const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
+use super::{REF_MAB_R5052, RRL_FWD_START, RRL_FWD_END, RRL_ANCHOR_L, RRL_ANCHOR_R};
 
 #[derive(Debug, Deserialize, Clone)]
 struct ResistanceVariant {
@@ -156,8 +153,10 @@ pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Op
 }
 
 pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
-    let refseq = parse_fasta_seq(REF_MAB_R5052);
+    let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
+
+    let refseq = parse_fasta_seq(REF_MAB_R5052); 
 
     let (fwd_id, fwd_off) = best_alignment(query, &refseq);
     let (rev_id, rev_off) = best_alignment(&rc, &refseq);

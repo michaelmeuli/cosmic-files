@@ -8,20 +8,33 @@ pub use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall, identify_sequence
 pub use rrl::RrlSnpCall;
 
 use erm41::Erm41Position28;
-use rrl::REF_MAB_R5052;
 
-const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
+const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
+const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
+const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
+const ERM41_ANCHOR_R: &[u8] = b"GGGGCTGGTATCCGCTCACT";
+
+const RRL_FWD_START: &[u8] = b"ctaagttcttaagggcgcat";
+const RRL_FWD_END: &[u8] = b"ctaagttcttaagggcgcat";
+const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
+const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
+
 const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fasta");
 const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
 const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
 const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
+
+const REF_ERM41_ABSCESSUS: &str = include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
+const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
+const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
+
+const REF_MAB_R5052: &str = include_str!("../../res/sequences/rrl/MAB_r5052.fasta");
+
+const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 const REF_MYCO_ERM41: &str = include_str!("../../res/sequences/myco_erm41.fasta");
 const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpoB.fasta");
-const REF_ERM41_ABSCESSUS: &str = include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
-const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
-const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
 
 
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
@@ -30,6 +43,32 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
         b'G' => b'C', b'C' => b'G',
         _    => b'N',
     }).collect()
+}
+
+pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'a [u8] {
+    let rc_start: Vec<u8> = reverse_complement(fwd_end);
+    let rc_end: Vec<u8> = reverse_complement(fwd_start);
+
+    let find_start = |p: &[u8]| seq.windows(p.len()).position(|w| w.eq_ignore_ascii_case(p));
+    let find_end = |p: &[u8]| {
+        seq.windows(p.len())
+            .rposition(|w| w.eq_ignore_ascii_case(p))
+            .map(|pos| pos + p.len())
+    };
+
+    let start = [fwd_start, rc_start.as_slice()]
+        .into_iter()
+        .filter_map(find_start)
+        .min()
+        .unwrap_or(0);
+
+    let end = [fwd_end, rc_end.as_slice()]
+        .into_iter()
+        .filter_map(find_end)
+        .max()
+        .unwrap_or(seq.len());
+
+    &seq[start..end.min(seq.len())]
 }
 
 pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8] {
