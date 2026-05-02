@@ -15,20 +15,20 @@ struct AbscessusResistanceVariants {
     gene: String,
     #[serde(rename = "Mutation")]
     mutation: String,
-    #[serde(rename = "Drug")]
+    #[serde(rename = "drug")]
     drug: String,
-    #[serde(rename = "Confers")]
+    #[serde(rename = "type")]
     confers: String,
 }
 
 
 /// Maps each 0-based ref_pos to `(wt_base, alt_to_drugs)` for rrl entries in
-/// abscessus_resistance_variants.csv. Parsed from HGVS strings like "n.2270A>C".
+/// Mycobacterium_abscessus/variants.csv. Parsed from HGVS strings like "n.2270A>C".
 /// Multiple alts at the same position (e.g. A>C, A>G, A>T) are grouped under one key.
-pub static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
+pub static RRL_ABSCESSUS_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
     LazyLock::new(|| {
         let mut rdr = csv::Reader::from_reader(
-            include_str!("../../res/abscessus_resistance_variants.csv").as_bytes(),
+            include_str!("../../res/sequences/ntm-db/Mycobacterium_abscessus/variants.csv").as_bytes(),
         );
         let mut map: BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)> = BTreeMap::new();
         for row in rdr.deserialize::<AbscessusResistanceVariants>() {
@@ -36,7 +36,7 @@ pub static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<S
             if row.gene.trim() != "rrl" {
                 continue;
             }
-            if row.confers.trim() != "resistance" {
+            if row.confers.trim() != "drug_resistance" {
                 continue;
             }
             let drug = row.drug.trim();
@@ -97,8 +97,8 @@ impl RrlSnpCall {
 
 /// Compute a call for every rrl resistance SNP position.
 /// Returns one entry per unique position; `query_base` is `None` when not covered.
-pub fn call_rrl_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
-    RRL_RESISTANCE_SNPS
+pub fn call_rrl_abscessus_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
+    RRL_ABSCESSUS_RESISTANCE_SNPS
         .iter()
         .map(|(&ref_pos, (wt_base, alt_to_drugs))| {
             let query_pos = ref_pos as isize - alignment_offset;
@@ -144,8 +144,7 @@ pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Op
 }
 
 /// Align `query` against the M. abscessus rrl (23S rRNA) reference (MAB_r5052) and return
-/// the single hit with resistance SNP calls for all positions from abscessus_resistance_variants.csv
-/// (Gene == rrl).
+/// the single hit with resistance SNP calls for all positions from ntm-db/Mycobacterium_abscessus/variants.csv
 pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let refseq = parse_fasta_seq(REF_MAB_R5052);
     let rc = reverse_complement(query);
@@ -158,7 +157,7 @@ pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
         (fwd_id, false, query, fwd_off)
     };
 
-    let rrl_snp_calls = call_rrl_snps(aligned_query, offset);
+    let rrl_abscessus_snp_calls = call_rrl_abscessus_snps(aligned_query, offset);
 
     vec![SeqIdHit {
         accession: "MAB_r5052".to_string(),
@@ -167,7 +166,7 @@ pub fn identify_sequence_23s_ntm(query: &[u8]) -> Vec<SeqIdHit> {
         is_reverse,
         kansasii_gastri_snp_calls: vec![],
         marinum_ulcerans_snp_calls: vec![],
-        rrl_snp_calls,
+        rrl_snp_calls: rrl_abscessus_snp_calls,
         aligned_query: aligned_query.to_vec(),
         alignment_offset: offset,
         erm41position28_opt: None,
