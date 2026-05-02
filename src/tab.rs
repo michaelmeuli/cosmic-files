@@ -90,7 +90,7 @@ use crate::{
         identify_species_16s, identify_species_23s_ntm, identify_species_erm41,
         identify_species_hsp65, identify_species_rpob, parse_ab1_chromatogram, parse_ab1_quality,
         parse_ab1_sequence,
-        rrl::identify_sequence_23s_ntm,
+        rrl::identify_sequence_rrl_ntm,
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         trim_to_min_quality,
     },
@@ -923,7 +923,7 @@ pub fn item_from_entry(
                     } else if is_hsp65 {
                         identify_sequence_hsp65(trimmed)
                     } else if is_23s_ntm {
-                        identify_sequence_23s_ntm(trimmed)
+                        identify_sequence_rrl_ntm(trimmed)
                     } else {
                         Vec::new()
                     };

@@ -1,10 +1,9 @@
 use super::reverse_complement;
 use super::{SeqIdHit, best_alignment, parse_fasta_seq};
 
-/// Conserved left flank — ends immediately before position 28
+const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
+const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
-
-/// Conserved right flank — starts immediately after position 28  
 const ERM41_ANCHOR_R: &[u8] = b"GGGGCTGGTATCCGCTCACT";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,14 +116,9 @@ pub fn erm41position28_from_single_read(read: &[u8]) -> Erm41Position28 {
     base_to_call(call_position28(&rc)).unwrap_or(Erm41Position28::Undetermined)
 }
 
-fn trim_erm41_primers(seq: &[u8]) -> Vec<u8> {
-    const FWD_START: &[&[u8]] = &[b"gtgtccggccaacggtcgcg"];
-    const FWD_END: &[&[u8]] = &[b"tggtgatcaggcggcgctga"];
-
-    // On an RC-strand query the start primers appear as RC(end primers) and vice versa,
-    // so we search both orientations for each boundary.
-    let rc_start: Vec<Vec<u8>> = FWD_END.iter().map(|p| reverse_complement(p)).collect();
-    let rc_end: Vec<Vec<u8>> = FWD_START.iter().map(|p| reverse_complement(p)).collect();
+fn trim_erm41_primers<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'a [u8] {
+    let rc_start: Vec<u8> = reverse_complement(fwd_end);
+    let rc_end: Vec<u8> = reverse_complement(fwd_start);
 
     let find_start = |p: &[u8]| seq.windows(p.len()).position(|w| w.eq_ignore_ascii_case(p));
     let find_end = |p: &[u8]| {
@@ -133,28 +127,23 @@ fn trim_erm41_primers(seq: &[u8]) -> Vec<u8> {
             .map(|pos| pos + p.len())
     };
 
-    let start = FWD_START
-        .iter()
-        .map(|p| p as &[u8])
-        .chain(rc_start.iter().map(|p| p.as_slice()))
+    let start = [fwd_start, rc_start.as_slice()]
+        .into_iter()
         .filter_map(find_start)
         .min()
         .unwrap_or(0);
 
-    let end = FWD_END
-        .iter()
-        .map(|p| p as &[u8])
-        .chain(rc_end.iter().map(|p| p.as_slice()))
+    let end = [fwd_end, rc_end.as_slice()]
+        .into_iter()
         .filter_map(find_end)
         .max()
         .unwrap_or(seq.len());
 
-    seq[start..end.min(seq.len())].to_vec()
+    &seq[start..end.min(seq.len())]
 }
 
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
-    let query = trim_erm41_primers(query);
-    let query = query.as_slice();
+    let query = trim_erm41_primers(query, ERM41_FWD_START, ERM41_FWD_END);
     let rc = reverse_complement(query);
     let erm41_pos28 = erm41position28_from_single_read(query);
 
