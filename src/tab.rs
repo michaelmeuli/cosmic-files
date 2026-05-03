@@ -2336,7 +2336,7 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_seq_id(&self) -> &[SeqIdHit] {
+    pub fn seq_id_hits(&self) -> &[SeqIdHit] {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
@@ -2354,7 +2354,7 @@ impl ItemMetadata {
     }
 
     pub fn is_seq_id(&self) -> bool {
-        self.ab1_seq_id()
+        self.seq_id_hits()
             .first()
             .is_some_and(|h| h.identity >= 60.0)
     }
@@ -2921,7 +2921,7 @@ impl Item {
         !self.is_fasta() && self.name.to_ascii_lowercase().contains("mbak14")
     }
 
-    pub fn is_23s_ntm(&self) -> bool {
+    pub fn is_rrl_ntm(&self) -> bool {
         !self.is_fasta() && self.name.to_ascii_lowercase().contains("mclr")
     }
 
@@ -3375,7 +3375,7 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
-        let hits = self.metadata.ab1_seq_id();
+        let hits = self.metadata.seq_id_hits();
         let mut column = widget::column::with_capacity(6).spacing(space_m);
         column = column.push(widget::text::heading(self.name.clone()));
         if hits.is_empty() {
@@ -3445,7 +3445,7 @@ impl Item {
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.ab1_seq_id();
+        let hits = self.metadata.seq_id_hits();
         if hits.is_empty() {
             details = details.push(widget::text::body("No sequence match found"));
         } else {
@@ -3604,7 +3604,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_23s_ntm(&self) -> Element<'_, Message> {
+    pub fn preview_rrl_ntm(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -3615,7 +3615,7 @@ impl Item {
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.ab1_seq_id();
+        let hits = self.metadata.seq_id_hits();
         if hits.is_empty() {
             details = details.push(widget::text::body("Could not align sequence to reference"));
         } else {

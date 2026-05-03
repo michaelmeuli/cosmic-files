@@ -1,10 +1,9 @@
-
+use super::reverse_complement;
+use super::{REF_MAB_R5052, RRL_ANCHOR_L, RRL_ANCHOR_R, RRL_FWD_END, RRL_FWD_START};
+use super::{SeqIdHit, best_alignment, parse_fasta};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
-use super::reverse_complement;
-use super::{SeqIdHit, best_alignment, parse_fasta_seq};
-use super::{REF_MAB_R5052, RRL_FWD_START, RRL_FWD_END, RRL_ANCHOR_L, RRL_ANCHOR_R};
 
 #[derive(Debug, Deserialize, Clone)]
 struct ResistanceVariant {
@@ -23,12 +22,18 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec
     let mut map: BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)> = BTreeMap::new();
     for row in rdr.deserialize::<ResistanceVariant>() {
         let row = row.unwrap();
-        if row.gene.trim() != "rrl" { continue; }
-        if row.confers.trim() != "drug_resistance" { continue; }
+        if row.gene.trim() != "rrl" {
+            continue;
+        }
+        if row.confers.trim() != "drug_resistance" {
+            continue;
+        }
         let drug = row.drug.trim();
         let m = row.mutation.trim();
         if let Some(rest) = m.strip_prefix("n.") {
-            let digits_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            let digits_end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
             if let Ok(pos1) = rest[..digits_end].parse::<usize>() {
                 let after_pos = &rest[digits_end..];
                 if let (Some(wt), Some(alt)) = (
@@ -50,19 +55,19 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec
     map
 }
 
-pub static RRL_ABSCESSUS_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
-    LazyLock::new(|| {
-        parse_rrl_resistance_snps(include_str!(
-            "../../res/sequences/ntm-db/Mycobacterium_abscessus/variants.csv"
-        ))
-    });
+pub static RRL_ABSCESSUS_RESISTANCE_SNPS: LazyLock<
+    BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>,
+> = LazyLock::new(|| {
+    parse_rrl_resistance_snps(include_str!(
+        "../../res/sequences/ntm-db/Mycobacterium_abscessus/variants.csv"
+    ))
+});
 pub static RRL_AVIUM_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
     LazyLock::new(|| {
         parse_rrl_resistance_snps(include_str!(
             "../../res/sequences/ntm-db/Mycobacterium_avium/variants.csv"
         ))
     });
-
 
 #[derive(Clone, Debug)]
 pub struct RrlSnpCall {
@@ -104,7 +109,12 @@ fn call_rrl_snps(
             } else {
                 None
             };
-            RrlSnpCall { ref_pos, query_base, wt_base: *wt_base, resistance_bases: alt_to_drugs.clone() }
+            RrlSnpCall {
+                ref_pos,
+                query_base,
+                wt_base: *wt_base,
+                resistance_bases: alt_to_drugs.clone(),
+            }
         })
         .collect()
 }
@@ -121,9 +131,11 @@ pub fn call_rrl_avium_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpC
     call_rrl_snps(&RRL_AVIUM_RESISTANCE_SNPS, query, alignment_offset)
 }
 
-
-pub(super) fn find_rrl_ntm_display_window(bases: &[u8], peak_locs: &[u16]) -> Option<(u16, u16, bool, u16)> {
-    const LEFT: usize  = 9;
+pub(super) fn find_rrl_ntm_display_window(
+    bases: &[u8],
+    peak_locs: &[u16],
+) -> Option<(u16, u16, bool, u16)> {
+    const LEFT: usize = 9;
     const RIGHT: usize = 10;
 
     let anchor_len: u16 = RRL_ANCHOR_L.len() as u16;
@@ -156,28 +168,52 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
 
-    let refseq = parse_fasta_seq(REF_MAB_R5052); 
+    let (mab_accession, mab_description, mab_refseq) = parse_fasta(REF_MAB_R5052);
+    let avium_refseq: &[u8] = &super::REF_AVIUM_RRL;
+    log::info!("RRL reference sequences: M. abscessus length {}, M. avium length {}", mab_refseq.len(), avium_refseq.len());
 
-    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-    let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-        (rev_id, true, rc.as_slice(), rev_off)
-    } else {
-        (fwd_id, false, query, fwd_off)
-    };
+    let refs: &[(&[u8], &str, &str)] = &[
+        (&mab_refseq, &mab_accession, &mab_description),
+        (avium_refseq, "REF_AVIUM_RRL", "Mycobacterium avium"),
+    ];
 
-    let rrl_abscessus_snp_calls = call_rrl_abscessus_snps(aligned_query, offset);
+    let mut hits: Vec<SeqIdHit> = refs
+        .iter()
+        .map(|&(refseq, accession, description)| {
+            let (fwd_id, fwd_off) = best_alignment(query, refseq);
+            let (rev_id, rev_off) = best_alignment(&rc, refseq);
+            let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
+                (rev_id, true, rc.as_slice(), rev_off)
+            } else {
+                (fwd_id, false, query, fwd_off)
+            };
+            let rrl_snp_calls = if accession == "REF_AVIUM_RRL" {
+                call_rrl_avium_snps(aligned_query, offset)
+            } else if accession == "REF_MAB_R5052"{
+                call_rrl_abscessus_snps(aligned_query, offset)
+            }
+            else {
+                vec![]
+            };
+            SeqIdHit {
+                accession: accession.to_string(),
+                description: description.to_string(),
+                identity,
+                is_reverse,
+                kansasii_gastri_snp_calls: vec![],
+                marinum_ulcerans_snp_calls: vec![],
+                rrl_snp_calls,
+                aligned_query: aligned_query.to_vec(),
+                alignment_offset: offset,
+                erm41position28_opt: None,
+            }
+        })
+        .collect();
 
-    vec![SeqIdHit {
-        accession: "MAB_r5052".to_string(),
-        description: "M. abscessus".to_string(),
-        identity,
-        is_reverse,
-        kansasii_gastri_snp_calls: vec![],
-        marinum_ulcerans_snp_calls: vec![],
-        rrl_snp_calls: rrl_abscessus_snp_calls,
-        aligned_query: aligned_query.to_vec(),
-        alignment_offset: offset,
-        erm41position28_opt: None,
-    }]
+    hits.sort_by(|a, b| {
+        b.identity
+            .partial_cmp(&a.identity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits
 }

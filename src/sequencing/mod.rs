@@ -30,6 +30,14 @@ const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41
 
 const REF_MAB_R5052: &str = include_str!("../../res/sequences/rrl/MAB_r5052.fasta");
 
+pub static REF_AVIUM_RRL: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+    extract_gene_from_genome(
+        include_str!("../../res/sequences/ntm-db/Mycobacterium_avium/genome.fasta"),
+        include_str!("../../res/sequences/ntm-db/Mycobacterium_avium/genome.gff"),
+        "rrl",
+    ).expect("rrl gene not found in M. avium genome")
+});
+
 const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 const REF_MYCO_ERM41: &str = include_str!("../../res/sequences/myco_erm41.fasta");
 const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
@@ -99,6 +107,53 @@ pub(crate) fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
         .collect()
 }
 
+
+/// Extract a named gene from a genome FASTA + GFF pair.
+/// Looks for a `gene` feature whose `gene=` attribute matches `gene_name`.
+/// Returns the sequence on the forward strand (or its reverse complement for `-` strand genes).
+pub fn extract_gene_from_genome(fasta: &str, gff: &str, gene_name: &str) -> Option<Vec<u8>> {
+    let mut target_seqname = String::new();
+    let mut target_start: usize = 0;
+    let mut target_end: usize = 0;
+    let mut target_strand = b'+';
+
+    for line in gff.lines() {
+        if line.starts_with('#') { continue; }
+        let fields: Vec<&str> = line.splitn(9, '\t').collect();
+        if fields.len() < 9 { continue; }
+        if fields[2] != "gene" { continue; }
+        let start: usize = match fields[3].parse() { Ok(v) => v, Err(_) => continue };
+        let end: usize   = match fields[4].parse() { Ok(v) => v, Err(_) => continue };
+        let strand = fields[6].bytes().next().unwrap_or(b'+');
+        let is_match = fields[8].split(';').any(|a| {
+            a.split_once('=').map_or(false, |(k, v)| k == "gene" && v == gene_name)
+        });
+        if is_match {
+            target_seqname = fields[0].to_string();
+            target_start = start;
+            target_end = end;
+            target_strand = strand;
+            break;
+        }
+    }
+
+    if target_seqname.is_empty() { return None; }
+
+    let mut in_target = false;
+    let mut seq: Vec<u8> = Vec::new();
+    for line in fasta.lines() {
+        if let Some(header) = line.strip_prefix('>') {
+            in_target = header.split_whitespace().next().unwrap_or("") == target_seqname;
+        } else if in_target {
+            seq.extend(line.bytes().filter(|b| b.is_ascii_alphabetic()));
+        }
+    }
+
+    if seq.is_empty() { return None; }
+
+    let gene_seq = seq.get(target_start.checked_sub(1)?..target_end)?.to_vec();
+    Some(if target_strand == b'-' { reverse_complement(&gene_seq) } else { gene_seq })
+}
 
 /// Parse a FASTA string into `(accession, description, sequence_bytes)`.
 pub(crate) fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
@@ -636,6 +691,15 @@ impl SeqIdHit {
             "REF_ERM41_MASSILENSE" => REF_ERM41_MASSILENSE,
             // For 23S rRNA NTM
             "MAB_r5052" => REF_MAB_R5052,
+            "REF_AVIUM_RRL" => return format_pairwise_alignment_impl(
+                &self.accession,
+                &self.description,
+                self.identity,
+                self.is_reverse,
+                &self.aligned_query,
+                &REF_AVIUM_RRL,
+                self.alignment_offset,
+            ),
             _ => return format!("Unknown reference accession: {}\n", self.accession),
         };
         let (_, _, refseq) = parse_fasta(ref_fasta);
