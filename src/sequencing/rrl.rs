@@ -1,6 +1,13 @@
 use super::reverse_complement;
-use super::{REF_MAB_R5052, RRL_ANCHOR_L, RRL_ANCHOR_R, RRL_FWD_END, RRL_FWD_START};
-use super::{SeqIdHit, best_alignment, parse_fasta};
+use super::{
+    REF_MAB_R5052, 
+    REF_AVIUM_RRL,
+    RRL_ANCHOR_L, 
+    RRL_ANCHOR_R, 
+    RRL_FWD_END, 
+    RRL_FWD_START
+};
+use super::{SeqIdHit, best_alignment, parse_fasta_seq};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -168,31 +175,35 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
 
-    let (mab_accession, mab_description, mab_refseq) = parse_fasta(REF_MAB_R5052);
-    let avium_refseq: &[u8] = &super::REF_AVIUM_RRL;
-    log::info!("RRL reference sequences: M. abscessus length {}, M. avium length {}", mab_refseq.len(), avium_refseq.len());
-
-    let refs: &[(&[u8], &str, &str)] = &[
-        (&mab_refseq, &mab_accession, &mab_description),
-        (avium_refseq, "REF_AVIUM_RRL", "Mycobacterium avium"),
+    let refs: &[(&str, &str, &str)] = &[
+        (
+            REF_MAB_R5052,
+            "REF_MAB_R5052",
+            "Mycobacterium abscessus",
+        ),
+        (
+            REF_AVIUM_RRL,
+            "REF_AVIUM_RRL",
+            "Mycobacterium avium",
+        ),
     ];
 
     let mut hits: Vec<SeqIdHit> = refs
         .iter()
-        .map(|&(refseq, accession, description)| {
-            let (fwd_id, fwd_off) = best_alignment(query, refseq);
-            let (rev_id, rev_off) = best_alignment(&rc, refseq);
+        .map(|(fasta, accession, description)| {
+            let refseq = parse_fasta_seq(fasta);
+            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
             let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
                 (rev_id, true, rc.as_slice(), rev_off)
             } else {
                 (fwd_id, false, query, fwd_off)
             };
-            let rrl_snp_calls = if accession == "REF_AVIUM_RRL" {
+            let rrl_snp_calls = if *accession == "REF_AVIUM_RRL" {
                 call_rrl_avium_snps(aligned_query, offset)
-            } else if accession == "REF_MAB_R5052"{
+            } else if *accession == "REF_MAB_R5052" {
                 call_rrl_abscessus_snps(aligned_query, offset)
-            }
-            else {
+            } else {
                 vec![]
             };
             SeqIdHit {
