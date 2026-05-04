@@ -6,15 +6,20 @@ use crate::operation::{OperationError, sync_to_disk};
 use anyhow::Context as AnyhowContext;
 use compio::BufResult;
 use compio::buf::{IntoInner, IoBuf};
-use compio::driver::{ToSharedFd, op::AsyncifyFd};
+use compio::driver::ToSharedFd;
+use compio::driver::op::AsyncifyFd;
 use compio::io::{AsyncReadAt, AsyncWriteAt};
 use cosmic::iced::futures;
 use futures::{FutureExt, StreamExt};
+use std::cell::Cell;
+use std::error::Error;
+use std::fs;
 use std::future::Future;
+use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Instant;
-use std::{cell::Cell, error::Error, fs, ops::ControlFlow, path::PathBuf};
 use walkdir::WalkDir;
 
 #[cfg(feature = "gvfs")]
@@ -473,12 +478,12 @@ impl Op {
         progress.total_bytes = metadata.as_ref().map(|m| m.len());
         (ctx.on_progress)(self, &progress);
 
-        if let Some(metadata) = metadata.as_ref() {
-            if let Err(why) = to_file.set_permissions(metadata.permissions()).await {
-                // This error is not propagated upwards as some filesystems do not support setting permissions
-                if !matches!(why.kind(), std::io::ErrorKind::Unsupported) {
-                    tracing::warn!(?why, "failed to set permissions for {}", self.to.display(),);
-                }
+        if let Some(metadata) = metadata.as_ref()
+            && let Err(why) = to_file.set_permissions(metadata.permissions()).await
+        {
+            // This error is not propagated upwards as some filesystems do not support setting permissions
+            if !matches!(why.kind(), std::io::ErrorKind::Unsupported) {
+                tracing::warn!(?why, "failed to set permissions for {}", self.to.display(),);
             }
         }
 

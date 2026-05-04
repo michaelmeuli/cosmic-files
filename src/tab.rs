@@ -1,88 +1,73 @@
 #[cfg(feature = "desktop")]
 use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
-use cosmic::{
-    Apply, Element, cosmic_theme, font,
-    iced::core::{mouse::ScrollDelta, widget::tree},
-    iced::{
-        Alignment, Border, Color, ContentFit, Length, Point, Rectangle, Size, Subscription, Vector,
-        advanced::{
-            graphics,
-            text::{self, Paragraph},
-        },
-        alignment::Vertical,
-        clipboard::dnd::DndAction,
-        futures::{self, SinkExt},
-        keyboard::Modifiers,
-        padding, stream,
-        widget::{
-            rule,
-            scrollable::{self, AbsoluteOffset, Viewport},
-            stack,
-        },
-        window,
-    },
-    theme,
-    widget::{
-        self, DndDestination, DndSource, Id, RcElementWrapper, Widget,
-        menu::{action::MenuAction, key_bind::KeyBind},
-        space,
-    },
+use cosmic::iced::advanced::graphics;
+use cosmic::iced::advanced::text::{self, Paragraph};
+use cosmic::iced::alignment::Vertical;
+use cosmic::iced::clipboard::dnd::DndAction;
+use cosmic::iced::core::mouse::ScrollDelta;
+use cosmic::iced::core::widget::tree;
+use cosmic::iced::futures::{self, SinkExt};
+use cosmic::iced::keyboard::Modifiers;
+use cosmic::iced::widget::scrollable::{self, AbsoluteOffset, Viewport};
+use cosmic::iced::widget::{rule, stack};
+use cosmic::iced::{
+    Alignment, Border, Color, ContentFit, Length, Point, Rectangle, Size, Subscription, Vector,
+    padding, stream, window,
 };
-use icu::{
-    datetime::{
-        DateTimeFormatter, DateTimeFormatterPreferences, fieldsets, input::DateTime,
-        options::TimePrecision,
-    },
-    locale::preferences::extensions::unicode::keywords::HourCycle,
-};
+use cosmic::widget::menu::action::MenuAction;
+use cosmic::widget::menu::key_bind::KeyBind;
+use cosmic::widget::{self, DndDestination, DndSource, Id, RcElementWrapper, Widget, space};
+use cosmic::{Apply, Element, cosmic_theme, font, theme};
+use i18n_embed::LanguageLoader;
+use icu::datetime::input::DateTime;
+use icu::datetime::options::TimePrecision;
+use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences, fieldsets};
+use icu::locale::preferences::extensions::unicode::keywords::HourCycle;
 use image::{DynamicImage, ImageReader};
 use jiff_icu::ConvertFrom;
 use mime_guess::{Mime, mime};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::cell::Cell;
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::error::Error;
+use std::fmt::{self, Display};
+use std::fs::{self, File, Metadata};
+use std::hash::Hash;
+use std::io::{BufRead, BufReader};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-use std::{
-    borrow::Cow,
-    cell::Cell,
-    cmp::{Ordering, Reverse},
-    collections::{BTreeMap, BTreeSet, HashMap},
-    error::Error,
-    fmt::{self, Display},
-    fs::{self, File, Metadata},
-    hash::Hash,
-    io::{BufRead, BufReader},
-    path::{self, Path, PathBuf},
-    sync::{Arc, LazyLock, RwLock, atomic},
-    time::{Duration, Instant, SystemTime},
-};
-
+use std::path::{self, Path, PathBuf};
+use std::sync::{Arc, LazyLock, RwLock, atomic};
+use std::time::{Duration, Instant, SystemTime};
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
 use trash::{TrashItem, TrashItemMetadata, TrashItemSize};
 use walkdir::WalkDir;
 
+use crate::app::{Action, PreviewItem, PreviewKind};
+use crate::clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste};
+use crate::config::{
+    ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig,
+    ThumbCfg, TBConfig,
+};
+use crate::dialog::DialogKind;
+use crate::large_image::{
+    LargeImageManager, decode_large_image, exceeds_memory_limit, should_use_dedicated_worker,
+    should_use_tiling,
+};
+use crate::localize::{LANGUAGE_SORTER, LOCALE};
+use crate::mime_icon::{mime_for_path, mime_icon};
+use crate::mounter::MOUNTERS;
+use crate::operation::{Controller, OperationError};
+use crate::thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize};
+use crate::thumbnailer::thumbnailer;
+use crate::trash::{Trash, TrashExt};
+use crate::{FxOrderMap, fl, menu, mime_app, mouse_area};
+use crate::russh::CLIENTS;
 use crate::{
-    FxOrderMap,
-    app::{Action, PreviewItem, PreviewKind},
-    clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste},
-    config::{
-        ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig,
-        TabConfig, ThumbCfg,
-    },
-    dialog::DialogKind,
-    fl,
-    large_image::{
-        LargeImageManager, decode_large_image, exceeds_memory_limit, should_use_dedicated_worker,
-        should_use_tiling,
-    },
-    localize::{LANGUAGE_SORTER, LOCALE},
-    menu, mime_app,
-    mime_icon::{mime_for_path, mime_icon},
-    mounter::MOUNTERS,
-    mouse_area,
-    operation::{Controller, OperationError},
-    russh::CLIENTS,
     sequencing::{
         Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
         erm41::{Erm41Position28, identify_sequence_erm41},
@@ -94,9 +79,6 @@ use crate::{
         tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
         trim_to_min_quality,
     },
-    thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize},
-    thumbnailer::thumbnailer,
-    trash::{Trash, TrashExt},
 };
 
 pub const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
@@ -1918,7 +1900,7 @@ impl Location {
         }
     }
 
-    pub fn scan(&self, sizes: IconSizes) -> (Option<Item>, Vec<Item>) {
+    pub fn scan(&self, sizes: IconSizes) -> (Option<Box<Item>>, Vec<Item>) {
         let items = match self {
             Self::Desktop(path, display, desktop_config) => {
                 scan_desktop(path, display, *desktop_config, sizes)
@@ -1937,7 +1919,7 @@ impl Location {
             Self::Remote(uri, _, path_opt) => {
                 match path_opt {
                     Some(path) => match item_from_remote(uri, sizes) {
-                        Ok(item) => Some(item),
+                        Ok(item) => Some(Box::new(item)),
                         Err(err) => {
                             log::warn!("failed to get item for {}: {}", path.display(), err);
                             None
@@ -1950,7 +1932,7 @@ impl Location {
             _ => {
                 match self.path_opt() {
                     Some(path) => match item_from_path(path, sizes) {
-                        Ok(item) => Some(item),
+                        Ok(item) => Some(Box::new(item)),
                         Err(err) => {
                             log::warn!("failed to get item for {}: {}", path.display(), err);
                             None
@@ -2947,7 +2929,7 @@ impl Item {
     }
 
     fn preview(&self) -> Element<'_, Message> {
-        let spacing = cosmic::theme::active().cosmic().spacing;
+        let spacing = cosmic::theme::spacing();
         // This loads the image only if thumbnailing worked
         let icon = widget::icon::icon(self.icon_handle_grid.clone())
             .content_fit(ContentFit::Contain)
@@ -3008,7 +2990,7 @@ impl Item {
             space_xxxs,
             space_m,
             ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let mut column = widget::column::with_capacity(4).spacing(space_m);
 
@@ -3735,7 +3717,7 @@ impl Item {
     }
 
     pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
-        let cosmic_theme::Spacing { space_xxxs, .. } = theme::active().cosmic().spacing;
+        let cosmic_theme::Spacing { space_xxxs, .. } = theme::spacing();
 
         let mut row = widget::row::with_capacity(2).spacing(space_xxxs);
         row = row.push(self.preview());
@@ -4063,7 +4045,7 @@ pub struct Tab {
     pub sort_name: HeadingOptions,
     pub sort_direction: bool,
     pub gallery: bool,
-    pub(crate) parent_item_opt: Option<Item>,
+    pub(crate) parent_item_opt: Option<Box<Item>>,
     pub(crate) items_opt: Option<Vec<Item>>,
     pub dnd_hovered: Option<(Location, Instant)>,
     pub(crate) scrollable_id: widget::Id,
@@ -4432,10 +4414,10 @@ impl Tab {
             return None;
         };
         let search_items = after
-            .into_iter()
+            .iter_mut()
             .enumerate()
             .map(|(i, item)| (i + start, item))
-            .chain(until.into_iter().enumerate());
+            .chain(until.iter_mut().enumerate());
 
         if forward {
             Self::select_first_prefix_match(prefix_lower, search_items)
@@ -4452,7 +4434,7 @@ impl Tab {
         items: impl Iterator<Item = (usize, &'a mut Item)>,
     ) -> Option<usize> {
         for (i, item) in items {
-            if item.name.to_lowercase().starts_with(&prefix) {
+            if item.name.to_lowercase().starts_with(prefix) {
                 item.selected = true;
                 return Some(i);
             }
@@ -5066,7 +5048,7 @@ impl Tab {
                             match item_from_path(&path, IconSizes::default()) {
                                 Ok(item) => {
                                     commands.push(Command::Preview(PreviewKind::Custom(
-                                        PreviewItem(item),
+                                        PreviewItem(Box::new(item)),
                                     )));
                                 }
                                 Err(err) => {
@@ -5826,15 +5808,9 @@ impl Tab {
                         #[cfg(unix)]
                         if let (Some(path), Some(mode)) = (
                             item.path_opt(),
-                            item.file_metadata().and_then(|metadata| {
-                                use std::os::unix::fs::MetadataExt;
-                                Some(metadata.mode())
-                            }),
+                            item.file_metadata().map(|metadata| metadata.mode()),
                         ) {
-                            permissions.push((
-                                path.clone(),
-                                set_mode_part(mode, shift, bits.try_into().unwrap()),
-                            ));
+                            permissions.push((path.clone(), set_mode_part(mode, shift, bits)));
                         }
                     }
                     commands.push(Command::SetMultiplePermissions(permissions));
@@ -6269,7 +6245,7 @@ impl Tab {
             space_xs,
             space_m,
             ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         //TODO: display error messages when image not found?
         let mut name_opt = None;
@@ -6467,7 +6443,7 @@ impl Tab {
             space_s,
             space_m,
             ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let size = self.size_opt.get().unwrap_or(Size::new(0.0, 0.0));
 
@@ -6911,7 +6887,7 @@ impl Tab {
     }
 
     pub fn empty_view(&self, has_hidden: bool, susceptible_hidden: bool) -> Element<'_, Message> {
-        let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
+        let cosmic_theme::Spacing { space_xxs, .. } = theme::spacing();
 
         mouse_area::MouseArea::new(widget::column::with_children([widget::container(
             match self.mode {
@@ -6953,7 +6929,7 @@ impl Tab {
             space_xxs,
             space_xxxs,
             ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let TabConfig {
             show_hidden,
@@ -7322,7 +7298,7 @@ impl Tab {
     ) {
         let cosmic_theme::Spacing {
             space_s, space_xxs, ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let TabConfig {
             show_hidden,
@@ -7769,7 +7745,7 @@ impl Tab {
             space_xxs,
             space_xs,
             ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let location_view_opt = if matches!(self.mode, Mode::Desktop) {
             None
@@ -8002,7 +7978,7 @@ impl Tab {
             space_xxxs,
             space_m,
             ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let mut column = widget::column::with_capacity(4).spacing(space_m);
 
@@ -8840,21 +8816,22 @@ fn text_editor_class(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io, path::PathBuf};
+    use std::path::PathBuf;
+    use std::{fs, io};
 
-    use cosmic::{iced::mouse::ScrollDelta, iced::runtime::keyboard::Modifiers, widget};
+    use cosmic::iced::mouse::ScrollDelta;
+    use cosmic::iced::runtime::keyboard::Modifiers;
+    use cosmic::widget;
     use log::{debug, trace};
     use tempfile::TempDir;
     use test_log::test;
 
     use super::{Location, Message, Tab, respond_to_scroll_direction, scan_path};
-    use crate::{
-        app::test_utils::{
-            NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
-            eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
-        },
-        config::{IconSizes, TBConfig, TabConfig, ThumbCfg},
+    use crate::app::test_utils::{
+        NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
+        eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
     };
+    use crate::config::{IconSizes, TabConfig, ThumbCfg};
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
     fn tab_selects_item(
