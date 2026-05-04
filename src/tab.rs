@@ -8831,7 +8831,7 @@ mod tests {
         NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
         eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
     };
-    use crate::config::{IconSizes, TabConfig, ThumbCfg};
+    use crate::config::{IconSizes, TabConfig, TBConfig, ThumbCfg};
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
     fn tab_selects_item(
