@@ -1,30 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic::{
-    Element,
-    app::Core,
-    iced::{
-        Alignment, Background, Border, Length, advanced::widget::text::Style as TextStyle,
-        keyboard::Modifiers,
-    },
-    theme,
-    widget::{
-        self, Row, button, column, container, divider,
-        menu::{self, ItemHeight, ItemWidth, MenuBar, key_bind::KeyBind},
-        responsive_menu_bar, space, text,
-    },
+use cosmic::app::Core;
+use cosmic::iced::advanced::widget::text::Style as TextStyle;
+use cosmic::iced::keyboard::Modifiers;
+use cosmic::iced::{Alignment, Background, Border, Length};
+use cosmic::widget::menu::key_bind::KeyBind;
+use cosmic::widget::menu::{self, ItemHeight, ItemWidth, MenuBar};
+use cosmic::widget::{
+    self, Row, button, column, container, divider, responsive_menu_bar, space, text,
 };
+use cosmic::{Element, theme};
 use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
-use std::{collections::HashMap, sync::LazyLock};
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
-use crate::{
-    app::{Action, Message},
-    config::{Config, ContextActionPreset},
-    fl,
-    tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab},
-    trash::{Trash, TrashExt},
-};
+use crate::app::{Action, Message};
+use crate::config::{Config, ContextActionPreset};
+use crate::fl;
+use crate::tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab};
+use crate::trash::{Trash, TrashExt};
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
     LazyLock::new(|| cosmic::widget::Id::new("responsive-menu"));
@@ -38,7 +33,7 @@ macro_rules! menu_button {
             .height(Length::Fixed(24.0))
             .align_y(Alignment::Center)
         )
-        .padding([theme::active().cosmic().spacing.space_xxs, 16])
+        .padding([theme::spacing().space_xxs, 16])
         .width(Length::Fill)
         .class(theme::Button::MenuItem)
     );
@@ -143,12 +138,11 @@ pub fn context_menu<'a>(
                     Some(Location::Trash) | Some(Location::Search(SearchLocation::Trash, ..)) => {
                         selected_trash_only = true
                     }
-                    Some(Location::Path(path)) => {
+                    Some(Location::Path(path))
                         if selected == 1
-                            && path.extension().and_then(|s| s.to_str()) == Some("desktop")
-                        {
-                            selected_desktop_entry = Some(&**path);
-                        }
+                            && path.extension().and_then(|s| s.to_str()) == Some("desktop") =>
+                    {
+                        selected_desktop_entry = Some(&**path);
                     }
                     _ => (),
                 }
@@ -579,7 +573,7 @@ pub fn dialog_menu(
     ])
     .item_height(ItemHeight::Dynamic(40))
     .item_width(ItemWidth::Uniform(360))
-    .spacing(theme::active().cosmic().spacing.space_xxxs.into())
+    .spacing(theme::spacing().space_xxxs.into())
     .into()
 }
 
@@ -634,7 +628,7 @@ pub fn menu_bar<'a>(
     responsive_menu_bar()
         .item_height(ItemHeight::Dynamic(40))
         .item_width(ItemWidth::Uniform(360))
-        .spacing(theme::active().cosmic().spacing.space_xxxs.into())
+        .spacing(theme::spacing().space_xxxs.into())
         .into_element(
             core,
             key_binds,
