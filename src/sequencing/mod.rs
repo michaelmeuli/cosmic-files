@@ -300,10 +300,10 @@ pub(crate) fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
     (identity, offset)
 }
 
-/// Align `query` against every sequence in `database` and return the best hit.
-pub fn identify_species(query: &[u8], database: &str) -> Option<SpeciesHit> {
+/// Align `query` against every sequence in `database` and return all hits sorted by identity descending.
+pub fn identify_species(query: &[u8], database: &str) -> Vec<SpeciesHit> {
     let rc = reverse_complement(query);
-    parse_multi_fasta(database)
+    let mut hits: Vec<SpeciesHit> = parse_multi_fasta(database)
         .into_iter()
         .map(|(accession, description, refseq)| {
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
@@ -323,22 +323,24 @@ pub fn identify_species(query: &[u8], database: &str) -> Option<SpeciesHit> {
                 ref_seq: refseq,
             }
         })
-        .max_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap_or(std::cmp::Ordering::Equal))
+        .collect();
+    hits.sort_by(|a, b| b.identity.partial_cmp(&a.identity).unwrap_or(std::cmp::Ordering::Equal));
+    hits
 }
 
-pub fn identify_species_hsp65(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_hsp65(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_HSP65)
 }
-pub fn identify_species_erm41(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_erm41(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_ERM41)
 }
-pub fn identify_species_16s(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_16s(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_RRS)
 }
-pub fn identify_species_rpob(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_rpob(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_RPOB)
 }
-pub fn identify_species_23s_ntm(query: &[u8]) -> Option<SpeciesHit> {
+pub fn identify_species_23s_ntm(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_RRL)
 }
 
@@ -734,7 +736,7 @@ impl SpeciesHit {
 pub struct SeqData {
     pub chromatogram_opt: Option<Ab1Channels>,
     pub seq_id_hits: Vec<SeqIdHit>,
-    pub species_hit_opt: Option<SpeciesHit>,
+    pub species_hits: Vec<SpeciesHit>,
     pub trimmed_length: usize,
     pub trimmed_avg_quality_opt: Option<f32>,
 }

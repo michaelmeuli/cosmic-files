@@ -900,7 +900,7 @@ pub fn item_from_entry(
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
-            let (seq_id_hits, species_hit_opt, trimmed_length, trimmed_avg_quality_opt) =
+            let (seq_id_hits, species_hits, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let trimmed: &[u8] = match &ab1_qual {
                         Some(qual) => trim_to_min_quality(seq, qual, 20),
@@ -927,7 +927,7 @@ pub fn item_from_entry(
                     } else {
                         Vec::new()
                     };
-                    let species_hit_opt = if is_hsp65 {
+                    let species_hits = if is_hsp65 {
                         identify_species_hsp65(trimmed)
                     } else if is_erm41 {
                         identify_species_erm41(trimmed)
@@ -938,22 +938,22 @@ pub fn item_from_entry(
                     } else if is_23s_ntm {
                         identify_species_23s_ntm(trimmed)
                     } else {
-                        None
+                        Vec::new()
                     };
                     (
                         seq_id_hits,
-                        species_hit_opt,
+                        species_hits,
                         trimmed_length,
                         trimmed_avg_quality_opt,
                     )
                 } else {
-                    (Vec::new(), None, 0, None)
+                    (Vec::new(), Vec::new(), 0, None)
                 };
             let chromatogram_opt = parse_ab1_chromatogram(&bytes);
             SeqData {
                 chromatogram_opt,
                 seq_id_hits,
-                species_hit_opt,
+                species_hits,
                 trimmed_length,
                 trimmed_avg_quality_opt,
             }
@@ -2346,10 +2346,13 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_species_hit(&self) -> Option<&SpeciesHit> {
+    pub fn ab1_species_hits(&self) -> &[SpeciesHit] {
         match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.species_hit_opt.as_ref(),
-            _ => None,
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()
+                .map(|s| s.species_hits.as_slice())
+                .unwrap_or(&[]),
+            _ => &[],
         }
     }
 
@@ -3551,21 +3554,29 @@ impl Item {
         }
 
         // ── Species identification (myco_hsp65 database) ──
-        if let Some(hit) = self.metadata.ab1_species_hit() {
+        let species_hits = self.metadata.ab1_species_hits();
+        if !species_hits.is_empty() {
+            let best = &species_hits[0];
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body(
                 "Species identification (hsp65 database):",
             ));
             details = details.push(widget::text::heading(format!(
                 "{} ({:.1}%)",
-                hit.description, hit.identity,
+                best.description, best.identity,
             )));
-            details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
+            details = details.push(widget::text::body(format!("Accession: {}", best.accession)));
             details = details.push(widget::text::body(""));
             details = details.push(
                 widget::button::standard("View alignment")
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone()))),
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(best.clone()))),
             );
+            for hit in &species_hits[1..species_hits.len().min(3)] {
+                details = details.push(widget::text::body(format!(
+                    "{} ({:.1}%)",
+                    hit.description, hit.identity,
+                )));
+            }
         }
 
         column = column.push(details);
@@ -3583,21 +3594,29 @@ impl Item {
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        if let Some(hit) = self.metadata.ab1_species_hit() {
+        let species_hits = self.metadata.ab1_species_hits();
+        if species_hits.is_empty() {
+            details = details.push(widget::text::body("No species match found"));
+        } else {
+            let best = &species_hits[0];
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body("Species identification (16S database):"));
             details = details.push(widget::text::heading(format!(
                 "{} ({:.1}%)",
-                hit.description, hit.identity,
+                best.description, best.identity,
             )));
-            details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
+            details = details.push(widget::text::body(format!("Accession: {}", best.accession)));
             details = details.push(widget::text::body(""));
             details = details.push(
                 widget::button::standard("View alignment")
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone()))),
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(best.clone()))),
             );
-        } else {
-            details = details.push(widget::text::body("No species match found"));
+            for hit in &species_hits[1..species_hits.len().min(3)] {
+                details = details.push(widget::text::body(format!(
+                    "{} ({:.1}%)",
+                    hit.description, hit.identity,
+                )));
+            }
         }
 
         column = column.push(details);
@@ -3685,21 +3704,30 @@ impl Item {
             details = details.push(widget::text::body(""));
         }
 
-        if let Some(hit) = self.metadata.ab1_species_hit() {
+        let species_hits = self.metadata.ab1_species_hits();
+        if species_hits.is_empty() {
+            details = details.push(widget::text::body("No species match found"));
+        } else {
+            let best = &species_hits[0];
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body("Species identification (23S database):"));
             details = details.push(widget::text::heading(format!(
                 "{} ({:.1}%)",
-                hit.description, hit.identity,
+                best.description, best.identity,
             )));
-            details = details.push(widget::text::body(format!("Accession: {}", hit.accession)));
+            details = details.push(widget::text::body(format!("Accession: {}", best.accession)));
             details = details.push(widget::text::body(""));
             details = details.push(
                 widget::button::standard("View alignment")
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone()))),
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(best.clone()))),
             );
-        } else {
-            details = details.push(widget::text::body("No species match found"));
+            details = details.push(widget::text::body(""));
+            for hit in &species_hits[1..species_hits.len().min(10)] {
+                details = details.push(widget::text::body(format!(
+                    "{} ({:.1}%), {}",
+                    hit.description, hit.identity, hit.accession
+                )));
+            }
         }
 
         column = column.push(details);
