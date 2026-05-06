@@ -1,0 +1,3 @@
+[submodule "res/sequences/ntm-db"]
+	path = res/sequences/ntm-db
+	url = https://github.com/pathogen-profiler/ntm-db

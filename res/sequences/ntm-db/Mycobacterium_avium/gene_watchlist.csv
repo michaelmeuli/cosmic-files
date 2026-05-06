@@ -1,5 +1,0 @@
-Gene,type,drug,literature
-rpoB,drug_resistance,rifampicin,10.1016/j.ijantimicag.2005.09.015
-rrs,drug_resistance,amikacin,10.1038/s41598-021-85721-5
-rrl,drug_resistance,macrolides,10.1128/AAC.39.12.2625
-MAV_2512,drug_resistance,bedaquiline,10.1183/13993003.00118-2019
