@@ -1,0 +1,64 @@
+# NCBI E-utilities configuration
+# Docs: https://www.ncbi.nlm.nih.gov/books/NBK25497/
+email   = "michael.meuli@gmail.com"   # required by NCBI
+# api_key = ""                         # optional: raises rate limit to 10 req/s
+
+# ---------------------------------------------------------------------------
+# [[direct]] — accession IS the gene/sequence record; fetched as FASTA directly
+# ---------------------------------------------------------------------------
+
+[[direct]]
+accession = "AF547836.1"   # Mycobacterium gastri CIP 104530 — hsp65
+output    = "hsp65/AF547836.fasta"
+
+[[direct]]
+accession = "AF547849.1"   # Mycobacterium kansasii CIP 104589 — hsp65
+output    = "hsp65/AF547849.fasta"
+
+[[direct]]
+accession = "AY299134.1"   # Mycobacterium marinum ATCC 927 — hsp65
+output    = "hsp65/AY299134.fasta"
+
+[[direct]]
+accession = "AY299145.1"   # Mycobacterium ulcerans — hsp65
+output    = "hsp65/AY299145.fasta"
+
+[[direct]]
+accession = "AY458075.1"   # Mycobacterium abscessus CIP 104536 — hsp65
+output    = "hsp65/AY458075.fasta"
+
+# ---------------------------------------------------------------------------
+# [[genome]] — extract a single gene from a genome record
+#
+# Option A: locus_tag  → script fetches the feature table, locates the gene,
+#                        then fetches that region (2 NCBI requests)
+# Option B: seq_start + seq_stop  → coordinates already known; 1-based, inclusive
+#                        (1 NCBI request; strand defaults to forward)
+# ---------------------------------------------------------------------------
+
+# --- rrl (23S rRNA) --------------------------------------------------------
+
+[[genome]]
+accession = "CP000479.1"    # Mycobacterium avium 104 complete genome
+locus_tag = "MAV_1533"      # rrlA (23S rRNA)
+output    = "rrl/MAV_1533.fasta"
+
+[[genome]]
+accession = "NC_010397.1"   # Mycobacteroides abscessus ATCC 19977 complete genome
+locus_tag = "MAB_r5052"     # rrl (23S rRNA)
+output    = "rrl/MAB_r5052.fasta"
+
+# --- erm41 (erythromycin resistance) ---------------------------------------
+
+[[genome]]
+accession = "NC_010397.1"       # Mycobacteroides abscessus ATCC 19977 complete genome
+locus_tag = "MAB_2297"          # erm(41) CDS
+output    = "erm41/erm41_abscessus_ATCC_19977.fasta"
+
+[[genome]]
+# Mycobacteroides abscessus subsp. bolletii CIP 108541 — WGS contig
+# Coordinates taken from NCBI FASTA header: NZ_JRMF01000040.1:92072-92593
+accession = "NZ_JRMF01000040.1"
+locus_tag = "QP40_RS10855"          # erm(41) CDS
+output    = "erm41/erm41_bolletii_CIP_108541.fasta"
+

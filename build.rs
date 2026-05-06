@@ -3,7 +3,38 @@ use std::process::Command;
 use std::{env, fs};
 use xdgen::{App, Context, FluentString};
 
+fn fetch_sequences() {
+    println!("cargo:rerun-if-changed=res/sequences/sequences.toml");
+    println!("cargo:rerun-if-changed=scripts/fetch_sequences.py");
+
+    let candidates: &[&str] = if cfg!(windows) {
+        &["python", "py", "python3"]
+    } else {
+        &["python3", "python"]
+    };
+
+    for &py in candidates {
+        let result = Command::new(py)
+            .args(["scripts/fetch_sequences.py"])
+            .status();
+        match result {
+            Ok(s) if s.success() => return,
+            Ok(s) => {
+                println!("cargo:warning=fetch_sequences.py exited with {s}");
+                return;
+            }
+            Err(_) => continue,
+        }
+    }
+    println!(
+        "cargo:warning=Python interpreter not found; \
+         FASTA files in res/sequences/ must already exist"
+    );
+}
+
 fn main() {
+    fetch_sequences();
+
     // Embed the ntm-db submodule commit hash so the UI can display it.
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD:res/sequences/ntm-db"])

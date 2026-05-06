@@ -8,7 +8,11 @@
       "Bash(grep -n \"pub fn identify_sequence\\\\b\\\\|myco_hsp65\\\\|myco_concat\" c:/Users/micha/rust/cosmic-files/src/sequencing/*.rs c:/Users/micha/rust/cosmic-files/src/tab.rs)",
       "Bash(cargo clippy *)",
       "Bash(grep -v \"^$\")",
-      "Bash(grep -v \"^    $\")"
+      "Bash(grep -v \"^    $\")",
+      "Bash(ls -la \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\\" | head -30)",
+      "Read(//c/Users/micha/rust/**)",
+      "PowerShell(where.exe python 2>&1; where.exe py 2>&1; $env:PATH -split \";\" | Where-Object { $_ -match \"python\" })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\micha\\\\AppData\\\\Local\\\\Programs\" -Directory | Where-Object { $_.Name -match \"python|conda|miniconda|anaconda\" } | Select Name; Get-ChildItem \"C:\\\\ProgramData\" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"python|conda|miniconda\" } | Select Name)"
     ]
   }
 }
