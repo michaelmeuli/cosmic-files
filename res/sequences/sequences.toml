@@ -1,7 +1,10 @@
 # NCBI E-utilities configuration
 # Docs: https://www.ncbi.nlm.nih.gov/books/NBK25497/
 email   = "michael.meuli@gmail.com"   # required by NCBI
-# api_key = ""                         # optional: raises rate limit to 10 req/s
+# optional: raises rate limit to 10 req/s:
+# [System.Environment]::SetEnvironmentVariable("NCBI_API_KEY", "your_key", "User")
+
+# python scripts\fetch_sequences.py
 
 # ---------------------------------------------------------------------------
 # [[direct]] — accession IS the gene/sequence record; fetched as FASTA directly
@@ -36,6 +39,7 @@ output    = "hsp65/AY458075.fasta"
 #                        (1 NCBI request; strand defaults to forward)
 # ---------------------------------------------------------------------------
 
+
 # --- rrl (23S rRNA) --------------------------------------------------------
 
 [[genome]]
@@ -48,7 +52,8 @@ accession = "NC_010397.1"   # Mycobacteroides abscessus ATCC 19977 complete geno
 locus_tag = "MAB_r5052"     # rrl (23S rRNA)
 output    = "rrl/MAB_r5052.fasta"
 
-# --- erm41 (erythromycin resistance) ---------------------------------------
+
+# --- erm(41) ---
 
 [[genome]]
 accession = "NC_010397.1"       # Mycobacteroides abscessus ATCC 19977 complete genome
@@ -62,3 +67,6 @@ accession = "NZ_JRMF01000040.1"
 locus_tag = "QP40_RS10855"          # erm(41) CDS
 output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 
+# Mycobacteroides abscessus subsp. massiliense CCUG 48898 — WGS contig
+# assembly: NZ_MVHY01000001.1
+# erm41_massiliense_CCUG_48898.fasta was done manually. (deletion neart the end, but the end is still there)

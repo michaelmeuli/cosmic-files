@@ -8,6 +8,7 @@ Requires Python 3.11+ (uses stdlib tomllib).
 On older Python: pip install tomli
 """
 
+import os
 import sys
 import time
 import urllib.request
@@ -165,7 +166,7 @@ def main() -> None:
         config = tomllib.load(f)
 
     email   = config.get("email",   "")
-    api_key = config.get("api_key", "")
+    api_key = os.environ.get("NCBI_API_KEY") or config.get("api_key", "")
     if not email:
         sys.exit("sequences.toml must contain: email = \"your@email.com\"")
 
