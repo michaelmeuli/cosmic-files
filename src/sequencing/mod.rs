@@ -637,7 +637,7 @@ impl SeqIdHit {
             "REF_ERM41_BOLLETII" => REF_ERM41_BOLLETII,
             "REF_ERM41_MASSILENSE" => REF_ERM41_MASSILENSE,
             // For 23S rRNA NTM
-            "MAB_r5052" => REF_MAB_R5052,
+            "REF_MAB_R5052" => REF_MAB_R5052,
             "REF_AVIUM_RRL" => REF_AVIUM_RRL,
             _ => return format!("Unknown reference accession: {}\n", self.accession),
         };
