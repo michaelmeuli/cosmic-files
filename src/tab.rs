@@ -50,8 +50,8 @@ use walkdir::WalkDir;
 use crate::app::{Action, PreviewItem, PreviewKind};
 use crate::clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste};
 use crate::config::{
-    ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TabConfig,
-    ThumbCfg, TBConfig,
+    ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig,
+    TabConfig, ThumbCfg,
 };
 use crate::dialog::DialogKind;
 use crate::large_image::{
@@ -62,24 +62,21 @@ use crate::localize::{LANGUAGE_SORTER, LOCALE};
 use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
+use crate::russh::CLIENTS;
+use crate::sequencing::{
+    Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
+    erm41::{Erm41Position28, identify_sequence_erm41},
+    hsp65::identify_sequence_hsp65,
+    identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
+    identify_species_rpob, parse_ab1_chromatogram, parse_ab1_quality, parse_ab1_sequence,
+    rrl::identify_sequence_rrl_ntm,
+    tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
+    trim_to_min_quality,
+};
 use crate::thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize};
 use crate::thumbnailer::thumbnailer;
 use crate::trash::{Trash, TrashExt};
 use crate::{FxOrderMap, fl, menu, mime_app, mouse_area};
-use crate::russh::CLIENTS;
-use crate::{
-    sequencing::{
-        Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
-        erm41::{Erm41Position28, identify_sequence_erm41},
-        hsp65::identify_sequence_hsp65,
-        identify_species_16s, identify_species_23s_ntm, identify_species_erm41,
-        identify_species_hsp65, identify_species_rpob, parse_ab1_chromatogram, parse_ab1_quality,
-        parse_ab1_sequence,
-        rrl::identify_sequence_rrl_ntm,
-        tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
-        trim_to_min_quality,
-    },
-};
 
 pub const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
 pub const HOVER_DURATION: Duration = Duration::from_millis(1600);
@@ -3368,9 +3365,12 @@ impl Item {
             ));
             let hits_column = hits.into_iter().fold(
                 widget::column::with_capacity(hits.len()).spacing(space_xxxs),
-                |col, hit| col.push(widget::text::body(format!(
-                    "{}: {:.1}%", hit.description, hit.identity,
-                ))),
+                |col, hit| {
+                    col.push(widget::text::body(format!(
+                        "{}: {:.1}%",
+                        hit.description, hit.identity,
+                    )))
+                },
             );
             column = column.push(hits_column);
         }
@@ -3617,6 +3617,7 @@ impl Item {
         if hits.is_empty() {
             details = details.push(widget::text::body("Could not align sequence to reference"));
         } else {
+            let best = &hits[0];
             if !self.metadata.is_seq_id() {
                 details = details.push(widget::text::body(
                     "Percent identity to reference is less than 60%.",
@@ -3626,8 +3627,12 @@ impl Item {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
                     sequence_length
-            )));
+                )));
             }
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
             if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
@@ -3635,20 +3640,23 @@ impl Item {
                 )));
             }
             details = details.push(widget::text::body(""));
-
-            details = details.push(widget::text::body(
-                "23S rRNA macrolide resistance SNPs (rrl):",
-            ));
-            let best = &hits[0];
-            for snp in &best.rrl_snp_calls {
+            if !best.rrl_snp_calls.is_empty() {
+                details = details.push(widget::text::body(
+                    "23S rRNA macrolide resistance SNPs (rrl):",
+                ));
                 details = details.push(widget::text::body(format!(
-                    "  pos {}: {}",
-                    snp.ref_pos + 1,
-                    snp.call_tag()
+                    "(Using commit: {} of ntm-db repository)",
+                    env!("NTM_DB_COMMIT")
                 )));
+                for snp in &best.rrl_snp_calls {
+                    details = details.push(widget::text::body(format!(
+                        "  pos {}: {}",
+                        snp.ref_pos + 1,
+                        snp.call_tag()
+                    )));
+                }
             }
             details = details.push(widget::text::body(""));
-
             details = details.push(
                 widget::button::standard("View alignment")
                     .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
@@ -3710,12 +3718,6 @@ impl Item {
                 )));
             }
         }
-
-        details = details.push(widget::text::body(""));
-        details = details.push(widget::text::body(format!(
-            "Using commit: {} of ntm-db repository",
-            env!("NTM_DB_COMMIT")
-        )));
 
         column = column.push(details);
         column.into()
@@ -8836,7 +8838,7 @@ mod tests {
         NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
         eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
     };
-    use crate::config::{IconSizes, TabConfig, TBConfig, ThumbCfg};
+    use crate::config::{IconSizes, TBConfig, TabConfig, ThumbCfg};
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
     fn tab_selects_item(

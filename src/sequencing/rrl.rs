@@ -126,14 +126,9 @@ fn call_rrl_snps(
         .collect()
 }
 
-/// Compute a call for every rrl resistance SNP position (M. abscessus).
-/// Returns one entry per unique position; `query_base` is `None` when not covered.
 pub fn call_rrl_abscessus_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
     call_rrl_snps(&RRL_ABSCESSUS_RESISTANCE_SNPS, query, alignment_offset)
 }
-
-/// Compute a call for every rrl resistance SNP position (M. avium).
-/// Returns one entry per unique position; `query_base` is `None` when not covered.
 pub fn call_rrl_avium_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
     call_rrl_snps(&RRL_AVIUM_RESISTANCE_SNPS, query, alignment_offset)
 }
