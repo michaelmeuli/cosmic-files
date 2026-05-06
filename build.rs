@@ -1,8 +1,20 @@
 use std::path::PathBuf;
+use std::process::Command;
 use std::{env, fs};
 use xdgen::{App, Context, FluentString};
 
 fn main() {
+    // Embed the ntm-db submodule commit hash so the UI can display it.
+    let commit = Command::new("git")
+        .args(["rev-parse", "HEAD:res/sequences/ntm-db"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim()[..7].to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=NTM_DB_COMMIT={}", commit);
+    println!("cargo:rerun-if-changed=.git/modules/res/sequences/ntm-db/HEAD");
+
     let id = "com.system76.CosmicFiles";
     let ctx = Context::new("i18n", env::var("CARGO_PKG_NAME").unwrap()).unwrap();
     let app = App::new(FluentString("cosmic-files"))

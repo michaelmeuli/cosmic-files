@@ -66,13 +66,13 @@ pub static RRL_ABSCESSUS_RESISTANCE_SNPS: LazyLock<
     BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>,
 > = LazyLock::new(|| {
     parse_rrl_resistance_snps(include_str!(
-        "../../res/sequences/ntm-db/Mycobacterium_abscessus/variants.csv"
+        "../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"
     ))
 });
 pub static RRL_AVIUM_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
     LazyLock::new(|| {
         parse_rrl_resistance_snps(include_str!(
-            "../../res/sequences/ntm-db/Mycobacterium_avium/variants.csv"
+            "../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv"
         ))
     });
 

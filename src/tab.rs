@@ -2296,10 +2296,7 @@ impl ItemMetadata {
 
     pub fn erm41position28_call(&self) -> Erm41Position28 {
         match self {
-            Self::Path {
-                sequence_opt: sequence,
-                ..
-            } => sequence
+            Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
                 .and_then(|s| s.seq_id_hits.first()?.erm41position28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
@@ -3625,10 +3622,12 @@ impl Item {
                     "Percent identity to reference is less than 60%.",
                 ));
             }
-            details = details.push(widget::text::body(format!(
-                "Sequence length: {}",
-                self.metadata.sequence_length().unwrap_or(0)
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
             )));
+            }
             if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
@@ -3711,6 +3710,12 @@ impl Item {
                 )));
             }
         }
+
+        details = details.push(widget::text::body(""));
+        details = details.push(widget::text::body(format!(
+            "Using commit: {} of ntm-db repository",
+            env!("NTM_DB_COMMIT")
+        )));
 
         column = column.push(details);
         column.into()
