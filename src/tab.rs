@@ -3535,26 +3535,19 @@ impl Item {
         // ── Species identification (myco_hsp65 database) ──
         let species_hits = self.metadata.ab1_species_hits();
         if !species_hits.is_empty() {
-            let best = &species_hits[0];
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body(
                 "Species identification (hsp65 database):",
             ));
-            details = details.push(widget::text::heading(format!(
-                "{} ({:.1}%)",
-                best.description, best.identity,
-            )));
-            details = details.push(widget::text::body(format!("Accession: {}", best.accession)));
-            details = details.push(widget::text::body(""));
-            details = details.push(
-                widget::button::standard("View alignment")
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(best.clone()))),
-            );
-            for hit in &species_hits[1..species_hits.len().min(3)] {
-                details = details.push(widget::text::body(format!(
-                    "{} ({:.1}%)",
-                    hit.description, hit.identity,
-                )));
+            for hit in &species_hits[..species_hits.len().min(3)] {
+                details = details.push(
+                    widget::button::link(format!(
+                        "{} ({:.1}%), {}",
+                        hit.description, hit.identity, hit.accession
+                    ))
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone())))
+                    .padding(0),
+                );
             }
         }
 
@@ -3577,24 +3570,17 @@ impl Item {
         if species_hits.is_empty() {
             details = details.push(widget::text::body("No species match found"));
         } else {
-            let best = &species_hits[0];
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body("Species identification (16S database):"));
-            details = details.push(widget::text::heading(format!(
-                "{} ({:.1}%)",
-                best.description, best.identity,
-            )));
-            details = details.push(widget::text::body(format!("Accession: {}", best.accession)));
-            details = details.push(widget::text::body(""));
-            details = details.push(
-                widget::button::standard("View alignment")
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(best.clone()))),
-            );
-            for hit in &species_hits[1..species_hits.len().min(3)] {
-                details = details.push(widget::text::body(format!(
-                    "{} ({:.1}%)",
-                    hit.description, hit.identity,
-                )));
+            for hit in &species_hits[..species_hits.len().min(3)] {
+                details = details.push(
+                    widget::button::link(format!(
+                        "{} ({:.1}%), {}",
+                        hit.description, hit.identity, hit.accession
+                    ))
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone())))
+                    .padding(0),
+                );
             }
         }
 
@@ -3697,25 +3683,17 @@ impl Item {
         if species_hits.is_empty() {
             details = details.push(widget::text::body("No species match found"));
         } else {
-            let best = &species_hits[0];
             details = details.push(widget::text::body(""));
             details = details.push(widget::text::body("Species identification (23S database):"));
-            details = details.push(widget::text::heading(format!(
-                "{} ({:.1}%)",
-                best.description, best.identity,
-            )));
-            details = details.push(widget::text::body(format!("Accession: {}", best.accession)));
-            details = details.push(widget::text::body(""));
-            details = details.push(
-                widget::button::standard("View alignment")
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(best.clone()))),
-            );
-            details = details.push(widget::text::body(""));
-            for hit in &species_hits[1..species_hits.len().min(10)] {
-                details = details.push(widget::text::body(format!(
-                    "{} ({:.1}%), {}",
-                    hit.description, hit.identity, hit.accession
-                )));
+            for hit in &species_hits[..species_hits.len().min(10)] {
+                details = details.push(
+                    widget::button::link(format!(
+                        "{} ({:.1}%), {}",
+                        hit.description, hit.identity, hit.accession
+                    ))
+                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone())))
+                    .padding(0),
+                );
             }
         }
 
