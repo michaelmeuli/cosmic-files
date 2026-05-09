@@ -148,6 +148,8 @@ uzers = "0.12.2"
 
 [build-dependencies]
 xdgen = "0.1"
+ureq = { version = "2", features = ["json"] }
+serde_json = "1"
 
 [dev-dependencies]
 # cap-std = "3"
