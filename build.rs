@@ -396,30 +396,25 @@ fn fetch_myco_sequences() {
     const EMAIL: &str = "michael.meuli@gmail.com";
     const BATCH: usize = 200;
 
-    // (const_name, ncbi_query, filename)
-    let targets: &[(&str, &str, &str)] = &[
+    // (ncbi_query, filename)
+    let targets: &[(&str, &str)] = &[
         (
-            "REF_MYCO_RRS",
             "Mycobacteriaceae[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
             "myco_rrs.fasta",
         ),
         (
-            "REF_MYCO_HSP65",
             "Mycobacteriaceae[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
             "myco_hsp65.fasta",
         ),
         (
-            "REF_MYCO_RPOB",
             "Mycobacteriaceae[Organism] AND rpoB[Gene Name] AND 400:3000[SLEN] AND type_material[Filter]",
-            "myco_rpoB.fasta",
+            "myco_rpob.fasta",
         ),
         (
-            "REF_MYCO_ERM41",
             "Mycobacteriaceae[Organism] AND erm(41)[Gene Name] AND 400:3000[SLEN]",
             "myco_erm41.fasta",
         ),
         (
-            "REF_MYCO_RRL",
             "Mycobacteriaceae[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
             "myco_rrl.fasta",
         ),
@@ -430,11 +425,8 @@ fn fetch_myco_sequences() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let seq_dir = manifest_dir.join("res/sequences");
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let mut codegen = String::new();
-
-    for &(const_name, query, filename) in targets {
+    for &(query, filename) in targets {
         let path = seq_dir.join(filename);
         println!("cargo:rerun-if-changed=res/sequences/{}", filename);
 
@@ -447,15 +439,6 @@ fn fetch_myco_sequences() {
                 Ok(n) => println!("cargo:warning=fetch_myco: wrote {} sequences → {}", n, filename),
                 Err(e) => println!("cargo:warning=fetch_myco: failed for {}: {}", filename, e),
             }
-        }
-
-        // Emit include_str! when the file has content; fall back to empty string so
-        // the build succeeds even when the network is unavailable.
-        if path.exists() && path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-            let abs = path.to_str().unwrap().replace('\\', "/");
-            codegen.push_str(&format!("const {const_name}: &str = include_str!(\"{abs}\");\n"));
-        } else {
-            codegen.push_str(&format!("const {const_name}: &str = \"\";\n"));
         }
     }
 
@@ -508,16 +491,6 @@ fn fetch_myco_sequences() {
             }
         }
     }
-
-    if dai2011_path.exists() && dai2011_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-        let abs = dai2011_path.to_str().unwrap().replace('\\', "/");
-        codegen.push_str(&format!("const REF_MYCO_HSP65_DAI2011: &str = include_str!(\"{abs}\");\n"));
-    } else {
-        codegen.push_str("const REF_MYCO_HSP65_DAI2011: &str = \"\";\n");
-    }
-
-    fs::write(out_dir.join("myco_sequences.rs"), &codegen)
-        .expect("failed to write myco_sequences.rs to OUT_DIR");
 }
 
 fn fetch_sequences() {
