@@ -14,7 +14,9 @@
       "PowerShell(where.exe python 2>&1; where.exe py 2>&1; $env:PATH -split \";\" | Where-Object { $_ -match \"python\" })",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\micha\\\\AppData\\\\Local\\\\Programs\" -Directory | Where-Object { $_.Name -match \"python|conda|miniconda|anaconda\" } | Select Name; Get-ChildItem \"C:\\\\ProgramData\" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"python|conda|miniconda\" } | Select Name)",
       "Bash(ls /c/Users/micha/.cargo/git/checkouts/libcosmic*/564ef83/src/widget/button/)",
-      "Read(//c/Users/micha/.cargo/git/checkouts/**)"
+      "Read(//c/Users/micha/.cargo/git/checkouts/**)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\" -Recurse)",
+      "Bash(Select-Object FullName)"
     ]
   }
 }
