@@ -36,19 +36,40 @@ rrl M. abscessus macrolides:
 
 <pre>
 impl RrlSnpCall {
-    /// "wt", "NA", or the observed mutant base as a char string.
     pub fn call_tag(&self) -> String {
         match self.query_base {
             None => "NA".to_string(),
             Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
-            Some(b) if b == self.resistance_base => format!("{} (resistance)", self.resistance_base as char),
+            Some(b) if self.resistance_bases.contains_key(&b) => {
+                let drugs = self.resistance_bases[&b].join(", ");
+                format!("{} ({})", b as char, drugs)
+            }
             Some(b) => format!("{} (mutation)", b as char),
         }
     }
 }
 </pre>
   
-    
+### Generation of species identification databeses:  
+
+[The INSD Collaboration (GenBank/ENA/DDBJ) source feature qualifier ‘type_material’ ](https://pmc.ncbi.nlm.nih.gov/articles/PMC4383940/):  
+Type material is the taxonomic device that ties formal names to the physical specimens that serve as exemplars for the species.  
+For the prokaryotes these are strains submitted to the culture collections;  
+for the eukaryotes they are specimens submitted to museums or herbaria.  
+The NCBI Taxonomy Database (http://www.ncbi.nlm.nih.gov/taxonomy) now includes annotation of type material that we use to flag sequences from type in GenBank and in Genomes.  
+  
+<ins>myco_rrs.fasta:</ins>   
+Mycobacteriaceae[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]        
+<ins>myco_hsp65.fasta:</ins>   
+Mycobacteriaceae[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]  
+<ins>myco_rpoB.fasta:</ins>   
+Mycobacteriaceae[Organism] AND rpoB[Gene Name] AND 400:3000[SLEN] AND type_material[Filter]  
+<ins>myco_erm41.fasta:</ins>   
+Mycobacteriaceae[Organism] AND erm(41)[Gene Name] AND 400:3000[SLEN]  
+<ins>myco_rrl.fasta:</ins>   
+Mycobacteriaceae[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]  
+   
+  
 ### TBProfiler:
   
 Unique confidence values of TBProfiler (examples/tbgetconfidencetypes.rs):

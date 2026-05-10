@@ -89,7 +89,6 @@ pub struct RrlSnpCall {
 }
 
 impl RrlSnpCall {
-    /// "NA", "<base> (wt)", "<base> (drug1, drug2, ...)", or "<base> (mutation)".
     pub fn call_tag(&self) -> String {
         match self.query_base {
             None => "NA".to_string(),
