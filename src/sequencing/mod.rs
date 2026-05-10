@@ -27,7 +27,12 @@ const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41
 const REF_MAB_R5052: &str = include_str!("../../res/sequences/rrl/MAB_r5052.fasta");
 const REF_AVIUM_RRL: &str = include_str!("../../res/sequences/rrl/MAV_1533.fasta");
 
-include!(concat!(env!("OUT_DIR"), "/myco_sequences.rs"));
+const REF_MYCO_RRS:           &str = include_str!("../../res/sequences/myco_rrs.fasta");
+const REF_MYCO_HSP65:         &str = include_str!("../../res/sequences/myco_hsp65.fasta");
+const REF_MYCO_RPOB:          &str = include_str!("../../res/sequences/myco_rpob.fasta");
+const REF_MYCO_ERM41:         &str = include_str!("../../res/sequences/myco_erm41.fasta");
+const REF_MYCO_RRL:           &str = include_str!("../../res/sequences/myco_rrl.fasta");
+const REF_MYCO_HSP65_DAI2011: &str = include_str!("../../res/sequences/myco_hsp65_dai2011.fasta");
 
 
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
