@@ -19,10 +19,6 @@ const RRL_FWD_END: &[u8] = b"ctaagttcttaagggcgcat";
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
 
-const REF_AF547836: &str = include_str!("../../res/sequences/hsp65/AF547836.fasta");
-const REF_AF547849: &str = include_str!("../../res/sequences/hsp65/AF547849.fasta");
-const REF_AY299134: &str = include_str!("../../res/sequences/hsp65/AY299134.fasta");
-const REF_AY299145: &str = include_str!("../../res/sequences/hsp65/AY299145.fasta");
 
 const REF_ERM41_ABSCESSUS: &str = include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
 const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
@@ -635,34 +631,20 @@ pub struct SeqIdHit {
     pub alignment_offset: isize,
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41position28_opt: Option<Erm41Position28>,
+    /// Full reference sequence for this hit (used for pairwise display).
+    pub ref_seq: Vec<u8>,
 }
 
 impl SeqIdHit {
     /// Format the alignment as a human-readable pairwise text (60-column wrapping).
     pub fn format_pairwise_alignment(&self) -> String {
-        let ref_fasta = match self.accession.as_str() {
-            // For hsp65
-            "AF547836" => REF_AF547836,
-            "AF547849" => REF_AF547849,
-            "AY299134" => REF_AY299134,
-            "AY299145" => REF_AY299145,
-            // For erm(41)
-            "REF_ERM41_ABSCESSUS" => REF_ERM41_ABSCESSUS,
-            "REF_ERM41_BOLLETII" => REF_ERM41_BOLLETII,
-            "REF_ERM41_MASSILENSE" => REF_ERM41_MASSILENSE,
-            // For 23S rRNA NTM
-            "REF_MAB_R5052" => REF_MAB_R5052,
-            "REF_AVIUM_RRL" => REF_AVIUM_RRL,
-            _ => return format!("Unknown reference accession: {}\n", self.accession),
-        };
-        let (_, _, refseq) = parse_fasta(ref_fasta);
         format_pairwise_alignment_impl(
             &self.accession,
             &self.description,
             self.identity,
             self.is_reverse,
             &self.aligned_query,
-            &refseq,
+            &self.ref_seq,
             self.alignment_offset,
         )
     }

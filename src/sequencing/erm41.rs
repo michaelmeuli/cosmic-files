@@ -157,6 +157,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
                 erm41position28_opt: Some(erm41_pos28.clone()),
+                ref_seq: refseq,
             }
         })
         .collect();

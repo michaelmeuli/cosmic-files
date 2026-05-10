@@ -1,5 +1,5 @@
 use super::reverse_complement;
-use super::{best_alignment, parse_fasta, SeqIdHit};
+use super::{best_alignment, SeqIdHit};
 
 /// Diagnostic SNPs between M. gastri (AF547836) and M. kansasii (AF547849),
 /// defined at 0-based positions in the aligned hsp65 reference sequences.
@@ -110,17 +110,16 @@ fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
 pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
     let query = trim_hsp65_primers(query);
     let query = query.as_slice();
-    let refs = [
-        parse_fasta(super::REF_AF547836),
-        parse_fasta(super::REF_AF547849),
-        parse_fasta(super::REF_AY299134),
-        parse_fasta(super::REF_AY299145),
-    ];
     let rc = reverse_complement(query);
 
-    let mut hits: Vec<SeqIdHit> = refs
+    let mut hits: Vec<SeqIdHit> = super::parse_multi_fasta(super::REF_MYCO_HSP65_DAI2011)
         .into_iter()
-        .map(|(accession, description, refseq)| {
+        .map(|(raw_acc, description, refseq)| {
+            // Strip version suffix so SNP dispatch and is_kansasii() etc. work correctly.
+            let accession = raw_acc
+                .rsplit_once('.')
+                .map(|(base, _)| base.to_string())
+                .unwrap_or(raw_acc);
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
             let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
@@ -128,8 +127,14 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query, fwd_off)
             };
-            let kansasii_gastri_snp_calls = call_kansasii_gastri_snps(aligned_query, offset);
-            let marinum_ulcerans_snp_calls = call_marinum_ulcerans_snps(aligned_query, offset);
+            let kansasii_gastri_snp_calls = match accession.as_str() {
+                "AF547836" | "AF547849" => call_kansasii_gastri_snps(aligned_query, offset),
+                _ => vec![],
+            };
+            let marinum_ulcerans_snp_calls = match accession.as_str() {
+                "AY299134" | "AY299145" => call_marinum_ulcerans_snps(aligned_query, offset),
+                _ => vec![],
+            };
             SeqIdHit {
                 accession,
                 description,
@@ -141,6 +146,7 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
                 erm41position28_opt: None,
+                ref_seq: refseq,
             }
         })
         .collect();
