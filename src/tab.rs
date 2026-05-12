@@ -3445,12 +3445,18 @@ impl Item {
                 )));
             }
             details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading("Best match:"));
+            details = details.push(widget::text::heading("Best matches (Lauzardo et al., 2011):"));
+            for hit in &hits[..hits.len().min(3)] {
+                details = details.push(
+                    widget::button::link(format!(
+                        "{} ({:.1}%), {}",
+                        hit.description, hit.identity, hit.accession
+                    ))
+                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                    .padding(0),
+                );
+            }
             let best = &hits[0];
-            details = details.push(widget::text::heading(format!(
-                "{} ({:.1}%)",
-                best.description, best.identity,
-            )));
             details = details.push(widget::text::body(""));
 
             if best.is_kansasii() || best.is_gastri() {
@@ -3513,26 +3519,8 @@ impl Item {
                 }
                 details = details.push(widget::text::body(""));
             }
-
-            details = details.push(
-                widget::button::standard("View alignment")
-                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
-            );
-
-            // ── Other matches ──
-            if hits.len() > 1 {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body("Other matches:".to_string()));
-                for hit in &hits[1..3.min(hits.len())] {
-                    details = details.push(widget::text::body(format!(
-                        "{} ({:.1}%)",
-                        hit.description, hit.identity,
-                    )));
-                }
-            }
         }
 
-        // ── Species identification (myco_hsp65 database) ──
         let species_hits = self.metadata.ab1_species_hits();
         if !species_hits.is_empty() {
             details = details.push(widget::text::body(""));
