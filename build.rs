@@ -635,6 +635,7 @@ fn fetch_myco_sequences() {
                         String::new()
                     };
                     if existing.contains(entry.accession.as_str()) {
+                        println!("cargo:warning=fetch_myco: {} already in {} — skip", entry.accession, entry.fasta);
                         continue;
                     }
                     println!("cargo:warning=fetch_myco: appending {} → {}", entry.accession, entry.fasta);

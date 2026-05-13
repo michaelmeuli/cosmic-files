@@ -16,7 +16,9 @@
       "Bash(ls /c/Users/micha/.cargo/git/checkouts/libcosmic*/564ef83/src/widget/button/)",
       "Read(//c/Users/micha/.cargo/git/checkouts/**)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\" -Recurse)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(Select-String -Pattern \"AF547836|AF547849|AY299134|AY299145\" \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_hsp65.fasta\")",
+      "Bash(Select-Object -First 10)"
     ]
   }
 }
