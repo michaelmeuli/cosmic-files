@@ -5,6 +5,7 @@ pub mod bed;
 pub mod hsp65;
 
 pub use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall, identify_sequence_hsp65};
+use hsp65::trim_hsp65_primers;
 pub use rrl::RrlSnpCall;
 
 use erm41::Erm41Position28;
@@ -344,7 +345,8 @@ pub fn identify_species(query: &[u8], database: &str) -> Vec<SpeciesHit> {
 }
 
 pub fn identify_species_hsp65(query: &[u8]) -> Vec<SpeciesHit> {
-    identify_species(query, REF_MYCO_HSP65)
+    let query = trim_hsp65_primers(query);
+    identify_species(&query, REF_MYCO_HSP65)
 }
 pub fn identify_species_erm41(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_ERM41)

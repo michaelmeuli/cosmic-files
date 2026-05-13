@@ -72,7 +72,7 @@ fn call_marinum_ulcerans_snps(
         .collect()
 }
 
-fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
+pub fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
     const FWD_START: &[&[u8]] = &[b"ATGGTGTGTCCATCGCCAAG", b"GAGGACCCGTACGAGAAGATCGGCGCTGA"];
     const FWD_END: &[&[u8]] = &[b"GAGCTCACCGAGGGTATGCG", b"CGCTGTCCACCCTGGTCGTC"];
 
