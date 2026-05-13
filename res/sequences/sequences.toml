@@ -70,3 +70,17 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # Mycobacteroides abscessus subsp. massiliense CCUG 48898 — WGS contig
 # assembly: NZ_MVHY01000001.1
 # erm41_massiliense_CCUG_48898.fasta was done manually. (deletion neart the end, but the end is still there)
+
+# ---------------------------------------------------------------------------
+# [[append]] — fetch a single accession and append it to a multi-FASTA file
+#
+# accession  the NCBI nucleotide accession (version suffix optional)
+# fasta      filename inside res/sequences/ to append to
+#
+# The sequence is only fetched if the accession is not already present in
+# that file, so re-running the build is safe.
+# ---------------------------------------------------------------------------
+
+# [[append]]
+# accession = "AB123456.1"   # Example: M. example strain — hsp65
+# fasta     = "myco_hsp65.fasta"

@@ -1,7 +1,20 @@
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::{env, fs};
 use xdgen::{App, Context, FluentString};
+
+#[derive(serde::Deserialize)]
+struct SequencesConfig {
+    #[serde(default)]
+    append: Vec<AppendEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct AppendEntry {
+    accession: String,
+    fasta: String,
+}
 
 fn ncbi_url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
@@ -391,6 +404,29 @@ const DAI2011_HSP65_ACCESSIONS: &[&str] = &[
     "AF547891", "AF434738", "AY373454",
 ];
 
+fn ncbi_fetch_single(
+    base: &str,
+    email: &str,
+    api_key: Option<&str>,
+    accession: &str,
+) -> Result<String, String> {
+    let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
+    let url = format!(
+        "{}/efetch.fcgi?db=nuccore&id={}&rettype=fasta&retmode=text&email={}{}",
+        base, accession, email, ak
+    );
+    let text = ureq::get(&url)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    if text.contains('>') {
+        Ok(text)
+    } else {
+        Err(format!("no FASTA returned for {}", accession))
+    }
+}
+
 fn fetch_myco_sequences() {
     const BASE: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
     const EMAIL: &str = "michael.meuli@gmail.com";
@@ -489,6 +525,48 @@ fn fetch_myco_sequences() {
                 ),
                 Err(e) => println!("cargo:warning=fetch_myco: failed to write {dai2011_filename}: {e}"),
             }
+        }
+    }
+
+    // User-defined accessions from sequences.toml [[append]] entries.
+    // Each entry names an accession and a target fasta filename; the sequence
+    // is fetched and appended if the accession is not already present.
+    let toml_path = seq_dir.join("sequences.toml");
+    println!("cargo:rerun-if-changed=res/sequences/sequences.toml");
+    if let Ok(toml_str) = fs::read_to_string(&toml_path) {
+        match toml::from_str::<SequencesConfig>(&toml_str) {
+            Ok(config) => {
+                let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
+                for entry in &config.append {
+                    let fasta_path = seq_dir.join(&entry.fasta);
+                    let existing = if fasta_path.exists() {
+                        fs::read_to_string(&fasta_path).unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    if existing.contains(entry.accession.as_str()) {
+                        continue;
+                    }
+                    println!("cargo:warning=fetch_myco: appending {} → {}", entry.accession, entry.fasta);
+                    match ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession) {
+                        Ok(seq) => {
+                            match fs::OpenOptions::new().append(true).create(true).open(&fasta_path) {
+                                Ok(mut f) => {
+                                    if let Err(e) = f.write_all(seq.as_bytes()) {
+                                        println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.accession);
+                                    } else {
+                                        println!("cargo:warning=fetch_myco: appended {}", entry.accession);
+                                    }
+                                }
+                                Err(e) => println!("cargo:warning=fetch_myco: open error for {}: {e}", entry.fasta),
+                            }
+                        }
+                        Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.accession),
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                }
+            }
+            Err(e) => println!("cargo:warning=fetch_myco: failed to parse sequences.toml: {e}"),
         }
     }
 }
