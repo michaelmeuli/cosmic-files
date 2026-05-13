@@ -74,13 +74,33 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # ---------------------------------------------------------------------------
 # [[append]] — fetch a single accession and append it to a multi-FASTA file
 #
-# accession  the NCBI nucleotide accession (version suffix optional)
-# fasta      filename inside res/sequences/ to append to
+# Required fields:
+#   accession  NCBI nucleotide accession (version suffix optional)
+#   fasta      filename inside res/sequences/ to append to
+#
+# Optional genome-extraction fields (mirrors [[genome]] above):
+#   locus_tag  fetch feature table, locate gene, then fetch that region
+#   seq_start  } already-known 1-based inclusive coordinates (skip feature
+#   seq_stop   }   table lookup; strand defaults to forward)
 #
 # The sequence is only fetched if the accession is not already present in
-# that file, so re-running the build is safe.
+# that file, so re-running the build is idempotent.
 # ---------------------------------------------------------------------------
 
+# Direct accession example:
 # [[append]]
-# accession = "AB123456.1"   # Example: M. example strain — hsp65
+# accession = "AB123456.1"   # M. example strain — hsp65
 # fasta     = "myco_hsp65.fasta"
+
+# Genome / locus_tag example:
+# [[append]]
+# accession = "NZ_JRMF01000040.1"   # M. abscessus subsp. bolletii CIP 108541
+# locus_tag = "QP40_RS10855"        # erm(41) CDS
+# fasta     = "myco_erm41.fasta"
+
+# Genome / explicit coordinates example:
+# [[append]]
+# accession = "NZ_JRMF01000040.1"
+# seq_start = 92072
+# seq_stop  = 92593
+# fasta     = "myco_erm41.fasta"

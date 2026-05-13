@@ -14,6 +14,10 @@ struct SequencesConfig {
 struct AppendEntry {
     accession: String,
     fasta: String,
+    // genome-extraction fields (mirrors [[genome]] in sequences.toml)
+    locus_tag: Option<String>,
+    seq_start: Option<u64>,
+    seq_stop: Option<u64>,
 }
 
 fn ncbi_url_encode(s: &str) -> String {
@@ -427,6 +431,92 @@ fn ncbi_fetch_single(
     }
 }
 
+// Returns (start, stop, strand) — coordinates are 1-based inclusive, strand 1=fwd 2=rev.
+// Mirrors parse_feature_table() in scripts/fetch_sequences.py.
+fn parse_feature_table(ft: &str, locus_tag: &str) -> Result<(u64, u64, u8), String> {
+    let mut cur_start: Option<u64> = None;
+    let mut cur_stop: Option<u64> = None;
+    let mut cur_strand: u8 = 1;
+
+    for line in ft.lines() {
+        let stripped = line.trim();
+        if stripped.is_empty() || stripped.starts_with('>') {
+            continue;
+        }
+        if !line.starts_with('\t') {
+            let parts: Vec<&str> = stripped.split('\t').collect();
+            if parts.len() >= 2 {
+                let a: Option<u64> = parts[0].trim_start_matches(['<', '>']).parse().ok();
+                let b: Option<u64> = parts[1].trim_start_matches(['<', '>']).parse().ok();
+                if let (Some(a), Some(b)) = (a, b) {
+                    cur_start = Some(a.min(b));
+                    cur_stop = Some(a.max(b));
+                    cur_strand = if a > b { 2 } else { 1 };
+                } else {
+                    cur_start = None;
+                    cur_stop = None;
+                }
+            }
+        } else {
+            let parts: Vec<&str> = stripped.split('\t').collect();
+            if parts.len() >= 2 && parts[0] == "locus_tag" && parts[1] == locus_tag {
+                if let (Some(s), Some(e)) = (cur_start, cur_stop) {
+                    return Ok((s, e, cur_strand));
+                }
+            }
+        }
+    }
+    Err(format!("locus_tag {:?} not found in feature table", locus_tag))
+}
+
+fn ncbi_fetch_genome_gene(
+    base: &str,
+    email: &str,
+    api_key: Option<&str>,
+    accession: &str,
+    locus_tag: Option<&str>,
+    seq_start: Option<u64>,
+    seq_stop: Option<u64>,
+) -> Result<String, String> {
+    let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
+    let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
+
+    let (start, stop, strand) = if let Some(tag) = locus_tag {
+        let ft_url = format!(
+            "{}/efetch.fcgi?db=nuccore&id={}&rettype=ft&retmode=text&email={}{}",
+            base, accession, email, ak
+        );
+        let ft = ureq::get(&ft_url)
+            .call()
+            .map_err(|e| e.to_string())?
+            .into_string()
+            .map_err(|e| e.to_string())?;
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        parse_feature_table(&ft, tag)?
+    } else {
+        match (seq_start, seq_stop) {
+            (Some(s), Some(e)) => (s, e, 1u8),
+            _ => return Err("must specify locus_tag or both seq_start and seq_stop".into()),
+        }
+    };
+
+    let url = format!(
+        "{}/efetch.fcgi?db=nuccore&id={}&rettype=fasta&retmode=text\
+         &seq_start={}&seq_stop={}&strand={}&email={}{}",
+        base, accession, start, stop, strand, email, ak
+    );
+    let text = ureq::get(&url)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    if text.contains('>') {
+        Ok(text)
+    } else {
+        Err(format!("no FASTA returned for {}:{}-{}", accession, start, stop))
+    }
+}
+
 fn fetch_myco_sequences() {
     const BASE: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
     const EMAIL: &str = "michael.meuli@gmail.com";
@@ -548,7 +638,16 @@ fn fetch_myco_sequences() {
                         continue;
                     }
                     println!("cargo:warning=fetch_myco: appending {} → {}", entry.accession, entry.fasta);
-                    match ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession) {
+                    let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
+                    let fetch_result = if is_genome {
+                        ncbi_fetch_genome_gene(
+                            BASE, EMAIL, api_key.as_deref(), &entry.accession,
+                            entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+                        )
+                    } else {
+                        ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
+                    };
+                    match fetch_result {
                         Ok(seq) => {
                             match fs::OpenOptions::new().append(true).create(true).open(&fasta_path) {
                                 Ok(mut f) => {
