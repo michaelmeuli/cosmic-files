@@ -88,12 +88,6 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # that file, so re-running the build is idempotent.
 # ---------------------------------------------------------------------------
 
-[[append]]
-accession = "CU458896"      # Mycobacteroides abscessus ATCC 19977 — rrl (23S rRNA)
-seq_start = 1464208
-seq_stop  = 1467319
-fasta     = "myco_rrl.fasta"
-
 # Direct accession example:
 # [[append]]
 # accession = "AB123456.1"   # M. example strain — hsp65

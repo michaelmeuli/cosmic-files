@@ -18,7 +18,15 @@
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\" -Recurse)",
       "Bash(Select-Object FullName)",
       "Bash(Select-String -Pattern \"AF547836|AF547849|AY299134|AY299145\" \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_hsp65.fasta\")",
-      "Bash(Select-Object -First 10)"
+      "Bash(Select-Object -First 10)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\ntm-db\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Head -50)",
+      "Bash(grep -v \"^.*species$\")",
+      "Bash(xargs -I {} basename {})",
+      "Bash(for species *)",
+      "Read(//c/Users/micha/rust/cosmic-files/res/sequences/ntm-db/db$species/**)",
+      "Bash(for species in \"Mycobacterium_abscessus\" \"Mycobacterium_avium\" \"Mycobacterium_fortuitum\" \"Mycobacterium_intracellulare\" \"Mycobacterium_leprae\" \"Mycobacterium_malmoense\" \"Mycobacterium_marinum\"; do *)"
     ]
   }
 }

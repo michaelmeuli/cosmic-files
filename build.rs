@@ -359,6 +359,165 @@ fn fetch_myco_sequences() {
 }
 
 
+fn reverse_complement_bytes(seq: &[u8]) -> Vec<u8> {
+    seq.iter().rev().map(|&b| match b.to_ascii_uppercase() {
+        b'A' => b'T', b'T' => b'A',
+        b'G' => b'C', b'C' => b'G',
+        _ => b'N',
+    }).collect()
+}
+
+fn load_genome_fasta(path: &std::path::Path) -> std::collections::HashMap<String, Vec<u8>> {
+    let mut map = std::collections::HashMap::new();
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return map,
+    };
+    let mut cur_name = String::new();
+    let mut cur_seq: Vec<u8> = Vec::new();
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix('>') {
+            if !cur_name.is_empty() {
+                map.insert(std::mem::take(&mut cur_name), std::mem::take(&mut cur_seq));
+            }
+            cur_name = rest.split_whitespace().next().unwrap_or("").to_string();
+        } else {
+            cur_seq.extend_from_slice(line.trim().as_bytes());
+        }
+    }
+    if !cur_name.is_empty() {
+        map.insert(cur_name, cur_seq);
+    }
+    map
+}
+
+struct GffFeature {
+    seqname: String,
+    ftype:   String,
+    start:   usize,
+    stop:    usize,
+    strand:  char,
+    attrs:   std::collections::HashMap<String, String>,
+}
+
+fn parse_gff(path: &std::path::Path) -> Vec<GffFeature> {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let mut features = Vec::new();
+    for line in content.lines() {
+        if line.starts_with('#') || line.is_empty() { continue; }
+        let cols: Vec<&str> = line.splitn(9, '\t').collect();
+        if cols.len() < 9 { continue; }
+        let start = match cols[3].parse::<usize>() { Ok(v) => v, Err(_) => continue };
+        let stop  = match cols[4].parse::<usize>() { Ok(v) => v, Err(_) => continue };
+        let strand = cols[6].chars().next().unwrap_or('+');
+        let mut attrs = std::collections::HashMap::new();
+        for pair in cols[8].split(';') {
+            if let Some((k, v)) = pair.split_once('=') {
+                attrs.insert(k.trim().to_string(), v.trim().to_string());
+            }
+        }
+        features.push(GffFeature { seqname: cols[0].to_string(), ftype: cols[2].to_string(), start, stop, strand, attrs });
+    }
+    features
+}
+
+fn gff_feature_matches(f: &GffFeature, gene: &str) -> bool {
+    let name    = f.attrs.get("Name").map(String::as_str).unwrap_or("");
+    let gene_kv = f.attrs.get("gene").map(String::as_str).unwrap_or("");
+    let product = f.attrs.get("product").map(String::as_str).unwrap_or("");
+    match gene {
+        "rrs"  => name == "rrs"  || (f.ftype == "rRNA" && product.contains("16S ribosomal RNA")),
+        "rrl"  => name == "rrl"  || (f.ftype == "rRNA" && product.contains("23S ribosomal RNA")),
+        "rpoB" => name == "rpoB" || gene_kv == "rpoB",
+        "erm"  => !name.is_empty() && name.to_ascii_lowercase().contains("erm"),
+        _ => false,
+    }
+}
+
+fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
+    use std::collections::HashSet;
+
+    struct Target { gene: &'static str, fasta: &'static str }
+    let targets = [
+        Target { gene: "rrs",  fasta: "myco_rrs.fasta"  },
+        Target { gene: "rrl",  fasta: "myco_rrl.fasta"  },
+        Target { gene: "rpoB", fasta: "myco_rpob.fasta" },
+        Target { gene: "erm",  fasta: "myco_erm41.fasta" },
+    ];
+
+    let db_dir = seq_dir.join("ntm-db/db");
+    let entries = match fs::read_dir(&db_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let species_path = entry.path();
+        if !species_path.is_dir() { continue; }
+        let dir_name = entry.file_name().to_string_lossy().into_owned();
+        let species_name = dir_name.replace('_', " ");
+
+        let gff_path   = species_path.join("genome.gff");
+        let fasta_path = species_path.join("genome.fasta");
+        println!("cargo:rerun-if-changed=res/sequences/ntm-db/db/{}/genome.gff", dir_name);
+        if !gff_path.exists() || !fasta_path.exists() { continue; }
+
+        let genome   = load_genome_fasta(&fasta_path);
+        let features = parse_gff(&gff_path);
+
+        for target in &targets {
+            let target_path = seq_dir.join(target.fasta);
+            let existing = if target_path.exists() {
+                fs::read_to_string(&target_path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let mut seen: HashSet<(String, usize, usize)> = HashSet::new();
+            for feature in &features {
+                if !gff_feature_matches(feature, target.gene) { continue; }
+                let coord_key = (feature.seqname.clone(), feature.start, feature.stop);
+                if !seen.insert(coord_key) { continue; }
+
+                let coord_str = format!("{}:{}-{}", feature.seqname, feature.start, feature.stop);
+                if existing.contains(&coord_str) { continue; }
+
+                let contig = match genome.get(&feature.seqname) {
+                    Some(c) => c,
+                    None => {
+                        println!("cargo:warning=ntm-db: contig {} not found in {}", feature.seqname, dir_name);
+                        continue;
+                    }
+                };
+                if feature.start == 0 || feature.stop > contig.len() {
+                    println!("cargo:warning=ntm-db: coords out of range {} in {}", coord_str, dir_name);
+                    continue;
+                }
+
+                let mut seq = contig[feature.start - 1..feature.stop].to_vec();
+                if feature.strand == '-' { seq = reverse_complement_bytes(&seq); }
+
+                let mut fasta_entry = format!(">{} {} {}\n", coord_str, species_name, target.gene).into_bytes();
+                for chunk in seq.chunks(70) {
+                    fasta_entry.extend_from_slice(chunk);
+                    fasta_entry.push(b'\n');
+                }
+
+                match fs::OpenOptions::new().append(true).create(true).open(&target_path) {
+                    Ok(mut f) => match f.write_all(&fasta_entry) {
+                        Ok(_)  => println!("cargo:warning=ntm-db: {} {} → {}", species_name, target.gene, target.fasta),
+                        Err(e) => println!("cargo:warning=ntm-db: write error {}: {e}", target.fasta),
+                    },
+                    Err(e) => println!("cargo:warning=ntm-db: open error {}: {e}", target.fasta),
+                }
+            }
+        }
+    }
+}
+
 /// Accessions that must be present in myco_hsp65.fasta for SNP dispatch to work.
 /// Keep in sync with the constants in src/sequencing/hsp65.rs.
 const HSP65_REQUIRED_ACCS: &[&str] = &["AF547836", "AF547849", "AY299134", "AY299145"];
@@ -387,6 +546,7 @@ fn main() {
     fetch_myco_sequences();
 
     let manifest_dir_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    extract_ntm_db_sequences(&manifest_dir_path.join("res/sequences"));
     check_hsp65_integrity(&manifest_dir_path.join("res/sequences"));
 
     // Embed the ntm-db submodule commit hash so the UI can display it.
