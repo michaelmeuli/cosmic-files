@@ -112,7 +112,7 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
     let query = query.as_slice();
     let rc = reverse_complement(query);
 
-    let mut hits: Vec<SeqIdHit> = super::parse_multi_fasta(super::REF_MYCO_HSP65_DAI2011)
+    let mut hits: Vec<SeqIdHit> = super::parse_multi_fasta(super::REF_MYCO_HSP65)
         .into_iter()
         .map(|(raw_acc, description, refseq)| {
             // Strip version suffix so SNP dispatch and is_kansasii() etc. work correctly.
