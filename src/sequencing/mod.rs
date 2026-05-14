@@ -365,6 +365,7 @@ pub fn identify_species_rpob(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_RPOB)
 }
 pub fn identify_species_23s_ntm(query: &[u8]) -> Vec<SpeciesHit> {
+    let query = trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     identify_species(query, REF_MYCO_RRL)
 }
 
