@@ -21,11 +21,13 @@ struct ResistanceVariant {
     drug: String,
     #[serde(rename = "type")]
     confers: String,
+    #[serde(rename = "E.coli-nomenclature", default)]
+    ecoli_nomenclature: String,
 }
 
-fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)> {
+fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)> {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
-    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)> = BTreeMap::new();
+    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)> = BTreeMap::new();
     for row in rdr.deserialize::<ResistanceVariant>() {
         let row = row.unwrap();
         if row.gene.trim() != "rrl" {
@@ -34,7 +36,8 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec
         if row.confers.trim() != "drug_resistance" {
             continue;
         }
-        let drug = row.drug.trim();
+        let drug = row.drug.trim().to_string();
+        let ecoli = row.ecoli_nomenclature.trim().to_string();
         let m = row.mutation.trim();
         if let Some(rest) = m.strip_prefix("n.") {
             let digits_end = rest
@@ -50,9 +53,9 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec
                         .and_then(|s| s.bytes().next()),
                 ) {
                     let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
-                    let drugs = entry.1.entry(alt).or_default();
-                    if !drugs.contains(&drug.to_string()) {
-                        drugs.push(drug.to_string());
+                    let variant = entry.1.entry(alt).or_insert_with(|| (Vec::new(), ecoli.clone()));
+                    if !variant.0.contains(&drug) {
+                        variant.0.push(drug);
                     }
                 }
             }
@@ -62,7 +65,7 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec
 }
 
 static RRL_RESISTANCE_SNPS: LazyLock<
-    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>>,
+    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>>,
 > = LazyLock::new(|| {
     [
         ("Mycobacterium abscessus", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
@@ -78,32 +81,43 @@ static RRL_RESISTANCE_SNPS: LazyLock<
 
 #[derive(Clone, Debug)]
 pub struct RrlSnpCall {
-    /// 0-based position in the rrl reference sequence (MAB_r5052).
+    /// 0-based position in the rrl reference sequence.
     pub ref_pos: usize,
     /// Base observed in the query at this position, or `None` if not covered.
     pub query_base: Option<u8>,
     /// Wild-type base at this position.
     pub wt_base: u8,
-    /// Maps each resistance-conferring base to the drugs it confers resistance to.
-    pub resistance_bases: BTreeMap<u8, Vec<String>>,
+    /// Maps each resistance-conferring alt base to `(drugs, E.coli nomenclature)`.
+    pub resistance_bases: BTreeMap<u8, (Vec<String>, String)>,
 }
 
 impl RrlSnpCall {
     pub fn call_tag(&self) -> String {
+        // E.coli position prefix shared by all alts at this position (e.g. "A2058").
+        let ecoli_prefix: Option<&str> = self.resistance_bases.values()
+            .next()
+            .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
+
         match self.query_base {
             None => "NA".to_string(),
-            Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
+            Some(b) if b == self.wt_base => match ecoli_prefix {
+                Some(p) => format!("{} (wt, E.coli {})", b as char, p),
+                None    => format!("{} (wt)", b as char),
+            },
             Some(b) if self.resistance_bases.contains_key(&b) => {
-                let drugs = self.resistance_bases[&b].join(", ");
-                format!("{} ({})", b as char, drugs)
+                let (drugs, ecoli) = &self.resistance_bases[&b];
+                format!("{} ({}, E.coli {})", b as char, drugs.join(", "), ecoli)
             }
-            Some(b) => format!("{} (mutation)", b as char),
+            Some(b) => match ecoli_prefix {
+                Some(p) => format!("{} (mutation, E.coli {}{})", b as char, p, b as char),
+                None    => format!("{} (mutation)", b as char),
+            },
         }
     }
 }
 
 fn call_rrl_snps(
-    snps: &BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>,
+    snps: &BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>,
     query: &[u8],
     alignment_offset: isize,
 ) -> Vec<RrlSnpCall> {
