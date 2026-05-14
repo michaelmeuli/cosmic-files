@@ -3451,7 +3451,9 @@ impl Item {
                 )));
             }
             details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading("Species identification (hsp65 database):"));
+            details = details.push(widget::text::heading(
+                "Species identification (hsp65 database):",
+            ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
                     widget::button::link(format!(
@@ -3601,6 +3603,20 @@ impl Item {
                     avg_qual
                 )));
             }
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading(
+                "Species identification (hsp65 database):",
+            ));
+            for hit in &hits[..hits.len().min(3)] {
+                details = details.push(
+                    widget::button::link(format!(
+                        "{} ({:.1}%)",
+                        hit.description, hit.identity
+                    ))
+                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                    .padding(0),
+                );
+            }
             details = details.push(widget::text::body(""));
             if !best.rrl_snp_calls.is_empty() {
                 details = details.push(widget::text::body(
@@ -3618,11 +3634,6 @@ impl Item {
                     )));
                 }
             }
-            details = details.push(widget::text::body(""));
-            details = details.push(
-                widget::button::standard("View alignment")
-                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone()))),
-            );
         }
 
         if let Some(chrom) = self.metadata.ab1_chromatogram() {
@@ -3653,24 +3664,6 @@ impl Item {
             .height(Length::Fixed(200.0));
             details = details.push(canvas);
             details = details.push(widget::text::body(""));
-        }
-
-        let species_hits = self.metadata.ab1_species_hits();
-        if species_hits.is_empty() {
-            details = details.push(widget::text::body("No species match found"));
-        } else {
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::body("Species identification (23S database):"));
-            for hit in &species_hits[..species_hits.len().min(10)] {
-                details = details.push(
-                    widget::button::link(format!(
-                        "{} ({:.1}%), {}",
-                        hit.description, hit.identity, hit.accession
-                    ))
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone())))
-                    .padding(0),
-                );
-            }
         }
 
         column = column.push(details);
