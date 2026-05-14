@@ -505,6 +505,7 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
                     fasta_entry.extend_from_slice(chunk);
                     fasta_entry.push(b'\n');
                 }
+                fasta_entry.push(b'\n');
 
                 match fs::OpenOptions::new().append(true).create(true).open(&target_path) {
                     Ok(mut f) => match f.write_all(&fasta_entry) {

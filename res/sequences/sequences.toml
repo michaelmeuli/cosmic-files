@@ -4,40 +4,6 @@ email   = "michael.meuli@gmail.com"   # required by NCBI
 # optional: raises rate limit to 10 req/s:
 # [System.Environment]::SetEnvironmentVariable("NCBI_API_KEY", "your_key", "User")
 
-# python scripts\fetch_sequences.py
-
-# ---------------------------------------------------------------------------
-# [[direct]] — accession IS the gene/sequence record; fetched as FASTA directly
-# ---------------------------------------------------------------------------
-
-# [[direct]]
-# accession = "AF547836.1"   # Mycobacterium gastri CIP 104530 — hsp65
-# output    = "hsp65/AF547836.fasta"
-# 
-# [[direct]]
-# accession = "AF547849.1"   # Mycobacterium kansasii CIP 104589 — hsp65
-# output    = "hsp65/AF547849.fasta"
-# 
-# [[direct]]
-# accession = "AY299134.1"   # Mycobacterium marinum ATCC 927 — hsp65
-# output    = "hsp65/AY299134.fasta"
-# 
-# [[direct]]
-# accession = "AY299145.1"   # Mycobacterium ulcerans — hsp65
-# output    = "hsp65/AY299145.fasta"
-# 
-# [[direct]]
-# accession = "AY458075.1"   # Mycobacterium abscessus CIP 104536 — hsp65
-# output    = "hsp65/AY458075.fasta"
-
-# ---------------------------------------------------------------------------
-# [[genome]] — extract a single gene from a genome record
-#
-# Option A: locus_tag  → script fetches the feature table, locates the gene,
-#                        then fetches that region (2 NCBI requests)
-# Option B: seq_start + seq_stop  → coordinates already known; 1-based, inclusive
-#                        (1 NCBI request; strand defaults to forward)
-# ---------------------------------------------------------------------------
 
 
 # --- rrl (23S rRNA) --------------------------------------------------------
