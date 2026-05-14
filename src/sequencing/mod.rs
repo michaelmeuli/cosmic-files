@@ -25,8 +25,6 @@ const REF_ERM41_ABSCESSUS: &str = include_str!("../../res/sequences/erm41/erm41_
 const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
 const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
 
-const REF_MAB_R5052: &str = include_str!("../../res/sequences/rrl/MAB_r5052.fasta");
-const REF_AVIUM_RRL: &str = include_str!("../../res/sequences/rrl/MAV_1533.fasta");
 
 const ACC_GASTRI:   &str = "AF547836";
 const ACC_KANSASII: &str = "AF547849";

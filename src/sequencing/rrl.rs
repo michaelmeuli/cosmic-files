@@ -1,13 +1,12 @@
 use super::reverse_complement;
 use super::{
-    REF_MAB_R5052, 
-    REF_AVIUM_RRL,
-    RRL_ANCHOR_L, 
-    RRL_ANCHOR_R, 
-    RRL_FWD_END, 
-    RRL_FWD_START
+    RRL_ANCHOR_L,
+    RRL_ANCHOR_R,
+    RRL_FWD_END,
+    RRL_FWD_START,
+    REF_MYCO_RRL,
 };
-use super::{SeqIdHit, best_alignment, parse_fasta_seq};
+use super::{SeqIdHit, best_alignment, parse_multi_fasta};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -164,23 +163,9 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
 
-    let refs: &[(&str, &str, &str)] = &[
-        (
-            REF_MAB_R5052,
-            "REF_MAB_R5052",
-            "Mycobacterium abscessus",
-        ),
-        (
-            REF_AVIUM_RRL,
-            "REF_AVIUM_RRL",
-            "Mycobacterium avium",
-        ),
-    ];
-
-    let mut hits: Vec<SeqIdHit> = refs
-        .iter()
-        .map(|(fasta, accession, description)| {
-            let refseq = parse_fasta_seq(fasta);
+    let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRL)
+        .into_iter()
+        .map(|(accession, description, refseq)| {
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
             let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
@@ -189,12 +174,12 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 (fwd_id, false, query, fwd_off)
             };
             let rrl_snp_calls = RRL_RESISTANCE_SNPS
-                .get(*description)
+                .get(description.as_str())
                 .map(|snps| call_rrl_snps(snps, aligned_query, offset))
                 .unwrap_or_default();
             SeqIdHit {
-                accession: accession.to_string(),
-                description: description.to_string(),
+                accession,
+                description,
                 identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
