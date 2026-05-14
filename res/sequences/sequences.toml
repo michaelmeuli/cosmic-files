@@ -48,8 +48,9 @@ locus_tag = "MAV_1533"      # rrlA (23S rRNA)
 output    = "rrl/MAV_1533.fasta"
 
 [[genome]]
-accession = "NC_010397.1"   # Mycobacteroides abscessus ATCC 19977 complete genome
-locus_tag = "MAB_r5052"     # rrl (23S rRNA)
+accession = "CU458896"      # Mycobacteroides abscessus ATCC 19977 complete genome (ENA)
+seq_start = 1464208
+seq_stop  = 1467319
 output    = "rrl/MAB_r5052.fasta"
 
 
@@ -86,6 +87,12 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # The sequence is only fetched if the accession is not already present in
 # that file, so re-running the build is idempotent.
 # ---------------------------------------------------------------------------
+
+[[append]]
+accession = "CU458896"      # Mycobacteroides abscessus ATCC 19977 — rrl (23S rRNA)
+seq_start = 1464208
+seq_stop  = 1467319
+fasta     = "myco_rrl.fasta"
 
 # Direct accession example:
 # [[append]]
