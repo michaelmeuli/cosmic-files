@@ -1,19 +1,7 @@
 use super::reverse_complement;
 use super::{best_alignment, SeqIdHit};
+use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
 
-/// Accessions used for SNP dispatch. Centralised here so the sanity check and
-/// the match arms stay in sync.
-const ACC_GASTRI: &str = "AF547836";
-const ACC_KANSASII: &str = "AF547849";
-const ACC_MARINUM: &str = "AY299134";
-const ACC_ULCERANS: &str = "AY299145";
-
-const KANSASII_GASTRI_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII];
-const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
-
-/// Diagnostic SNPs between M. gastri (AF547836) and M. kansasii (AF547849),
-/// defined at 0-based positions in the aligned hsp65 reference sequences.
-/// Both references are 423 bp with no indels, so positions are identical in both.
 const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
     // (0-based ref pos, gastri_base, kansasii_base)
     (100, b'C', b'T'),
@@ -26,9 +14,6 @@ const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
     (399, b'G', b'A'),
 ];
 
-/// Diagnostic SNPs between M. marinum (AY299134) and M. ulcerans (AY299145),
-/// defined at 0-based positions in the aligned hsp65 reference sequences.
-/// Both references are 603 bp with no indels, so positions are identical in both.
 const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
     // (0-based ref pos, marinum_base, ulcerans_base)
     (20, b'C', b'T'),

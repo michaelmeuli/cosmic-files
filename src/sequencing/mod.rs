@@ -28,6 +28,13 @@ const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41
 const REF_MAB_R5052: &str = include_str!("../../res/sequences/rrl/MAB_r5052.fasta");
 const REF_AVIUM_RRL: &str = include_str!("../../res/sequences/rrl/MAV_1533.fasta");
 
+const ACC_GASTRI:   &str = "AF547836";
+const ACC_KANSASII: &str = "AF547849";
+const ACC_MARINUM:  &str = "AY299134";
+const ACC_ULCERANS: &str = "AY299145";
+const KANSASII_GASTRI_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII];
+const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
+
 const REF_MYCO_RRS:           &str = include_str!("../../res/sequences/myco_rrs.fasta");
 const REF_MYCO_HSP65:         &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 const REF_MYCO_RPOB:          &str = include_str!("../../res/sequences/myco_rpob.fasta");
@@ -657,16 +664,16 @@ impl SeqIdHit {
     }
 
     pub fn is_kansasii(&self) -> bool {
-        self.accession == "AF547849"
+        self.accession == ACC_KANSASII
     }
     pub fn is_gastri(&self) -> bool {
-        self.accession == "AF547836"
+        self.accession == ACC_GASTRI
     }
     pub fn is_marinum(&self) -> bool {
-        self.accession == "AY299134"
+        self.accession == ACC_MARINUM
     }
     pub fn is_ulcerans(&self) -> bool {
-        self.accession == "AY299145"
+        self.accession == ACC_ULCERANS
     }
     pub fn kansasii_gastri_snp_species_call(&self) -> Option<&'static str> {
         let gastri = self
