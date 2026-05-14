@@ -358,34 +358,6 @@ fn fetch_myco_sequences() {
     }
 }
 
-fn fetch_sequences() {
-    println!("cargo:rerun-if-changed=res/sequences/sequences.toml");
-    println!("cargo:rerun-if-changed=scripts/fetch_sequences.py");
-
-    let candidates: &[&str] = if cfg!(windows) {
-        &["python", "py", "python3"]
-    } else {
-        &["python3", "python"]
-    };
-
-    for &py in candidates {
-        let result = Command::new(py)
-            .args(["scripts/fetch_sequences.py"])
-            .status();
-        match result {
-            Ok(s) if s.success() => return,
-            Ok(s) => {
-                println!("cargo:warning=fetch_sequences.py exited with {s}");
-                return;
-            }
-            Err(_) => continue,
-        }
-    }
-    println!(
-        "cargo:warning=Python interpreter not found; \
-         FASTA files in res/sequences/ must already exist"
-    );
-}
 
 /// Accessions that must be present in myco_hsp65.fasta for SNP dispatch to work.
 /// Keep in sync with the constants in src/sequencing/hsp65.rs.
@@ -413,7 +385,6 @@ fn check_hsp65_integrity(seq_dir: &std::path::Path) {
 
 fn main() {
     fetch_myco_sequences();
-    fetch_sequences();
 
     let manifest_dir_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     check_hsp65_integrity(&manifest_dir_path.join("res/sequences"));
