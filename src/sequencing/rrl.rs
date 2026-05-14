@@ -62,19 +62,20 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, Vec
     map
 }
 
-pub static RRL_ABSCESSUS_RESISTANCE_SNPS: LazyLock<
-    BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>,
+static RRL_RESISTANCE_SNPS: LazyLock<
+    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>>,
 > = LazyLock::new(|| {
-    parse_rrl_resistance_snps(include_str!(
-        "../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"
-    ))
+    [
+        ("Mycobacterium abscessus", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
+        ("Mycobacterium avium",          include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv")),
+        ("Mycobacterium fortuitum",      include_str!("../../res/sequences/ntm-db/db/Mycobacterium_fortuitum/variants.csv")),
+        ("Mycobacterium intracellulare", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_intracellulare/variants.csv")),
+        ("Mycobacterium leprae",         include_str!("../../res/sequences/ntm-db/db/Mycobacterium_leprae/variants.csv")),
+    ]
+    .into_iter()
+    .map(|(species, csv)| (species, parse_rrl_resistance_snps(csv)))
+    .collect()
 });
-pub static RRL_AVIUM_RESISTANCE_SNPS: LazyLock<BTreeMap<usize, (u8, BTreeMap<u8, Vec<String>>)>> =
-    LazyLock::new(|| {
-        parse_rrl_resistance_snps(include_str!(
-            "../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv"
-        ))
-    });
 
 #[derive(Clone, Debug)]
 pub struct RrlSnpCall {
@@ -125,12 +126,6 @@ fn call_rrl_snps(
         .collect()
 }
 
-pub fn call_rrl_abscessus_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
-    call_rrl_snps(&RRL_ABSCESSUS_RESISTANCE_SNPS, query, alignment_offset)
-}
-pub fn call_rrl_avium_snps(query: &[u8], alignment_offset: isize) -> Vec<RrlSnpCall> {
-    call_rrl_snps(&RRL_AVIUM_RESISTANCE_SNPS, query, alignment_offset)
-}
 
 pub(super) fn find_rrl_ntm_display_window(
     bases: &[u8],
@@ -193,13 +188,10 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query, fwd_off)
             };
-            let rrl_snp_calls = if *accession == "REF_AVIUM_RRL" {
-                call_rrl_avium_snps(aligned_query, offset)
-            } else if *accession == "REF_MAB_R5052" {
-                call_rrl_abscessus_snps(aligned_query, offset)
-            } else {
-                vec![]
-            };
+            let rrl_snp_calls = RRL_RESISTANCE_SNPS
+                .get(*description)
+                .map(|snps| call_rrl_snps(snps, aligned_query, offset))
+                .unwrap_or_default();
             SeqIdHit {
                 accession: accession.to_string(),
                 description: description.to_string(),
