@@ -11,30 +11,6 @@ const ACC_ULCERANS: &str = "AY299145";
 const KANSASII_GASTRI_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII];
 const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
 
-/// Required accessions — all must be present in REF_MYCO_HSP65.
-const REQUIRED_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII, ACC_MARINUM, ACC_ULCERANS];
-
-static REF_INTEGRITY_CHECKED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-
-fn check_ref_integrity() {
-    let present: std::collections::HashSet<String> =
-        super::parse_multi_fasta(super::REF_MYCO_HSP65)
-            .into_iter()
-            .map(|(raw_acc, _, _)| {
-                raw_acc
-                    .rsplit_once('.')
-                    .map(|(base, _)| base.to_string())
-                    .unwrap_or(raw_acc)
-            })
-            .collect();
-    for acc in REQUIRED_ACCS {
-        assert!(
-            present.contains(*acc),
-            "REF_MYCO_HSP65 is missing required accession {acc}"
-        );
-    }
-}
-
 /// Diagnostic SNPs between M. gastri (AF547836) and M. kansasii (AF547849),
 /// defined at 0-based positions in the aligned hsp65 reference sequences.
 /// Both references are 423 bp with no indels, so positions are identical in both.
@@ -142,8 +118,6 @@ pub fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
 }
 
 pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
-    REF_INTEGRITY_CHECKED.get_or_init(check_ref_integrity);
-
     let query = trim_hsp65_primers(query);
     let query = query.as_slice();
     let rc = reverse_complement(query);

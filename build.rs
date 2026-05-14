@@ -700,9 +700,36 @@ fn fetch_sequences() {
     );
 }
 
+/// Accessions that must be present in myco_hsp65.fasta for SNP dispatch to work.
+/// Keep in sync with the constants in src/sequencing/hsp65.rs.
+const HSP65_REQUIRED_ACCS: &[&str] = &["AF547836", "AF547849", "AY299134", "AY299145"];
+
+fn check_hsp65_integrity(seq_dir: &std::path::Path) {
+    let path = seq_dir.join("myco_hsp65.fasta");
+    let fasta = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => panic!("cannot read myco_hsp65.fasta: {e}"),
+    };
+    let present: std::collections::HashSet<&str> = fasta
+        .lines()
+        .filter(|l| l.starts_with('>'))
+        .filter_map(|l| l[1..].split_whitespace().next())
+        .map(|id| id.split('.').next().unwrap_or(id))
+        .collect();
+    for acc in HSP65_REQUIRED_ACCS {
+        assert!(
+            present.contains(acc),
+            "myco_hsp65.fasta is missing required accession {acc} — SNP dispatch will not work"
+        );
+    }
+}
+
 fn main() {
     fetch_myco_sequences();
     fetch_sequences();
+
+    let manifest_dir_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    check_hsp65_integrity(&manifest_dir_path.join("res/sequences"));
 
     // Embed the ntm-db submodule commit hash so the UI can display it.
     let commit = Command::new("git")
