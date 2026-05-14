@@ -40,7 +40,6 @@ const REF_MYCO_HSP65:         &str = include_str!("../../res/sequences/myco_hsp6
 const REF_MYCO_RPOB:          &str = include_str!("../../res/sequences/myco_rpob.fasta");
 const REF_MYCO_ERM41:         &str = include_str!("../../res/sequences/myco_erm41.fasta");
 const REF_MYCO_RRL:           &str = include_str!("../../res/sequences/myco_rrl.fasta");
-const REF_MYCO_HSP65_DAI2011: &str = include_str!("../../res/sequences/myco_hsp65_dai2011.fasta");
 
 
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
