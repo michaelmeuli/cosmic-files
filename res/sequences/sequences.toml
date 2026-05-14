@@ -105,18 +105,18 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # seq_stop  = 92593
 # fasta     = "myco_erm41.fasta"
 
-[[append]]
-accession = "AF547836.1"   # Mycobacterium gastri CIP 104530 — hsp65
-fasta    = "myco_hsp65.fasta"
-
-[[append]]
-accession = "AF547849.1"   # Mycobacterium kansasii CIP 104589 — hsp65
-fasta    = "myco_hsp65.fasta"
-
-[[append]]
-accession = "AY299134.1"   # Mycobacterium marinum ATCC 927 — hsp65
-fasta    = "myco_hsp65.fasta"
-
-[[append]]
-accession = "AY299145.1"   # Mycobacterium ulcerans — hsp65
-fasta    = "myco_hsp65.fasta"
+# [[append]]
+# accession = "AF547836.1"   # Mycobacterium gastri CIP 104530 — hsp65
+# fasta    = "myco_hsp65.fasta"
+# 
+# [[append]]
+# accession = "AF547849.1"   # Mycobacterium kansasii CIP 104589 — hsp65
+# fasta    = "myco_hsp65.fasta"
+# 
+# [[append]]
+# accession = "AY299134.1"   # Mycobacterium marinum ATCC 927 — hsp65
+# fasta    = "myco_hsp65.fasta"
+# 
+# [[append]]
+# accession = "AY299145.1"   # Mycobacterium ulcerans — hsp65
+# fasta    = "myco_hsp65.fasta"
