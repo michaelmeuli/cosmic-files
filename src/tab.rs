@@ -3451,7 +3451,7 @@ impl Item {
                 )));
             }
             details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading("Best matches (Lauzardo et al., 2011):"));
+            details = details.push(widget::text::heading("Species identification (hsp65 database):"));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
                     widget::button::link(format!(
@@ -3524,24 +3524,6 @@ impl Item {
                     )));
                 }
                 details = details.push(widget::text::body(""));
-            }
-        }
-
-        let species_hits = self.metadata.ab1_species_hits();
-        if !species_hits.is_empty() {
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::body(
-                "Species identification (hsp65 database):",
-            ));
-            for hit in &species_hits[..species_hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!(
-                        "{} ({:.1}%), {}",
-                        hit.description, hit.identity, hit.accession
-                    ))
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone())))
-                    .padding(0),
-                );
             }
         }
 
