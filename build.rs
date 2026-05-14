@@ -7,7 +7,18 @@ use xdgen::{App, Context, FluentString};
 #[derive(serde::Deserialize)]
 struct SequencesConfig {
     #[serde(default)]
+    genome: Vec<GenomeEntry>,
+    #[serde(default)]
     append: Vec<AppendEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct GenomeEntry {
+    accession: String,
+    output: String,
+    locus_tag: Option<String>,
+    seq_start: Option<u64>,
+    seq_stop: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -278,6 +289,31 @@ fn fetch_myco_sequences() {
         match toml::from_str::<SequencesConfig>(&toml_str) {
             Ok(config) => {
                 let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
+                for entry in &config.genome {
+                    let out_path = seq_dir.join(&entry.output);
+                    println!("cargo:rerun-if-changed=res/sequences/{}", entry.output);
+                    if out_path.exists() && out_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+                        println!("cargo:warning=fetch_myco: {} exists — skip", entry.output);
+                        continue;
+                    }
+                    println!("cargo:warning=fetch_myco: fetching genome gene → {}", entry.output);
+                    if let Some(parent) = out_path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    match ncbi_fetch_genome_gene(
+                        BASE, EMAIL, api_key.as_deref(), &entry.accession,
+                        entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+                    ) {
+                        Ok(seq) => {
+                            match fs::write(&out_path, seq.as_bytes()) {
+                                Ok(_) => println!("cargo:warning=fetch_myco: wrote {}", entry.output),
+                                Err(e) => println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.output),
+                            }
+                        }
+                        Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.output),
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                }
                 for entry in &config.append {
                     let fasta_path = seq_dir.join(&entry.fasta);
                     let existing = if fasta_path.exists() {
