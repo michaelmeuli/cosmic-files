@@ -121,17 +121,17 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         (
             super::REF_ERM41_ABSCESSUS,
             "REF_ERM41_ABSCESSUS",
-            "Mycobacteroides abscessus subsp. abscessus",
+            "M. abscessus subsp. abscessus",
         ),
         (
             super::REF_ERM41_BOLLETII,
             "REF_ERM41_BOLLETII",
-            "Mycobacteroides abscessus subsp. bolletii",
+            "M. abscessus subsp. bolletii",
         ),
         (
             super::REF_ERM41_MASSILENSE,
             "REF_ERM41_MASSILENSE",
-            "Mycobacteroides abscessus subsp. massiliense",
+            "M. abscessus subsp. massiliense",
         ),
     ];
 
