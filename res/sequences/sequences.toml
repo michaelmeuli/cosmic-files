@@ -5,21 +5,6 @@ email   = "michael.meuli@gmail.com"   # required by NCBI
 # [System.Environment]::SetEnvironmentVariable("NCBI_API_KEY", "your_key", "User")
 
 
-
-# --- rrl (23S rRNA) --------------------------------------------------------
-
-[[genome]]
-accession = "CP000479.1"    # Mycobacterium avium 104 complete genome
-locus_tag = "MAV_1533"      # rrlA (23S rRNA)
-output    = "rrl/MAV_1533.fasta"
-
-[[genome]]
-accession = "CU458896"      # Mycobacteroides abscessus ATCC 19977 complete genome (ENA)
-seq_start = 1464208
-seq_stop  = 1467319
-output    = "rrl/MAB_r5052.fasta"
-
-
 # --- erm(41) ---
 
 [[genome]]
@@ -38,21 +23,17 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # assembly: NZ_MVHY01000001.1
 # erm41_massiliense_CCUG_48898.fasta was done manually. (deletion neart the end, but the end is still there)
 
-# ---------------------------------------------------------------------------
-# [[append]] — fetch a single accession and append it to a multi-FASTA file
-#
-# Required fields:
-#   accession  NCBI nucleotide accession (version suffix optional)
-#   fasta      filename inside res/sequences/ to append to
-#
-# Optional genome-extraction fields (mirrors [[genome]] above):
-#   locus_tag  fetch feature table, locate gene, then fetch that region
-#   seq_start  } already-known 1-based inclusive coordinates (skip feature
-#   seq_stop   }   table lookup; strand defaults to forward)
-#
-# The sequence is only fetched if the accession is not already present in
-# that file, so re-running the build is idempotent.
-# ---------------------------------------------------------------------------
+
+
+# Direct accession (no locus_tag / coordinates) — fetches the accession as-is:
+# [[genome]]
+# accession = "AB123456.1"   # M. example strain — hsp65
+# output    = "hsp65/hsp65_example.fasta"
+
+
+
+
+
 
 # Direct accession example:
 # [[append]]
@@ -72,18 +53,3 @@ output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 # seq_stop  = 92593
 # fasta     = "myco_erm41.fasta"
 
-# [[append]]
-# accession = "AF547836.1"   # Mycobacterium gastri CIP 104530 — hsp65
-# fasta    = "myco_hsp65.fasta"
-# 
-# [[append]]
-# accession = "AF547849.1"   # Mycobacterium kansasii CIP 104589 — hsp65
-# fasta    = "myco_hsp65.fasta"
-# 
-# [[append]]
-# accession = "AY299134.1"   # Mycobacterium marinum ATCC 927 — hsp65
-# fasta    = "myco_hsp65.fasta"
-# 
-# [[append]]
-# accession = "AY299145.1"   # Mycobacterium ulcerans — hsp65
-# fasta    = "myco_hsp65.fasta"

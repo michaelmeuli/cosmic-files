@@ -3360,35 +3360,53 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(17).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
         let hits = self.metadata.seq_id_hits();
-        let mut column = widget::column::with_capacity(6).spacing(space_m);
-        column = column.push(widget::text::heading(self.name.clone()));
         if hits.is_empty() {
-            column = column.push(widget::text::body("No sequence match found"));
+            details = details.push(widget::text::body("No sequence match found"));
         } else {
-            column = column.push(widget::text::heading(
+            if !self.metadata.is_seq_id() {
+                details = details.push(widget::text::body("Percent identity is less than 60%."));
+            }
+            details = details.push(widget::text::body(format!(
+                "Sequence length: {}",
+                self.metadata.sequence_length().unwrap_or(0)
+            )));
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading(
                 "Percent identity to erm(41) references of abscessus subspecies:",
             ));
-            let hits_column = hits.into_iter().fold(
-                widget::column::with_capacity(hits.len()).spacing(space_xxxs),
-                |col, hit| {
-                    col.push(widget::text::body(format!(
+            for hit in &hits[..hits.len().min(3)] {
+                details = details.push(
+                    widget::button::link(format!(
                         "{}: {:.1}%",
                         hit.description, hit.identity,
-                    )))
-                },
-            );
-            column = column.push(hits_column);
+                    ))
+                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                    .padding(0),
+                );
+            }
         }
+
         if self.metadata.is_abscessus_seq_id() || self.metadata.is_bolletii_seq_id() {
             let call = self.metadata.erm41position28_call();
-            column = column.push(widget::text::heading(format!("erm(41) {}", call)));
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::heading(format!("erm(41) {}", call)));
         }
-        let mut details = widget::column::with_capacity(5).spacing(space_xxxs);
         if let Some(chrom) = self.metadata.ab1_chromatogram()
             && chrom.erm41_view_state_opt.is_some()
             && !self.metadata.is_massiliense_seq_id()
         {
+            details = details.push(widget::text::body(""));
             details = details.push(widget::text::body(
                 "Shown are bases 19-39, with position 28 in bold.",
             ));
@@ -3411,14 +3429,8 @@ impl Item {
             details = details.push(canvas);
             details = details.push(widget::text::body(""));
         }
-        column = column.push(details);
 
-        if let Some(best_id_hit) = hits.first() {
-            column = column.push(
-                widget::button::standard("View alignment")
-                    .on_press(Message::OpenSeqAlignment(Box::new(best_id_hit.clone()))),
-            );
-        }
+        column = column.push(details);
         column.into()
     }
 

@@ -300,10 +300,16 @@ fn fetch_myco_sequences() {
                     if let Some(parent) = out_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
-                    match ncbi_fetch_genome_gene(
-                        BASE, EMAIL, api_key.as_deref(), &entry.accession,
-                        entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
-                    ) {
+                    let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
+                    let fetch_result = if is_genome {
+                        ncbi_fetch_genome_gene(
+                            BASE, EMAIL, api_key.as_deref(), &entry.accession,
+                            entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+                        )
+                    } else {
+                        ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
+                    };
+                    match fetch_result {
                         Ok(seq) => {
                             match fs::write(&out_path, seq.as_bytes()) {
                                 Ok(_) => println!("cargo:warning=fetch_myco: wrote {}", entry.output),
