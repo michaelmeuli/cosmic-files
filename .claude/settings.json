@@ -32,7 +32,15 @@
       "Read(//mnt/c/Users/micha/rust/cosmic-files/res/sequences/ntm-db/**)",
       "Bash(find /mnt/c/Users/micha/rust/cosmic-files -name \"build.rs\" 2>/dev/null)",
       "Read(//mnt/c/Users/micha/rust/**)",
-      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\src\\\\sequencing\\\\\" -ErrorAction SilentlyContinue)"
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\src\\\\sequencing\\\\\" -ErrorAction SilentlyContinue)",
+      "WebFetch(domain:michaelmeuli.github.io)",
+      "Bash(gh run *)",
+      "Bash(git -C /c/Users/micha/rust/cosmic-files branch -a)",
+      "Bash(git -C /c/Users/micha/rust/cosmic-files ls-files res/sequences/myco_rrs.fasta res/sequences/myco_hsp65.fasta res/sequences/erm41/)",
+      "Bash(git -C /c/Users/micha/rust/cosmic-files ls-files res/sequences/myco_rpob.fasta res/sequences/myco_erm41.fasta res/sequences/myco_rrl.fasta)",
+      "Bash(git -C /c/Users/micha/rust/cosmic-files check-ignore -v res/sequences/myco_rpob.fasta)",
+      "Bash(git -C /c/Users/micha/rust/cosmic-files add res/sequences/myco_rpob.fasta res/sequences/myco_erm41.fasta res/sequences/myco_rrl.fasta)",
+      "Bash(git -C /c/Users/micha/rust/cosmic-files status --short)"
     ]
   }
 }
