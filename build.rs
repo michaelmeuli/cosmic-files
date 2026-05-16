@@ -237,20 +237,20 @@ fn fetch_myco_sequences() {
     // (ncbi_query, filename)
     let targets: &[(&str, &str)] = &[
         (
-            "Mycobacteriaceae[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
-            "myco_rrs.fasta",
-        ),
-        (
-            "Mycobacteriaceae[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
-            "myco_hsp65.fasta",
+            "Mycobacteriaceae[Organism] AND erm(41)[Gene Name] AND 400:3000[SLEN]",
+            "myco_erm41.fasta",
         ),
         (
             "Mycobacteriaceae[Organism] AND rpoB[Gene Name] AND 400:3000[SLEN] AND type_material[Filter]",
             "myco_rpob.fasta",
         ),
         (
-            "Mycobacteriaceae[Organism] AND erm(41)[Gene Name] AND 400:3000[SLEN]",
-            "myco_erm41.fasta",
+            "Mycobacteriaceae[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
+            "myco_hsp65.fasta",
+        ),
+        (
+            "Mycobacteriaceae[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
+            "myco_rrs.fasta",
         ),
         (
             "Mycobacteriaceae[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
@@ -448,10 +448,11 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
 
     struct Target { gene: &'static str, fasta: &'static str }
     let targets = [
+        Target { gene: "erm",  fasta: "myco_erm41.fasta" },
+        Target { gene: "rpoB", fasta: "myco_rpob.fasta" },
+        Target { gene: "hsp65", fasta: "myco_hsp65.fasta" },
         Target { gene: "rrs",  fasta: "myco_rrs.fasta"  },
         Target { gene: "rrl",  fasta: "myco_rrl.fasta"  },
-        Target { gene: "rpoB", fasta: "myco_rpob.fasta" },
-        Target { gene: "erm",  fasta: "myco_erm41.fasta" },
     ];
 
     let db_dir = seq_dir.join("ntm-db/db");
