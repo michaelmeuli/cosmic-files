@@ -68,7 +68,7 @@ use crate::sequencing::{
     erm41::{Erm41Position28, identify_sequence_erm41},
     hsp65::identify_sequence_hsp65,
     identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
-    identify_species_rpob, parse_ab1_chromatogram, parse_ab1_quality, parse_ab1_sequence,
+    identify_species_rpob, parse_ab1_quality, parse_ab1_sequence,
     rrl::identify_sequence_rrl_ntm,
     tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
     trim_to_min_quality,
@@ -932,7 +932,7 @@ pub fn item_from_entry(
                 } else {
                     (Vec::new(), Vec::new(), 0, None)
                 };
-            let chromatogram_opt = parse_ab1_chromatogram(&bytes);
+            let chromatogram_opt = Ab1Channels::from_bytes(&bytes);
             SeqData {
                 chromatogram_opt,
                 seq_id_hits,
@@ -3387,12 +3387,9 @@ impl Item {
             ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
-                    widget::button::link(format!(
-                        "{}: {:.1}%",
-                        hit.description, hit.identity,
-                    ))
-                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                    .padding(0),
+                    widget::button::link(format!("{}: {:.1}%", hit.description, hit.identity,))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
                 );
             }
         }
@@ -3621,12 +3618,9 @@ impl Item {
             ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
-                    widget::button::link(format!(
-                        "{} ({:.1}%)",
-                        hit.description, hit.identity
-                    ))
-                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                    .padding(0),
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
                 );
             }
             details = details.push(widget::text::body(""));

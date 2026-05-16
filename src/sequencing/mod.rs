@@ -1,11 +1,11 @@
-pub mod erm41;
-pub mod tb_data;
-pub mod rrl;
 pub mod bed;
+pub mod erm41;
 pub mod hsp65;
+pub mod rrl;
+pub mod tb_data;
 
-pub use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall, identify_sequence_hsp65};
 use hsp65::trim_hsp65_primers;
+pub use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall, identify_sequence_hsp65};
 pub use rrl::RrlSnpCall;
 
 use erm41::Erm41Position28;
@@ -20,32 +20,37 @@ const RRL_FWD_END: &[u8] = b"ctaagttcttaagggcgcat";
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
 
+const REF_ERM41_ABSCESSUS: &str =
+    include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
+const REF_ERM41_BOLLETII: &str =
+    include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
+const REF_ERM41_MASSILENSE: &str =
+    include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
 
-const REF_ERM41_ABSCESSUS: &str = include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
-const REF_ERM41_BOLLETII: &str = include_str!("../../res/sequences/erm41/erm41_bolletii_CIP_108541.fasta");
-const REF_ERM41_MASSILENSE: &str = include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
-
-
-const ACC_GASTRI:   &str = "AF547836";
+const ACC_GASTRI: &str = "AF547836";
 const ACC_KANSASII: &str = "AF547849";
-const ACC_MARINUM:  &str = "AY299134";
+const ACC_MARINUM: &str = "AY299134";
 const ACC_ULCERANS: &str = "AY299145";
 const KANSASII_GASTRI_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII];
 const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
 
-const REF_MYCO_RRS:           &str = include_str!("../../res/sequences/myco_rrs.fasta");
-const REF_MYCO_HSP65:         &str = include_str!("../../res/sequences/myco_hsp65.fasta");
-const REF_MYCO_RPOB:          &str = include_str!("../../res/sequences/myco_rpob.fasta");
-const REF_MYCO_ERM41:         &str = include_str!("../../res/sequences/myco_erm41.fasta");
-const REF_MYCO_RRL:           &str = include_str!("../../res/sequences/myco_rrl.fasta");
-
+const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
+const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
+const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
+const REF_MYCO_ERM41: &str = include_str!("../../res/sequences/myco_erm41.fasta");
+const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b.to_ascii_uppercase() {
-        b'A' => b'T', b'T' => b'A',
-        b'G' => b'C', b'C' => b'G',
-        _    => b'N',
-    }).collect()
+    seq.iter()
+        .rev()
+        .map(|&b| match b.to_ascii_uppercase() {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'G' => b'C',
+            b'C' => b'G',
+            _ => b'N',
+        })
+        .collect()
 }
 
 pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'a [u8] {
@@ -74,6 +79,9 @@ pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'
     &seq[start..end.min(seq.len())]
 }
 
+
+/// Trim leading and trailing bases whose Phred quality score is below `min_q`.
+/// Returns an empty slice if no base meets the threshold or the trimmed region is empty.
 pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8] {
     let start = seq
         .iter()
@@ -132,12 +140,15 @@ pub(crate) fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
                     .map(|(base, _)| base)
                     .unwrap_or(acc_field)
                     .to_string();
-                description = words.next().map(|s| {
-                    let mut ws = s.splitn(3, ' ');
-                    let genus = ws.next().unwrap_or("");
-                    let species = ws.next().unwrap_or("");
-                    format!("{} {}", genus, species)
-                }).unwrap_or_default();
+                description = words
+                    .next()
+                    .map(|s| {
+                        let mut ws = s.splitn(3, ' ');
+                        let genus = ws.next().unwrap_or("");
+                        let species = ws.next().unwrap_or("");
+                        format!("{} {}", genus, species)
+                    })
+                    .unwrap_or_default();
             }
         } else {
             seq.extend(line.bytes().filter(|b| b.is_ascii_alphabetic()));
@@ -146,6 +157,7 @@ pub(crate) fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
     (accession, description, seq)
 }
 
+/// Parse a multi-FASTA string into `(accession, description, sequence)` tuples.
 fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
     let mut result = Vec::new();
     let mut cur_acc = String::new();
@@ -154,7 +166,11 @@ fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
     for line in fasta.lines() {
         if let Some(rest) = line.strip_prefix('>') {
             if !cur_acc.is_empty() {
-                result.push((cur_acc.clone(), cur_desc.clone(), std::mem::take(&mut cur_seq)));
+                result.push((
+                    cur_acc.clone(),
+                    cur_desc.clone(),
+                    std::mem::take(&mut cur_seq),
+                ));
             }
             let mut words = rest.splitn(4, ' ');
             cur_acc = words.next().unwrap_or("").to_string();
@@ -171,8 +187,7 @@ fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
     result
 }
 
-
-fn format_pairwise_alignment_impl(
+fn format_pairwise_alignment(
     accession: &str,
     description: &str,
     identity: f32,
@@ -186,7 +201,13 @@ fn format_pairwise_alignment_impl(
         let end = start + query.len();
         let ref_p = refseq.to_vec();
         let query_p: Vec<u8> = (0..refseq.len())
-            .map(|i| if i >= start && i < end { query[i - start] } else { b'-' })
+            .map(|i| {
+                if i >= start && i < end {
+                    query[i - start]
+                } else {
+                    b'-'
+                }
+            })
             .collect();
         (ref_p, query_p)
     } else {
@@ -194,7 +215,13 @@ fn format_pairwise_alignment_impl(
         let end = start + refseq.len();
         let query_p = query.to_vec();
         let ref_p: Vec<u8> = (0..query.len())
-            .map(|i| if i >= start && i < end { refseq[i - start] } else { b'-' })
+            .map(|i| {
+                if i >= start && i < end {
+                    refseq[i - start]
+                } else {
+                    b'-'
+                }
+            })
             .collect();
         (ref_p, query_p)
     };
@@ -213,8 +240,15 @@ fn format_pairwise_alignment_impl(
         })
         .collect();
 
-    let orient = if is_reverse { "Reverse Complement" } else { "Forward" };
-    let mut out = format!("Query vs {} ({}) — {:.1}% identity\n\n", accession, description, identity);
+    let orient = if is_reverse {
+        "Reverse Complement"
+    } else {
+        "Forward"
+    };
+    let mut out = format!(
+        "Query vs {} ({}) — {:.1}% identity\n\n",
+        accession, description, identity
+    );
     out.push_str(&format!("Orientation: {orient}\n\n"));
 
     let line_width = 60usize;
@@ -223,7 +257,7 @@ fn format_pairwise_alignment_impl(
     let mut query_pos = 1usize;
     for chunk_start in (0..len).step_by(line_width) {
         let chunk_end = (chunk_start + line_width).min(len);
-        let ref_chunk   = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
+        let ref_chunk = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
         let match_chunk = std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
         let query_chunk = std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
 
@@ -231,13 +265,11 @@ fn format_pairwise_alignment_impl(
         out.push_str(&format!("             {match_chunk}\n"));
         out.push_str(&format!("Query {:5}: {}\n\n", query_pos, query_chunk));
 
-        ref_pos   += ref_chunk.bytes().filter(|&b| b != b'-').count();
+        ref_pos += ref_chunk.bytes().filter(|&b| b != b'-').count();
         query_pos += query_chunk.bytes().filter(|&b| b != b'-').count();
     }
     out
 }
-
-
 
 /// FNV-1a hash of a k-mer, case-insensitive.
 fn kmer_hash(kmer: &[u8]) -> u64 {
@@ -311,12 +343,19 @@ pub(crate) fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
     let (best_count, best_off) = if candidates.is_empty() {
         (0..=max_offset).map(score_offset).max_by_key(|&(c, _)| c)
     } else {
-        candidates.into_iter().map(score_offset).max_by_key(|&(c, _)| c)
+        candidates
+            .into_iter()
+            .map(score_offset)
+            .max_by_key(|&(c, _)| c)
     }
     .unwrap_or((0, 0));
 
     let identity = best_count as f32 / shorter.len() as f32 * 100.0;
-    let offset = if swapped { -(best_off as isize) } else { best_off as isize };
+    let offset = if swapped {
+        -(best_off as isize)
+    } else {
+        best_off as isize
+    };
     (identity, offset)
 }
 
@@ -344,7 +383,11 @@ pub fn identify_species(query: &[u8], database: &str) -> Vec<SpeciesHit> {
             }
         })
         .collect();
-    hits.sort_by(|a, b| b.identity.partial_cmp(&a.identity).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.identity
+            .partial_cmp(&a.identity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits
 }
 
@@ -366,8 +409,6 @@ pub fn identify_species_23s_ntm(query: &[u8]) -> Vec<SpeciesHit> {
     identify_species(query, REF_MYCO_RRL)
 }
 
-
-
 pub(super) fn scan_window(
     center: usize,
     left: usize,
@@ -375,12 +416,12 @@ pub(super) fn scan_window(
     peak_locs: &[u16],
 ) -> Option<(u16, u16)> {
     let base_start = center.checked_sub(left)?;
-    let base_end   = center + right;
+    let base_end = center + right;
     if base_end >= peak_locs.len() {
         return None;
     }
     let start_scan = peak_locs[base_start];
-    let end_scan   = peak_locs[base_end];
+    let end_scan = peak_locs[base_end];
     if start_scan >= end_scan {
         return None;
     }
@@ -396,7 +437,7 @@ pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
     // Root directory entry sits at byte 6 (28 bytes long).
     // num_elements (i32 BE) at root+12 = byte 18
     // data_offset  (i32 BE) at root+20 = byte 26
-    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
+    let dir_count = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
     let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
 
     let mut pbas1: Option<Vec<u8>> = None;
@@ -406,12 +447,12 @@ pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
         if e + 28 > data.len() {
             break;
         }
-        let tag_name   = &data[e..e + 4];
+        let tag_name = &data[e..e + 4];
         let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
         // num_elements at e+12, data_size at e+16, data_offset at e+20
         let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
         let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-        let data_off  = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
+        let data_off = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
 
         if tag_name == b"PBAS" {
             // When data fits in 4 bytes it is stored inline at the data_offset field position
@@ -437,7 +478,7 @@ pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
 
-    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
+    let dir_count = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
     let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
 
     let mut pcon1: Option<Vec<u8>> = None;
@@ -447,11 +488,11 @@ pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
         if e + 28 > data.len() {
             break;
         }
-        let tag_name   = &data[e..e + 4];
+        let tag_name = &data[e..e + 4];
         let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
-        let num_elems  = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
-        let data_size  = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-        let data_off   = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
+        let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
+        let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
+        let data_off = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
 
         if tag_name == b"PCON" {
             let offset = if data_size <= 4 { e + 20 } else { data_off };
@@ -469,115 +510,123 @@ pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
     pcon1
 }
 
-pub fn parse_ab1_chromatogram(data: &[u8]) -> Option<Ab1Channels> {
-    if data.len() < 34 || &data[0..4] != b"ABIF" {
-        return None;
-    }
-
-    let dir_count  = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
-    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
-
-    // Collect all tag entries we care about
-    let mut data_tags: std::collections::HashMap<i32, Vec<i16>> = std::collections::HashMap::new();
-    let mut pbas1: Option<Vec<u8>>  = None;
-    let mut pbas2: Option<Vec<u8>>  = None;
-    let mut ploc1: Option<Vec<u16>> = None;
-    let mut ploc2: Option<Vec<u16>> = None;
-    let mut fwo: Option<[u8; 4]>    = None;
-
-    for i in 0..dir_count {
-        let e = dir_offset + i * 28;
-        if e + 28 > data.len() {
-            break;
+impl Ab1Channels {
+    /// Parse an AB1 chromatogram from raw file bytes.
+    ///
+    /// Returns `None` if the data is not a valid ABIF file or required tags are missing.
+    /// Prefers edited/analyzed data (PBAS 2, PLOC 2, DATA 9–12) over raw (PBAS 1, PLOC 1, DATA 1–4).
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        if data.len() < 34 || &data[0..4] != b"ABIF" {
+            return None;
         }
-        let tag_name   = &data[e..e + 4];
-        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
-        let num_elems  = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
-        let data_size  = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-        let data_off   = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
 
-        let offset = if data_size <= 4 { e + 20 } else { data_off };
+        let dir_count = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
+        let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
 
-        if tag_name == b"DATA" && (1..=12).contains(&tag_number) {
-            // Each element is an i16 BE (2 bytes)
-            if offset + num_elems * 2 <= data.len() {
-                let values: Vec<i16> = (0..num_elems)
-                    .map(|j| i16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]]))
-                    .collect();
-                data_tags.insert(tag_number, values);
+        // Collect all tag entries we care about
+        let mut data_tags: std::collections::HashMap<i32, Vec<i16>> =
+            std::collections::HashMap::new();
+        let mut pbas1: Option<Vec<u8>> = None;
+        let mut pbas2: Option<Vec<u8>> = None;
+        let mut ploc1: Option<Vec<u16>> = None;
+        let mut ploc2: Option<Vec<u16>> = None;
+        let mut fwo: Option<[u8; 4]> = None;
+
+        for i in 0..dir_count {
+            let e = dir_offset + i * 28;
+            if e + 28 > data.len() {
+                break;
             }
-        } else if tag_name == b"PBAS" {
-            if offset + num_elems <= data.len() {
-                let seq = data[offset..offset + num_elems].to_vec();
-                match tag_number {
-                    2 => pbas2 = Some(seq),
-                    1 => pbas1 = Some(seq),
-                    _ => {}
+            let tag_name = &data[e..e + 4];
+            let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
+            let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
+            let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
+            let data_off = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
+
+            let offset = if data_size <= 4 { e + 20 } else { data_off };
+
+            if tag_name == b"DATA" && (1..=12).contains(&tag_number) {
+                // Each element is an i16 BE (2 bytes)
+                if offset + num_elems * 2 <= data.len() {
+                    let values: Vec<i16> = (0..num_elems)
+                        .map(|j| {
+                            i16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]])
+                        })
+                        .collect();
+                    data_tags.insert(tag_number, values);
+                }
+            } else if tag_name == b"PBAS" {
+                if offset + num_elems <= data.len() {
+                    let seq = data[offset..offset + num_elems].to_vec();
+                    match tag_number {
+                        2 => pbas2 = Some(seq),
+                        1 => pbas1 = Some(seq),
+                        _ => {}
+                    }
+                }
+            } else if tag_name == b"PLOC" {
+                // i16 BE peak scan positions
+                if offset + num_elems * 2 <= data.len() {
+                    let locs: Vec<u16> = (0..num_elems)
+                        .map(|j| {
+                            u16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]])
+                        })
+                        .collect();
+                    match tag_number {
+                        2 => ploc2 = Some(locs),
+                        1 => ploc1 = Some(locs),
+                        _ => {}
+                    }
+                }
+            } else if tag_name == b"FWO_" && tag_number == 1 {
+                // 4 bytes: base letter for each channel in order
+                if offset + 4 <= data.len() {
+                    let mut arr = [0u8; 4];
+                    arr.copy_from_slice(&data[offset..offset + 4]);
+                    fwo = Some(arr);
                 }
             }
-        } else if tag_name == b"PLOC" {
-            // i16 BE peak scan positions
-            if offset + num_elems * 2 <= data.len() {
-                let locs: Vec<u16> = (0..num_elems)
-                    .map(|j| u16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]]))
-                    .collect();
-                match tag_number {
-                    2 => ploc2 = Some(locs),
-                    1 => ploc1 = Some(locs),
-                    _ => {}
-                }
-            }
-        } else if tag_name == b"FWO_" && tag_number == 1 {
-            // 4 bytes: base letter for each channel in order
-            if offset + 4 <= data.len() {
-                let mut arr = [0u8; 4];
-                arr.copy_from_slice(&data[offset..offset + 4]);
-                fwo = Some(arr);
-            }
         }
+
+        // Prefer analyzed channels (9-12), fall back to raw (1-4)
+        let channel_indices: [(i32, i32); 4] = [(9, 1), (10, 2), (11, 3), (12, 4)];
+        let channels: [Vec<i16>; 4] = channel_indices.map(|(preferred, fallback)| {
+            data_tags
+                .remove(&preferred)
+                .or_else(|| data_tags.remove(&fallback))
+                .unwrap_or_default()
+        });
+
+        let bases = pbas2.or(pbas1)?;
+        let peak_locs = ploc2.or(ploc1).unwrap_or_else(|| vec![0u16; bases.len()]);
+        let base_order = fwo.unwrap_or(*b"ACGT");
+
+        let erm41_view_state_opt = erm41::find_erm41_display_window(&bases, &peak_locs).map(
+            |(start, end, is_reverse, pos28_base_idx)| Erm41ViewState {
+                window: (start, end),
+                is_reverse,
+                pos28_base_idx,
+            },
+        );
+
+        let rrl_ntm_view_state_opt = rrl::find_rrl_ntm_display_window(&bases, &peak_locs).map(
+            |(start, end, is_reverse, snp_base_idx)| RrlNtmViewState {
+                window: (start, end),
+                is_reverse,
+                snp_base_idx,
+            },
+        );
+
+        Some(Self {
+            channels,
+            bases,
+            peak_locs,
+            base_order,
+            erm41_view_state_opt,
+            rrl_ntm_view_state_opt,
+        })
     }
-
-    // Prefer analyzed channels (9-12), fall back to raw (1-4)
-    let channel_indices: [(i32, i32); 4] = [(9, 1), (10, 2), (11, 3), (12, 4)];
-    let channels: [Vec<i16>; 4] = channel_indices.map(|(preferred, fallback)| {
-        data_tags
-            .remove(&preferred)
-            .or_else(|| data_tags.remove(&fallback))
-            .unwrap_or_default()
-    });
-
-    let bases     = pbas2.or(pbas1)?;
-    let peak_locs = ploc2
-        .or(ploc1)
-        .unwrap_or_else(|| vec![0u16; bases.len()]);
-    let base_order = fwo.unwrap_or(*b"ACGT");
-
-    let erm41_view_state_opt = erm41::find_erm41_display_window(&bases, &peak_locs)
-        .map(|(start, end, is_reverse, pos28_base_idx)| Erm41ViewState {
-            window: (start, end),
-            is_reverse,
-            pos28_base_idx,
-        });
-
-    let rrl_ntm_view_state_opt = rrl::find_rrl_ntm_display_window(&bases, &peak_locs)
-        .map(|(start, end, is_reverse, snp_base_idx)| RrlNtmViewState {
-            window: (start, end),
-            is_reverse,
-            snp_base_idx,
-        });
-
-    Some(Ab1Channels {
-        channels,
-        bases,
-        peak_locs,
-        base_order,
-        erm41_view_state_opt,
-        rrl_ntm_view_state_opt,
-    })
 }
-
-
-
 
 #[derive(Clone, Copy, Debug)]
 pub struct Erm41ViewState {
@@ -650,7 +699,7 @@ pub struct SeqIdHit {
 impl SeqIdHit {
     /// Format the alignment as a human-readable pairwise text (60-column wrapping).
     pub fn format_pairwise_alignment(&self) -> String {
-        format_pairwise_alignment_impl(
+        format_pairwise_alignment(
             &self.accession,
             &self.description,
             self.identity,
@@ -728,7 +777,7 @@ pub struct SpeciesHit {
 impl SpeciesHit {
     /// Format the alignment as a human-readable pairwise text (60-column wrapping).
     pub fn format_pairwise_alignment(&self) -> String {
-        format_pairwise_alignment_impl(
+        format_pairwise_alignment(
             &self.accession,
             &self.description,
             self.identity,
