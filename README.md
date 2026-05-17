@@ -50,7 +50,7 @@ impl RrlSnpCall {
 }
 </pre>
   
-### Generation of species identification databeses:  
+### Generation of species identification databases:  
 
 [The INSD Collaboration (GenBank/ENA/DDBJ) source feature qualifier ‘type_material’ ](https://pmc.ncbi.nlm.nih.gov/articles/PMC4383940/):  
 Type material is the taxonomic device that ties formal names to the physical specimens that serve as exemplars for the species.  

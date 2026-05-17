@@ -124,6 +124,7 @@ pub(super) fn find_erm41_display_window(
 }
 
 
+/// Unlike identify_sequence_hsp65() and identify_sequence_rrl_ntm(), this only uses reference sequences extracted via sequences.toml and not the database fetched via fetch_myco_sequences().
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, ERM41_FWD_START, ERM41_FWD_END);
     let rc = reverse_complement(query);
