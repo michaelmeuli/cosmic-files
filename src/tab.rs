@@ -3617,7 +3617,7 @@ impl Item {
             }
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading(
-                "Species identification (hsp65 database):",
+                "Species identification (rrl database):",
             ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
