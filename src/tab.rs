@@ -886,7 +886,7 @@ pub fn item_from_entry(
             let (seq_id_hits, species_hits, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => trim_to_min_quality(seq, qual, 20),
+                        Some(qual) => trim_to_min_quality(seq, qual, 10),
                         None => seq.as_slice(),
                     };
                     let trimmed_length = trimmed.len();
