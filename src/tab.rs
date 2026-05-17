@@ -3365,16 +3365,18 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
-        if hits.is_empty() {
-            details = details.push(widget::text::body("No sequence match found"));
+        if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
+            details = details.push(widget::text::body("Could not align sequence to references"));
         } else {
             if !self.metadata.is_seq_id() {
                 details = details.push(widget::text::body("Percent identity is less than 60%."));
             }
-            details = details.push(widget::text::body(format!(
-                "Sequence length: {}",
-                self.metadata.sequence_length().unwrap_or(0)
-            )));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
             if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
@@ -3387,47 +3389,43 @@ impl Item {
             ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
-                    widget::button::link(format!(
-                        "{}: {:.1}%",
-                        hit.description, hit.identity,
-                    ))
-                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                    .padding(0),
+                    widget::button::link(format!("{}: {:.1}%", hit.description, hit.identity,))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
                 );
             }
-        }
-
-        if self.metadata.is_abscessus_seq_id() || self.metadata.is_bolletii_seq_id() {
-            let call = self.metadata.erm41position28_call();
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::heading(format!("erm(41) {}", call)));
-        }
-        if let Some(chrom) = self.metadata.ab1_chromatogram()
-            && chrom.erm41_view_state_opt.is_some()
-            && !self.metadata.is_massiliense_seq_id()
-        {
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::body(
-                "Shown are bases 19-39, with position 28 in bold.",
-            ));
-            if chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse) {
-                details = details.push(widget::text::body("reverse complement"));
+            if self.metadata.is_abscessus_seq_id() || self.metadata.is_bolletii_seq_id() {
+                let call = self.metadata.erm41position28_call();
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::heading(format!("erm(41) {}", call)));
             }
-            details = details.push(widget::text::body(""));
-            let canvas = widget::Canvas::new(ChromatogramProgram {
-                is_reverse: chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse),
-                display_window: chrom.erm41_view_state_opt.map(|e| e.window),
-                highlighted_scans: chrom
-                    .erm41_view_state_opt
-                    .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx as usize).copied())
-                    .map(|v| vec![v])
-                    .unwrap_or_default(),
-                chrom,
-            })
-            .width(Length::Fill)
-            .height(Length::Fixed(200.0));
-            details = details.push(canvas);
-            details = details.push(widget::text::body(""));
+            if let Some(chrom) = self.metadata.ab1_chromatogram()
+                && chrom.erm41_view_state_opt.is_some()
+                && !self.metadata.is_massiliense_seq_id()
+            {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body(
+                    "Shown are bases 19-39, with position 28 in bold.",
+                ));
+                if chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse) {
+                    details = details.push(widget::text::body("reverse complement"));
+                }
+                details = details.push(widget::text::body(""));
+                let canvas = widget::Canvas::new(ChromatogramProgram {
+                    is_reverse: chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse),
+                    display_window: chrom.erm41_view_state_opt.map(|e| e.window),
+                    highlighted_scans: chrom
+                        .erm41_view_state_opt
+                        .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx as usize).copied())
+                        .map(|v| vec![v])
+                        .unwrap_or_default(),
+                    chrom,
+                })
+                .width(Length::Fill)
+                .height(Length::Fixed(200.0));
+                details = details.push(canvas);
+                details = details.push(widget::text::body(""));
+            }
         }
 
         column = column.push(details);
@@ -3446,16 +3444,18 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
-        if hits.is_empty() {
-            details = details.push(widget::text::body("No sequence match found"));
+        if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
+            details = details.push(widget::text::body("Could not align sequence to references"));
         } else {
             if !self.metadata.is_seq_id() {
                 details = details.push(widget::text::body("Percent identity is less than 60%."));
             }
-            details = details.push(widget::text::body(format!(
-                "Sequence length: {}",
-                self.metadata.sequence_length().unwrap_or(0)
-            )));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
             if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
@@ -3590,8 +3590,9 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
-        if hits.is_empty() {
-            details = details.push(widget::text::body("Could not align sequence to reference"));
+
+        if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
+            details = details.push(widget::text::body("Could not align sequence to references"));
         } else {
             let best = &hits[0];
             if !self.metadata.is_seq_id() {
@@ -3621,12 +3622,9 @@ impl Item {
             ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
-                    widget::button::link(format!(
-                        "{} ({:.1}%)",
-                        hit.description, hit.identity
-                    ))
-                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                    .padding(0),
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
                 );
             }
             details = details.push(widget::text::body(""));
@@ -3646,36 +3644,35 @@ impl Item {
                     )));
                 }
             }
-        }
-
-        if let Some(chrom) = self.metadata.ab1_chromatogram() {
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::body(
-                "Shown in bold are bases coresponding to E. coli positions 2058/2059",
-            ));
-            if chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse) {
-                details = details.push(widget::text::body("reverse complement"));
+            if let Some(chrom) = self.metadata.ab1_chromatogram() {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body(
+                    "Shown in bold are bases coresponding to E. coli positions 2058/2059",
+                ));
+                if chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse) {
+                    details = details.push(widget::text::body("reverse complement"));
+                }
+                details = details.push(widget::text::body(""));
+                let canvas = widget::Canvas::new(ChromatogramProgram {
+                    is_reverse: chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse),
+                    display_window: chrom.rrl_ntm_view_state_opt.map(|e| e.window),
+                    highlighted_scans: chrom
+                        .rrl_ntm_view_state_opt
+                        .map(|e| {
+                            let idx = e.snp_base_idx as usize;
+                            [idx, idx + 1]
+                                .iter()
+                                .filter_map(|&i| chrom.peak_locs.get(i).copied())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    chrom,
+                })
+                .width(Length::Fill)
+                .height(Length::Fixed(200.0));
+                details = details.push(canvas);
+                details = details.push(widget::text::body(""));
             }
-            details = details.push(widget::text::body(""));
-            let canvas = widget::Canvas::new(ChromatogramProgram {
-                is_reverse: chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse),
-                display_window: chrom.rrl_ntm_view_state_opt.map(|e| e.window),
-                highlighted_scans: chrom
-                    .rrl_ntm_view_state_opt
-                    .map(|e| {
-                        let idx = e.snp_base_idx as usize;
-                        [idx, idx + 1]
-                            .iter()
-                            .filter_map(|&i| chrom.peak_locs.get(i).copied())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                chrom,
-            })
-            .width(Length::Fill)
-            .height(Length::Fixed(200.0));
-            details = details.push(canvas);
-            details = details.push(widget::text::body(""));
         }
 
         column = column.push(details);
