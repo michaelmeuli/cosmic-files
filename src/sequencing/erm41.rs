@@ -25,32 +25,66 @@ impl std::fmt::Display for Erm41Position28 {
     }
 }
 
-pub fn call_position28(read: &[u8]) -> Option<u8> {
-    let anchor_len = ERM41_ANCHOR_L.len();
-    let hit = read
-        .windows(anchor_len)
-        .position(|w| w.eq_ignore_ascii_case(ERM41_ANCHOR_L))?;
-    let pos28 = hit + anchor_len;
-    let base = read.get(pos28).copied()?.to_ascii_uppercase();
-    let right_start = pos28 + 1;
-    let right_end = right_start + ERM41_ANCHOR_R.len();
-    if right_end > read.len() {
-        return None;
+impl Erm41Position28 {
+    /// Returns the uppercase nucleotide byte (`b'C'`, `b'T'`, `b'G'`, `b'A'`) at erm41
+    /// position 28, located by bracketing it between `ERM41_ANCHOR_L` and `ERM41_ANCHOR_R`.
+    /// Returns `None` if either anchor is absent or the read is too short.
+    fn call_position28(read: &[u8]) -> Option<u8> {
+        let anchor_len = ERM41_ANCHOR_L.len();
+        let hit = read
+            .windows(anchor_len)
+            .position(|w| w.eq_ignore_ascii_case(ERM41_ANCHOR_L))?;
+        let pos28 = hit + anchor_len;
+        let base = read.get(pos28).copied()?.to_ascii_uppercase();
+        let right_start = pos28 + 1;
+        let right_end = right_start + ERM41_ANCHOR_R.len();
+        if right_end > read.len() {
+            return None;
+        }
+        let right_ok = read[right_start..right_end].eq_ignore_ascii_case(ERM41_ANCHOR_R);
+        if !right_ok {
+            return None;
+        }
+        Some(base)
     }
-    let right_ok = read[right_start..right_end].eq_ignore_ascii_case(ERM41_ANCHOR_R);
-    if !right_ok {
-        return None;
-    }
-    Some(base)
-}
 
-fn base_to_call(base: Option<u8>) -> Option<Erm41Position28> {
-    match base {
-        Some(b'C') => Some(Erm41Position28::C28),
-        Some(b'T') => Some(Erm41Position28::T28),
-        Some(b'G') => Some(Erm41Position28::G28),
-        Some(b'A') => Some(Erm41Position28::A28),
-        _ => None,
+    /// Converts a raw nucleotide byte from [`call_position28`](Self::call_position28) into the
+    /// corresponding variant. Returns `None` for any byte that is not `C`, `T`, `G`, or `A`.
+    fn from_base(base: Option<u8>) -> Option<Self> {
+        match base {
+            Some(b'C') => Some(Self::C28),
+            Some(b'T') => Some(Self::T28),
+            Some(b'G') => Some(Self::G28),
+            Some(b'A') => Some(Self::A28),
+            _ => None,
+        }
+    }
+
+    /// Consider both forward and reverse reads for Erm41Position28.
+    /// Function is not used at the moment.
+    pub fn from_fw_rev(fwd_read: &[u8], rev_read: &[u8]) -> Self {
+        let fwd = Self::from_base(Self::call_position28(fwd_read));
+        let rc = reverse_complement(rev_read);
+        let rev = Self::from_base(Self::call_position28(&rc));
+
+        match (fwd, rev) {
+            (Some(a), Some(b)) if a == b => a,
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (Some(_), Some(_)) => Self::Ambiguous,
+            (None, None) => Self::Undetermined,
+        }
+    }
+
+    /// Calls erm41 position 28 from a single read, trying the forward orientation first and
+    /// falling back to the reverse complement. Returns [`Undetermined`](Self::Undetermined) if
+    /// the anchors are not found in either orientation.
+    pub fn from_single_read(read: &[u8]) -> Self {
+        if let Some(call) = Self::from_base(Self::call_position28(read)) {
+            return call;
+        }
+        let rc = reverse_complement(read);
+        Self::from_base(Self::call_position28(&rc)).unwrap_or(Self::Undetermined)
     }
 }
 
@@ -89,33 +123,11 @@ pub(super) fn find_erm41_display_window(
     None
 }
 
-// TODO: consider fw and rev sequences. Function is unused at the moment.
-pub fn erm41position28_from_fw_rev(fwd_read: &[u8], rev_read: &[u8]) -> Erm41Position28 {
-    let fwd = base_to_call(call_position28(fwd_read));
-    let rc = reverse_complement(rev_read);
-    let rev = base_to_call(call_position28(&rc));
-
-    match (fwd, rev) {
-        (Some(a), Some(b)) if a == b => a, // both agree
-        (Some(a), None) => a,              // only fwd found
-        (None, Some(b)) => b,              // only rev found
-        (Some(_), Some(_)) => Erm41Position28::Ambiguous,
-        (None, None) => Erm41Position28::Undetermined,
-    }
-}
-
-pub fn erm41position28_from_single_read(read: &[u8]) -> Erm41Position28 {
-    if let Some(call) = base_to_call(call_position28(read)) {
-        return call;
-    }
-    let rc = reverse_complement(read);
-    base_to_call(call_position28(&rc)).unwrap_or(Erm41Position28::Undetermined)
-}
 
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, ERM41_FWD_START, ERM41_FWD_END);
     let rc = reverse_complement(query);
-    let erm41_pos28 = erm41position28_from_single_read(query);
+    let erm41_pos28 = Erm41Position28::from_single_read(query);
 
     let refs: &[(&str, &str, &str)] = &[
         (
