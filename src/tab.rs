@@ -65,7 +65,7 @@ use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
-    erm41::{Erm41Position28, identify_sequence_erm41},
+    erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
     identify_species_rpob, parse_ab1_quality, parse_ab1_sequence,
@@ -947,8 +947,14 @@ pub fn item_from_entry(
 
     let is_susceptible = sequence
         .as_ref()
-        .and_then(|s| s.seq_id_hits.first()?.erm41position28_opt.as_ref().map(|p| p.is_susceptible()))
-        .unwrap_or(false);
+        .and_then(|s| {
+            s.seq_id_hits
+                .first()?
+                .erm41position28_opt
+                .as_ref()
+                .map(|p| is_susceptible_erm41(p))
+        })
+        .unwrap_or(true);
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
@@ -3431,11 +3437,15 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            if !self.metadata.is_susceptible() {
+            if self.metadata.is_susceptible() {
+                details = details.push(widget::text::heading(format!(
+                    "Predicted to be susceptible to macrolides."
+                )));
+            } else {
                 details = details.push(widget::text::heading(format!(
                     "Predicted inducible macrolide resistance."
                 )));
-            } 
+            }
         }
 
         column = column.push(details);

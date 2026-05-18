@@ -25,11 +25,14 @@ impl std::fmt::Display for Erm41Position28 {
     }
 }
 
-impl Erm41Position28 {
-    pub fn is_susceptible(&self) -> bool {
-        matches!(self, Self::C28 | Self::G28 | Self::A28)
-    }
+/// Returns `true` if the erm41 position-28 call is consistent with macrolide susceptibility
+/// (C28, G28, or A28). Returns `false` for T28 (inducible resistance), as well as
+/// [`Ambiguous`](Erm41Position28::Ambiguous) and [`Undetermined`](Erm41Position28::Undetermined).
+pub fn is_susceptible_erm41(pos: &Erm41Position28) -> bool {
+    matches!(pos, Erm41Position28::C28 | Erm41Position28::G28 | Erm41Position28::A28)
+}
 
+impl Erm41Position28 {
     /// Returns the uppercase nucleotide byte (`b'C'`, `b'T'`, `b'G'`, `b'A'`) at erm41
     /// position 28, located by bracketing it between `ERM41_ANCHOR_L` and `ERM41_ANCHOR_R`.
     /// Returns `None` if either anchor is absent or the read is too short.
