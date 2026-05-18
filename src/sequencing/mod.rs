@@ -9,6 +9,7 @@ pub use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall, identify_sequence
 pub use rrl::RrlSnpCall;
 
 use erm41::Erm41Position28;
+pub use erm41::Erm41LofCall;
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -715,6 +716,8 @@ pub struct SeqIdHit {
     pub marinum_ulcerans_snp_calls: Vec<MarinumUlceransSnpCall>,
     /// Calls at each rrl macrolide-resistance SNP position (23S rRNA).
     pub rrl_snp_calls: Vec<RrlSnpCall>,
+    /// Calls at each erm(41) loss-of-function variant position.
+    pub erm41_snp_calls: Vec<Erm41LofCall>,
     /// The aligned query (forward or reverse-complement, whichever scored best).
     pub aligned_query: Vec<u8>,
     /// Signed offset such that `query_index = ref_index - alignment_offset`.

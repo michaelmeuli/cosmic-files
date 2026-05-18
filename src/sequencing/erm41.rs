@@ -1,6 +1,9 @@
 use super::reverse_complement;
 use super::{SeqIdHit, best_alignment, parse_fasta_seq};
 use super::{ERM41_FWD_START, ERM41_FWD_END, ERM41_ANCHOR_L, ERM41_ANCHOR_R};
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Erm41Position28 {
@@ -105,6 +108,189 @@ impl Erm41Position28 {
     }
 }
 
+fn translate_codon(codon: &[u8]) -> u8 {
+    if codon.len() < 3 {
+        return 0;
+    }
+    let c = [
+        codon[0].to_ascii_uppercase(),
+        codon[1].to_ascii_uppercase(),
+        codon[2].to_ascii_uppercase(),
+    ];
+    match &c[..] {
+        b"TTT" | b"TTC" => b'F',
+        b"TTA" | b"TTG" | b"CTT" | b"CTC" | b"CTA" | b"CTG" => b'L',
+        b"ATT" | b"ATC" | b"ATA" => b'I',
+        b"ATG" => b'M',
+        b"GTT" | b"GTC" | b"GTA" | b"GTG" => b'V',
+        b"TCT" | b"TCC" | b"TCA" | b"TCG" | b"AGT" | b"AGC" => b'S',
+        b"CCT" | b"CCC" | b"CCA" | b"CCG" => b'P',
+        b"ACT" | b"ACC" | b"ACA" | b"ACG" => b'T',
+        b"GCT" | b"GCC" | b"GCA" | b"GCG" => b'A',
+        b"TAT" | b"TAC" => b'Y',
+        b"TAA" | b"TAG" | b"TGA" => b'*',
+        b"CAT" | b"CAC" => b'H',
+        b"CAA" | b"CAG" => b'Q',
+        b"AAT" | b"AAC" => b'N',
+        b"AAA" | b"AAG" => b'K',
+        b"GAT" | b"GAC" => b'D',
+        b"GAA" | b"GAG" => b'E',
+        b"TGT" | b"TGC" => b'C',
+        b"TGG" => b'W',
+        b"CGT" | b"CGC" | b"CGA" | b"CGG" | b"AGA" | b"AGG" => b'R',
+        b"GGT" | b"GGC" | b"GGA" | b"GGG" => b'G',
+        _ => 0,
+    }
+}
+
+fn three_letter_to_one(aa3: &str) -> u8 {
+    match aa3.to_ascii_uppercase().as_str() {
+        "ALA" => b'A', "ARG" => b'R', "ASN" => b'N', "ASP" => b'D',
+        "CYS" => b'C', "GLN" => b'Q', "GLU" => b'E', "GLY" => b'G',
+        "HIS" => b'H', "ILE" => b'I', "LEU" => b'L', "LYS" => b'K',
+        "MET" => b'M', "PHE" => b'F', "PRO" => b'P', "SER" => b'S',
+        "THR" => b'T', "TRP" => b'W', "TYR" => b'Y', "VAL" => b'V',
+        _ => 0,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Erm41LofRow {
+    #[serde(rename = "Gene")]
+    gene: String,
+    #[serde(rename = "Mutation")]
+    mutation: String,
+    #[serde(rename = "type")]
+    variant_type: String,
+}
+
+fn parse_erm41_lof_snps(
+    csv: &str,
+    refseq: &[u8],
+) -> BTreeMap<usize, (u8, BTreeMap<u8, String>)> {
+    let mut rdr = csv::Reader::from_reader(csv.as_bytes());
+    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, String>)> = BTreeMap::new();
+    for row in rdr.deserialize::<Erm41LofRow>() {
+        let row = match row {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if row.gene.trim() != "erm(41)" || row.variant_type.trim() != "loss_of_function" {
+            continue;
+        }
+        let m = row.mutation.trim();
+        let rest = match m.strip_prefix("p.") {
+            Some(r) if r.len() >= 4 => r,
+            _ => continue,
+        };
+        let digits_end = rest[3..]
+            .find(|c: char| !c.is_ascii_digit())
+            .map(|i| i + 3)
+            .unwrap_or(rest.len());
+        if digits_end <= 3 {
+            continue;
+        }
+        let prot_pos: usize = match rest[3..digits_end].parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let target_str = &rest[digits_end..];
+        let target_aa = if target_str == "*" {
+            b'*'
+        } else if target_str.len() >= 3 {
+            three_letter_to_one(&target_str[..3])
+        } else {
+            continue
+        };
+        if target_aa == 0 {
+            continue;
+        }
+        let codon_start = (prot_pos - 1) * 3;
+        if codon_start + 3 > refseq.len() {
+            continue;
+        }
+        let ref_codon = [
+            refseq[codon_start].to_ascii_uppercase(),
+            refseq[codon_start + 1].to_ascii_uppercase(),
+            refseq[codon_start + 2].to_ascii_uppercase(),
+        ];
+        for codon_pos in 0..3usize {
+            let wt_base = ref_codon[codon_pos];
+            for &alt in b"ACGT" {
+                if alt == wt_base {
+                    continue;
+                }
+                let mut alt_codon = ref_codon;
+                alt_codon[codon_pos] = alt;
+                if translate_codon(&alt_codon) == target_aa {
+                    let ref_pos = codon_start + codon_pos;
+                    let entry = map.entry(ref_pos).or_insert_with(|| (wt_base, BTreeMap::new()));
+                    entry.1.entry(alt).or_insert_with(|| m.to_string());
+                }
+            }
+        }
+    }
+    map
+}
+
+static ERM41_LOF_SNPS: LazyLock<
+    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, String>)>>,
+> = LazyLock::new(|| {
+    [(
+        "M. abscessus subsp. abscessus",
+        include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"),
+        super::REF_ERM41_ABSCESSUS,
+    )]
+    .into_iter()
+    .map(|(desc, csv, fasta)| (desc, parse_erm41_lof_snps(csv, &parse_fasta_seq(fasta))))
+    .collect()
+});
+
+#[derive(Clone, Debug)]
+pub struct Erm41LofCall {
+    pub ref_pos: usize,
+    pub query_base: Option<u8>,
+    pub wt_base: u8,
+    /// Maps each loss-of-function alt base to the mutation label (e.g. `"p.Trp10Arg"`).
+    pub lof_alts: BTreeMap<u8, String>,
+}
+
+impl Erm41LofCall {
+    pub fn call_tag(&self) -> String {
+        match self.query_base {
+            None => "NA".to_string(),
+            Some(b) if b == self.wt_base => format!("{} (wt)", b as char),
+            Some(b) if self.lof_alts.contains_key(&b) => {
+                format!("{} ({})", b as char, self.lof_alts[&b])
+            }
+            Some(b) => format!("{} (novel variant)", b as char),
+        }
+    }
+}
+
+fn call_erm41_lof_snps(
+    snps: &BTreeMap<usize, (u8, BTreeMap<u8, String>)>,
+    query: &[u8],
+    alignment_offset: isize,
+) -> Vec<Erm41LofCall> {
+    snps.iter()
+        .map(|(&ref_pos, (wt_base, lof_alts))| {
+            let query_pos = ref_pos as isize - alignment_offset;
+            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
+                Some(query[query_pos as usize].to_ascii_uppercase())
+            } else {
+                None
+            };
+            Erm41LofCall {
+                ref_pos,
+                query_base,
+                wt_base: *wt_base,
+                lof_alts: lof_alts.clone(),
+            }
+        })
+        .collect()
+}
+
 pub(super) fn find_erm41_display_window(
     bases: &[u8],
     peak_locs: &[u16],
@@ -176,6 +362,10 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query, fwd_off)
             };
+            let erm41_snp_calls = ERM41_LOF_SNPS
+                .get(description)
+                .map(|snps| call_erm41_lof_snps(snps, aligned_query, offset))
+                .unwrap_or_default();
             SeqIdHit {
                 accession: accession.to_string(),
                 description: description.to_string(),
@@ -184,6 +374,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls: vec![],
+                erm41_snp_calls,
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
                 erm41position28_opt: Some(erm41_pos28.clone()),
