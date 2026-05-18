@@ -246,13 +246,13 @@ async fn remote_sftp_list(
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
             let _is_ab1 = new_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
             let mut tbprofilerjson_opt = None;
-            let mut is_susceptible = false;
+            let mut is_susceptible = None;
             if is_tbprofiler_json {
                 match load_remote_json(client, &child_uri).await {
                     Ok(json) => {
                         let sus = json.dr_variants.iter().all(|v| v.is_susceptible());
                         tbprofilerjson_opt = Some(json);
-                        is_susceptible = sus;
+                        is_susceptible = Some(sus);
                     }
                     Err(e) => {
                         log::info!("Failed to load JSON for {}: {}", new_path.display(), e);
@@ -358,7 +358,7 @@ async fn remote_sftp_list(
     let sample_susceptibility: HashMap<String, bool> = items
         .iter()
         .filter_map(|item| {
-            if let ItemMetadata::RusshPath { is_raw_sample_file: true, is_susceptible: true, .. } =
+            if let ItemMetadata::RusshPath { is_raw_sample_file: true, is_susceptible: Some(true), .. } =
                 &item.metadata
             {
                 let id = item.name.find('.').map(|i| item.name[..i].to_string())?;
@@ -382,7 +382,7 @@ async fn remote_sftp_list(
                     *is_raw_sample_file = false;
                 } else if let Some(id) = sample_id
                     && let Some(&sus) = sample_susceptibility.get(id) {
-                        *is_susceptible = sus;
+                        *is_susceptible = Some(sus);
                     }
             }
     }
@@ -395,7 +395,7 @@ async fn remote_sftp_list(
             continue;
         }
         let mut tbprofilerjson_opt = None;
-        let mut is_susceptible = false;
+        let mut is_susceptible = None;
 
         if let Some(json_path) = &files.json {
             let mut url = Url::parse(&format!(
@@ -416,7 +416,7 @@ async fn remote_sftp_list(
                 Ok(json) => {
                     let sus = json.dr_variants.iter().all(|v| v.is_susceptible());
                     tbprofilerjson_opt = Some(json);
-                    is_susceptible = sus;
+                    is_susceptible = Some(sus);
                 }
                 Err(e) => log::warn!("Failed to load sample JSON: {}", e),
             }
@@ -557,7 +557,7 @@ async fn remote_sftp_parent(
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
-            is_susceptible: false,
+            is_susceptible: None,
         }
     };
     let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {

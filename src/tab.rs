@@ -952,9 +952,8 @@ pub fn item_from_entry(
                 .first()?
                 .erm41position28_opt
                 .as_ref()
-                .map(|p| is_susceptible_erm41(p))
-        })
-        .unwrap_or(true);
+                .and_then(|p| is_susceptible_erm41(p))
+        });
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
@@ -1257,7 +1256,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             && let Some(id) = name.find('.').map(|i| &name[..i])
             && let Some(&sus) = sample_susceptibility.get(id)
         {
-            *is_susceptible = sus;
+            *is_susceptible = Some(sus);
         }
     }
 
@@ -1276,8 +1275,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         });
         let is_susceptible = tbprofilerjson_opt
             .as_ref()
-            .map(|j| j.dr_variants.iter().all(|v| v.is_susceptible()))
-            .unwrap_or(false);
+            .map(|j| j.dr_variants.iter().all(|v| v.is_susceptible()));
         let location = Location::Path(tab_path.join(&sample_id));
         let metadata = ItemMetadata::Path {
             metadata: fs_meta,
@@ -2196,7 +2194,7 @@ pub enum ItemMetadata {
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
-        is_susceptible: bool,
+        is_susceptible: Option<bool>,
     },
     Trash {
         metadata: trash::TrashItemMetadata,
@@ -2226,7 +2224,7 @@ pub enum ItemMetadata {
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
-        is_susceptible: bool,
+        is_susceptible: Option<bool>,
     },
 }
 
@@ -2495,12 +2493,12 @@ impl ItemMetadata {
         }
     }
 
-    pub fn is_susceptible(&self) -> bool {
+    pub fn is_susceptible(&self) -> Option<bool> {
         match self {
             Self::Path { is_susceptible, .. } => *is_susceptible,
             #[cfg(feature = "russh")]
             Self::RusshPath { is_susceptible, .. } => *is_susceptible,
-            _ => false,
+            _ => None,
         }
     }
 }
@@ -3437,14 +3435,14 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            if self.metadata.is_susceptible() {
-                details = details.push(widget::text::heading(format!(
-                    "Predicted to be susceptible to macrolides."
-                )));
-            } else {
-                details = details.push(widget::text::heading(format!(
-                    "Predicted inducible macrolide resistance."
-                )));
+            match self.metadata.is_susceptible() {
+                Some(true) => details = details.push(widget::text::heading(
+                    "Predicted to be susceptible to macrolides.",
+                )),
+                Some(false) => details = details.push(widget::text::heading(
+                    "Predicted inducible macrolide resistance.",
+                )),
+                None => {}
             }
         }
 
@@ -7006,7 +7004,7 @@ impl Tab {
                     hidden += 1;
                     continue;
                 }
-                if item.metadata.is_susceptible() && !show_susceptible {
+                if matches!(item.metadata.is_susceptible(), Some(true)) && !show_susceptible {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     susceptible_hidden += 1;
@@ -7341,7 +7339,7 @@ impl Tab {
                     hidden += 1;
                     continue;
                 }
-                if item.metadata.is_susceptible() && !show_susceptible {
+                if matches!(item.metadata.is_susceptible(), Some(true)) && !show_susceptible {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     susceptible_hidden += 1;
