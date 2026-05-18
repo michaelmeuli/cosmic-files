@@ -945,6 +945,11 @@ pub fn item_from_entry(
         None
     };
 
+    let is_susceptible = sequence
+        .as_ref()
+        .and_then(|s| s.seq_id_hits.first()?.erm41position28_opt.as_ref().map(|p| p.is_susceptible()))
+        .unwrap_or(false);
+
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
     Item {
@@ -963,7 +968,7 @@ pub fn item_from_entry(
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
-            is_susceptible: false,
+            is_susceptible,
         },
         hidden,
         location_opt: Some(Location::Path(path)),
@@ -3361,7 +3366,7 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(17).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(18).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
@@ -3426,6 +3431,11 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
+            if !self.metadata.is_susceptible() {
+                details = details.push(widget::text::heading(format!(
+                    "Predicted inducible macrolide resistance."
+                )));
+            } 
         }
 
         column = column.push(details);
