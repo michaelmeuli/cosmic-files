@@ -945,15 +945,11 @@ pub fn item_from_entry(
         None
     };
 
-    let is_susceptible = sequence
-        .as_ref()
-        .and_then(|s| {
-            s.seq_id_hits
-                .first()?
-                .erm41position28_opt
-                .as_ref()
-                .and_then(|p| is_susceptible_erm41(p))
-        });
+    let is_susceptible = sequence.as_ref().and_then(|s| {
+        let hit = s.seq_id_hits.first()?;
+        let pos = hit.erm41position28_opt.as_ref()?;
+        is_susceptible_erm41(pos, &hit.erm41_snp_calls)
+    });
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
@@ -3374,9 +3370,11 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
+        
         if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
             details = details.push(widget::text::body("Could not align sequence to references"));
         } else {
+            let best = &hits[0];
             if !self.metadata.is_seq_id() {
                 details = details.push(widget::text::body("Percent identity is less than 60%."));
             }
@@ -3408,6 +3406,26 @@ impl Item {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::heading(format!("erm(41) {}", call)));
             }
+
+            details = details.push(widget::text::body(""));
+            if !best.erm41_snp_calls.is_empty() {
+                details = details.push(widget::text::body(
+                    "erm(41) loss-of-function SNPs:",
+                ));
+                details = details.push(widget::text::body(format!(
+                    "(Using commit: {} of ntm-db repository)",
+                    env!("NTM_DB_COMMIT")
+                )));
+                for snp in &best.erm41_snp_calls {
+                    details = details.push(widget::text::body(format!(
+                        "  pos {}: {}",
+                        snp.ref_pos + 1,
+                        snp.call_tag()
+                    )));
+                }
+            }
+
+
             if let Some(chrom) = self.metadata.ab1_chromatogram()
                 && chrom.erm41_view_state_opt.is_some()
                 && !self.metadata.is_massiliense_seq_id()

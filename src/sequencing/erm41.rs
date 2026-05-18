@@ -1,6 +1,6 @@
 use super::reverse_complement;
+use super::{ERM41_ANCHOR_L, ERM41_ANCHOR_R, ERM41_FWD_END, ERM41_FWD_START};
 use super::{SeqIdHit, best_alignment, parse_fasta_seq};
-use super::{ERM41_FWD_START, ERM41_FWD_END, ERM41_ANCHOR_L, ERM41_ANCHOR_R};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -28,11 +28,19 @@ impl std::fmt::Display for Erm41Position28 {
     }
 }
 
-/// Returns `Some(true)` for C28/G28/A28 (susceptible), `Some(false)` for T28 (inducible
-/// resistance), and `None` for [`Ambiguous`](Erm41Position28::Ambiguous) and
-/// [`Undetermined`](Erm41Position28::Undetermined).
-pub fn is_susceptible_erm41(pos: &Erm41Position28) -> Option<bool> {
-    pos.is_susceptible()
+/// Returns susceptibility for an erm(41) call given the observed LOF SNP calls.
+///
+/// Returns `Some(false)` if any LOF alt carries a drug annotation. Otherwise delegates to
+/// `pos.is_susceptible()`, preserving `None` for ambiguous or undetermined positions.
+pub fn is_susceptible_erm41(pos: &Erm41Position28, snp_calls: &[Erm41LofCall]) -> Option<bool> {
+    let has_drug = snp_calls
+        .iter()
+        .any(|c| c.lof_alts.values().any(|(_, drug)| drug.is_some()));
+    if has_drug {
+        Some(false)
+    } else {
+        pos.is_susceptible()
+    }
 }
 
 impl Erm41Position28 {
@@ -145,13 +153,36 @@ fn translate_codon(codon: &[u8]) -> u8 {
 
 fn three_letter_to_one(aa3: &str) -> u8 {
     match aa3.to_ascii_uppercase().as_str() {
-        "ALA" => b'A', "ARG" => b'R', "ASN" => b'N', "ASP" => b'D',
-        "CYS" => b'C', "GLN" => b'Q', "GLU" => b'E', "GLY" => b'G',
-        "HIS" => b'H', "ILE" => b'I', "LEU" => b'L', "LYS" => b'K',
-        "MET" => b'M', "PHE" => b'F', "PRO" => b'P', "SER" => b'S',
-        "THR" => b'T', "TRP" => b'W', "TYR" => b'Y', "VAL" => b'V',
+        "ALA" => b'A',
+        "ARG" => b'R',
+        "ASN" => b'N',
+        "ASP" => b'D',
+        "CYS" => b'C',
+        "GLN" => b'Q',
+        "GLU" => b'E',
+        "GLY" => b'G',
+        "HIS" => b'H',
+        "ILE" => b'I',
+        "LEU" => b'L',
+        "LYS" => b'K',
+        "MET" => b'M',
+        "PHE" => b'F',
+        "PRO" => b'P',
+        "SER" => b'S',
+        "THR" => b'T',
+        "TRP" => b'W',
+        "TYR" => b'Y',
+        "VAL" => b'V',
         _ => 0,
     }
+}
+
+fn empty_string_as_none<'de, D>(de: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = Option::<String>::deserialize(de)?;
+    Ok(s.filter(|s| !s.trim().is_empty()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,14 +193,28 @@ struct Erm41LofRow {
     mutation: String,
     #[serde(rename = "type")]
     variant_type: String,
+    /// `None` means no drug resistance annotated — interpret as susceptible (`Some(true)`).
+    #[serde(rename = "drug", default, deserialize_with = "empty_string_as_none")]
+    drug: Option<String>,
 }
 
+/// Parse loss-of-function SNPs for erm(41) from a ntm-db resistance CSV.
+///
+/// Returns a map keyed by **0-based nucleotide position** in the erm(41) reference sequence.
+/// Each value is a tuple:
+/// - `.0` — the wild-type base at that position (`u8` ASCII, e.g. `b'A'`)
+/// - `.1` — `lof_alts`: a map from **alternative base** (`u8` ASCII) to a
+///   `(mutation_label, drug)` pair, where `mutation_label` is the HGVS protein annotation
+///   (e.g. `"p.Trp28*"`) and `drug` is the affected drug (`None` if absent in the CSV,
+///   interpreted as susceptible).
+///   Only single-nucleotide substitutions that produce the annotated LoF amino-acid change
+///   (stop codon or annotated replacement) are included; synonymous changes are skipped.
 fn parse_erm41_lof_snps(
     csv: &str,
     refseq: &[u8],
-) -> BTreeMap<usize, (u8, BTreeMap<u8, String>)> {
+) -> BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)> {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
-    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, String>)> = BTreeMap::new();
+    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)> = BTreeMap::new();
     for row in rdr.deserialize::<Erm41LofRow>() {
         let row = match row {
             Ok(r) => r,
@@ -200,7 +245,7 @@ fn parse_erm41_lof_snps(
         } else if target_str.len() >= 3 {
             three_letter_to_one(&target_str[..3])
         } else {
-            continue
+            continue;
         };
         if target_aa == 0 {
             continue;
@@ -224,8 +269,13 @@ fn parse_erm41_lof_snps(
                 alt_codon[codon_pos] = alt;
                 if translate_codon(&alt_codon) == target_aa {
                     let ref_pos = codon_start + codon_pos;
-                    let entry = map.entry(ref_pos).or_insert_with(|| (wt_base, BTreeMap::new()));
-                    entry.1.entry(alt).or_insert_with(|| m.to_string());
+                    let entry = map
+                        .entry(ref_pos)
+                        .or_insert_with(|| (wt_base, BTreeMap::new()));
+                    entry
+                        .1
+                        .entry(alt)
+                        .or_insert_with(|| (m.to_string(), row.drug.clone()));
                 }
             }
         }
@@ -234,7 +284,7 @@ fn parse_erm41_lof_snps(
 }
 
 static ERM41_LOF_SNPS: LazyLock<
-    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, String>)>>,
+    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>>,
 > = LazyLock::new(|| {
     [(
         "M. abscessus subsp. abscessus",
@@ -251,8 +301,8 @@ pub struct Erm41LofCall {
     pub ref_pos: usize,
     pub query_base: Option<u8>,
     pub wt_base: u8,
-    /// Maps each loss-of-function alt base to the mutation label (e.g. `"p.Trp10Arg"`).
-    pub lof_alts: BTreeMap<u8, String>,
+    /// Maps each loss-of-function alt base to `(mutation_label, drug)`.
+    pub lof_alts: BTreeMap<u8, (String, Option<String>)>,
 }
 
 impl Erm41LofCall {
@@ -261,15 +311,20 @@ impl Erm41LofCall {
             None => "NA".to_string(),
             Some(b) if b == self.wt_base => format!("{} (wt)", b as char),
             Some(b) if self.lof_alts.contains_key(&b) => {
-                format!("{} ({})", b as char, self.lof_alts[&b])
+                format!("{} ({})", b as char, self.lof_alts[&b].0)
             }
             Some(b) => format!("{} (novel variant)", b as char),
         }
     }
 }
 
+/// Maps each known loss-of-function SNP position to the base observed in the query sequence,
+/// adjusting for the alignment offset between reference and query coordinates.
+///
+/// `snps` maps each reference position to `(wt_base, lof_alts)`, where `lof_alts` maps each
+/// loss-of-function alternate base to a `(mutation_label, drug)` pair.
 fn call_erm41_lof_snps(
-    snps: &BTreeMap<usize, (u8, BTreeMap<u8, String>)>,
+    snps: &BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>,
     query: &[u8],
     alignment_offset: isize,
 ) -> Vec<Erm41LofCall> {
@@ -325,7 +380,6 @@ pub(super) fn find_erm41_display_window(
 
     None
 }
-
 
 /// Unlike identify_sequence_hsp65() and identify_sequence_rrl_ntm(), this only uses reference sequences extracted via sequences.toml and not the database fetched via fetch_myco_sequences().
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
@@ -389,4 +443,3 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     });
     hits
 }
-
