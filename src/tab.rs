@@ -3406,7 +3406,6 @@ impl Item {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::heading(format!("erm(41) {}", call)));
             }
-
             details = details.push(widget::text::body(""));
             if !best.erm41_snp_calls.is_empty() {
                 details = details.push(widget::text::body(
@@ -3424,8 +3423,6 @@ impl Item {
                     )));
                 }
             }
-
-
             if let Some(chrom) = self.metadata.ab1_chromatogram()
                 && chrom.erm41_view_state_opt.is_some()
                 && !self.metadata.is_massiliense_seq_id()

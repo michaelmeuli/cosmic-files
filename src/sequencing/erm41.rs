@@ -30,14 +30,15 @@ impl std::fmt::Display for Erm41Position28 {
 
 /// Returns susceptibility for an erm(41) call given the observed LOF SNP calls.
 ///
-/// Returns `Some(false)` if any LOF alt carries a drug annotation. Otherwise delegates to
+/// Returns `Some(true)` if any observed base is a LOF alt — a single LOF mutation is sufficient
+/// to render erm(41) non-functional, making the organism susceptible. Otherwise delegates to
 /// `pos.is_susceptible()`, preserving `None` for ambiguous or undetermined positions.
 pub fn is_susceptible_erm41(pos: &Erm41Position28, snp_calls: &[Erm41LofCall]) -> Option<bool> {
-    let has_drug = snp_calls
+    let has_lof = snp_calls
         .iter()
-        .any(|c| c.lof_alts.values().any(|(_, drug)| drug.is_some()));
-    if has_drug {
-        Some(false)
+        .any(|c| c.query_base.map_or(false, |b| c.lof_alts.contains_key(&b)));
+    if has_lof {
+        Some(true)
     } else {
         pos.is_susceptible()
     }
