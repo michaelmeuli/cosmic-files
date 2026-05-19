@@ -420,7 +420,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
             // Abscessus LOF SNP positions apply to all three subspecies — bolletii and
             // massiliense are sequence-similar enough, and no separate variants.csv exists for them.
             let erm41_snp_calls = ERM41_LOF_SNPS
-                .get("M. abscessus subsp. abscessus")
+                .get("M. abscessus subsp. abscessus")  //.get(description)
                 .map(|snps| call_erm41_lof_snps(snps, aligned_query, offset))
                 .unwrap_or_default();
             SeqIdHit {

@@ -2346,7 +2346,7 @@ impl ItemMetadata {
     pub fn is_seq_id(&self) -> bool {
         self.seq_id_hits()
             .first()
-            .is_some_and(|h| h.identity >= 60.0)
+            .is_some_and(|h| h.identity >= 80.0)
     }
 
     pub fn sequence_length(&self) -> Option<usize> {
