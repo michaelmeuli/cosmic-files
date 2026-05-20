@@ -286,14 +286,14 @@ async fn remote_sftp_list(
                 }
                 children_opt = Some(count);
             }
-            let is_tb_result = tbprofilerjson_opt.is_some();
+            let is_tbprofiler_result_as_sample = tbprofilerjson_opt.is_some();
             ItemMetadata::RusshPath {
                 mtime,
                 size_opt,
                 children_opt,
                 is_tbprofiler_json,
                 tbprofilerjson_opt,
-                is_tb_result,
+                is_tbprofiler_result_as_sample,
                 is_raw_sample_file,
                 sample_json_path_opt: None,
                 sample_csv_path_opt: None,
@@ -437,7 +437,7 @@ async fn remote_sftp_list(
             children_opt: None,
             is_tbprofiler_json: true,
             tbprofilerjson_opt,
-            is_tb_result: true,
+            is_tbprofiler_result_as_sample: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json.clone(),
             sample_csv_path_opt: files.csv.clone(),
@@ -559,7 +559,7 @@ async fn remote_sftp_parent(
             children_opt,
             is_tbprofiler_json: false,
             tbprofilerjson_opt: None,
-            is_tb_result: false,
+            is_tbprofiler_result_as_sample: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
             sample_csv_path_opt: None,

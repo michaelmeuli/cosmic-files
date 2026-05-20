@@ -964,7 +964,7 @@ pub fn item_from_entry(
             tbprofilerjson_opt,
             is_ab1,
             sequence_opt: sequence,
-            is_tb_result: false,
+            is_tbprofiler_result_as_sample: false,
             is_raw_sample_file: false,
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
@@ -1279,7 +1279,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             tbprofilerjson_opt,
             is_ab1: false,
             sequence_opt: None,
-            is_tb_result: true,
+            is_tbprofiler_result_as_sample: true,
             is_raw_sample_file: false,
             sample_json_path_opt: files.json,
             sample_csv_path_opt: files.csv,
@@ -2185,7 +2185,7 @@ pub enum ItemMetadata {
         tbprofilerjson_opt: Option<TbProfilerJson>,
         is_ab1: bool,
         sequence_opt: Option<SeqData>,
-        is_tb_result: bool,
+        is_tbprofiler_result_as_sample: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
@@ -2215,7 +2215,7 @@ pub enum ItemMetadata {
         children_opt: Option<usize>,
         is_tbprofiler_json: bool,
         tbprofilerjson_opt: Option<TbProfilerJson>,
-        is_tb_result: bool,
+        is_tbprofiler_result_as_sample: bool,
         is_raw_sample_file: bool,
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
@@ -2422,11 +2422,11 @@ impl ItemMetadata {
         }
     }
 
-    pub fn is_tb_result(&self) -> bool {
+    pub fn is_tbprofiler_result_as_sample(&self) -> bool {
         match self {
-            Self::Path { is_tb_result, .. } => *is_tb_result,
+            Self::Path { is_tbprofiler_result_as_sample, .. } => *is_tbprofiler_result_as_sample,
             #[cfg(feature = "russh")]
-            Self::RusshPath { is_tb_result, .. } => *is_tb_result,
+            Self::RusshPath { is_tbprofiler_result_as_sample, .. } => *is_tbprofiler_result_as_sample,
             _ => false,
         }
     }
@@ -3307,7 +3307,7 @@ impl Item {
         }
 
         if let ItemMetadata::Path { .. } = &self.metadata
-            && self.metadata.is_tb_result()
+            && self.metadata.is_tbprofiler_result_as_sample()
         {
             for (label, opt_path) in [
                 ("Open .results.csv", self.metadata.csv_path()),
@@ -3330,7 +3330,7 @@ impl Item {
                     "item is remote, showing download button: {}",
                     path.display()
                 );
-                if !self.metadata.is_tb_result() {
+                if !self.metadata.is_tbprofiler_result_as_sample() {
                     column = column.push(
                         widget::button::standard(fl!("download"))
                             .on_press(Message::Download(Some((path.clone(), uri.clone())))),
@@ -3338,7 +3338,7 @@ impl Item {
                 }
             }
             if let Some(Location::Remote(uri, _, _)) = &self.location_opt
-                && self.metadata.is_tb_result()
+                && self.metadata.is_tbprofiler_result_as_sample()
             {
                 for (label, opt_path) in [
                     ("Download .results.csv", self.metadata.csv_path()),
@@ -4267,7 +4267,7 @@ impl Tab {
             .iter()
             .filter(|item| item.selected)
             .flat_map(|item| {
-                if item.metadata.is_tb_result() {
+                if item.metadata.is_tbprofiler_result_as_sample() {
                     let mut paths = Vec::new();
                     if let Some(p) = item.metadata.json_path() {
                         paths.push(p.clone());
@@ -7030,7 +7030,7 @@ impl Tab {
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tb_result() && !item.metadata.is_groupable_as_sample_tbprofiler_result_file() && !show_as_samples {
+                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_file() && !show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
@@ -7367,7 +7367,7 @@ impl Tab {
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tb_result() && !item.metadata.is_groupable_as_sample_tbprofiler_result_file() && !show_as_samples {
+                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_file() && !show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
@@ -8028,7 +8028,7 @@ impl Tab {
                     // Include remote TB result items even though their location path is None
                     // (they carry their downloadable paths in sample_*_path_opt fields)
                     #[cfg(feature = "russh")]
-                    if item.metadata.is_tb_result()
+                    if item.metadata.is_tbprofiler_result_as_sample()
                         && let Some(Location::Remote(..)) = &item.location_opt
                     {
                         return true;
@@ -8158,7 +8158,7 @@ impl Tab {
                             if let ItemMetadata::RusshPath { .. } = &item.metadata
                                 && let Some(Location::Remote(uri, _, path_opt)) = &item.location_opt
                             {
-                                if item.metadata.is_tb_result() {
+                                if item.metadata.is_tbprofiler_result_as_sample() {
                                     // Expand sample items into their individual file paths
                                     let mut result = Vec::new();
                                     if let Some(p) = item.metadata.json_path() {
