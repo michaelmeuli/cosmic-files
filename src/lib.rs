@@ -29,7 +29,7 @@ pub mod mime_icon;
 mod mounter;
 mod mouse_area;
 pub mod operation;
-mod russh;
+pub mod russh;
 mod spawn_detached;
 pub mod tab;
 mod thumbnail_cacher;

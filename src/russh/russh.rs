@@ -35,10 +35,17 @@ use tokio::runtime::Builder;
 
 use crate::config::TBConfig;
 
+/// Collects the relevant output files produced by a single TB-Profiler sample run.
+///
+/// Each field holds the path to the corresponding file type on the remote host.
+/// Fields are `None` when the file was not found for that sample.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SampleFiles {
+    /// Path to the TBProfiler JSON report (`<sample>.results.json`).
     json: Option<PathBuf>,
+    /// Path to the CSV summary file (`<sample>.results.csv`), if present.
     csv: Option<PathBuf>,
+    /// Path to the DOCX report (`<sample>.results.docx`), if present.
     docx: Option<PathBuf>,
     mtime: u64,
     size: Option<u64>,
