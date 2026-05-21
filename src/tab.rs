@@ -2431,7 +2431,7 @@ impl ItemMetadata {
         }
     }
 
-    pub fn is_groupable_as_sample_tbprofiler_result_file(&self) -> bool {
+    pub fn is_groupable_as_sample_tbprofiler_result_item(&self) -> bool {
         match self {
             Self::Path {
                 is_raw_sample_file, ..
@@ -7025,12 +7025,12 @@ impl Tab {
                     susceptible_hidden += 1;
                     continue;
                 }
-                if item.metadata.is_groupable_as_sample_tbprofiler_result_file() && show_as_samples {
+                if item.metadata.is_groupable_as_sample_tbprofiler_result_item() && show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_file() && !show_as_samples {
+                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_item() && !show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
@@ -7362,12 +7362,12 @@ impl Tab {
                 }
                 // When show_as_samples is on, hide raw .results.* files (shown as grouped items).
                 // When show_as_samples is off, hide grouped sample items.
-                if item.metadata.is_groupable_as_sample_tbprofiler_result_file() && show_as_samples {
+                if item.metadata.is_groupable_as_sample_tbprofiler_result_item() && show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_file() && !show_as_samples {
+                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_item() && !show_as_samples {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
