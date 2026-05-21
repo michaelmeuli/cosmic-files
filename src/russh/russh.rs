@@ -211,9 +211,9 @@ async fn remote_sftp_list(
         let location = Location::Remote(child_uri.clone(), name.clone(), Some(new_path.clone()));
 
         // Always register .results.* files in the samples map for grouped items,
-        // but also add them individually (is_raw_sample_file = true) so the
+        // but also add them individually (is_tbprofiler_groupable_raw_result_file = true) so the
         // display layer can toggle without a rescan.
-        let mut is_raw_sample_file = false;
+        let mut is_tbprofiler_groupable_raw_result_file = false;
         if file_type == FileType::File
             && let Some((sample_id, suffix)) = name.split_once(".results.") {
                 let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
@@ -236,7 +236,7 @@ async fn remote_sftp_list(
                     _ => {}
                 }
 
-                is_raw_sample_file = true;
+                is_tbprofiler_groupable_raw_result_file = true;
             }
 
         let metadata = if !force_dir {
@@ -294,7 +294,7 @@ async fn remote_sftp_list(
                 is_tbprofiler_json,
                 tbprofilerjson_opt,
                 is_tbprofiler_result_as_sample,
-                is_raw_sample_file,
+                is_tbprofiler_groupable_raw_result_file,
                 sample_json_path_opt: None,
                 sample_csv_path_opt: None,
                 sample_docx_path_opt: None,
@@ -365,7 +365,7 @@ async fn remote_sftp_list(
     let sample_susceptibility: HashMap<String, bool> = items
         .iter()
         .filter_map(|item| {
-            if let ItemMetadata::RusshPath { is_raw_sample_file: true, is_susceptible: Some(true), .. } =
+            if let ItemMetadata::RusshPath { is_tbprofiler_groupable_raw_result_file: true, is_susceptible: Some(true), .. } =
                 &item.metadata
             {
                 let id = item.name.find('.').map(|i| item.name[..i].to_string())?;
@@ -376,17 +376,17 @@ async fn remote_sftp_list(
         })
         .collect();
 
-    // Reset is_raw_sample_file for items whose sample group has no JSON,
+    // Reset is_tbprofiler_groupable_raw_result_file for items whose sample group has no JSON,
     // and propagate susceptibility to non-JSON raw files
     for item in &mut items {
         let name = item.name.clone();
-        if let ItemMetadata::RusshPath { is_raw_sample_file, is_susceptible, .. } =
+        if let ItemMetadata::RusshPath { is_tbprofiler_groupable_raw_result_file, is_susceptible, .. } =
             &mut item.metadata
-            && *is_raw_sample_file {
+            && *is_tbprofiler_groupable_raw_result_file {
                 let sample_id = name.find('.').map(|i| &name[..i]);
                 if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none()))
                 {
-                    *is_raw_sample_file = false;
+                    *is_tbprofiler_groupable_raw_result_file = false;
                 } else if let Some(id) = sample_id
                     && let Some(&sus) = sample_susceptibility.get(id) {
                         *is_susceptible = Some(sus);
@@ -438,7 +438,7 @@ async fn remote_sftp_list(
             is_tbprofiler_json: true,
             tbprofilerjson_opt,
             is_tbprofiler_result_as_sample: true,
-            is_raw_sample_file: false,
+            is_tbprofiler_groupable_raw_result_file: false,
             sample_json_path_opt: files.json.clone(),
             sample_csv_path_opt: files.csv.clone(),
             sample_docx_path_opt: files.docx.clone(),
@@ -560,7 +560,7 @@ async fn remote_sftp_parent(
             is_tbprofiler_json: false,
             tbprofilerjson_opt: None,
             is_tbprofiler_result_as_sample: false,
-            is_raw_sample_file: false,
+            is_tbprofiler_groupable_raw_result_file: false,
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,

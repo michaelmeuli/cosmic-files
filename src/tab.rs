@@ -965,7 +965,7 @@ pub fn item_from_entry(
             is_ab1,
             sequence_opt: sequence,
             is_tbprofiler_result_as_sample: false,
-            is_raw_sample_file: false,
+            is_tbprofiler_groupable_raw_result_file: false,
             sample_json_path_opt: None,
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
@@ -1194,7 +1194,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         let name = item.name.clone();
         let path = item.path_opt().cloned();
         if let ItemMetadata::Path {
-            is_raw_sample_file, ..
+            is_tbprofiler_groupable_raw_result_file, ..
         } = &mut item.metadata
             && let Some((sample_id, suffix)) = name.split_once(".results.")
         {
@@ -1211,19 +1211,19 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
                 "docx" => entry.docx = path,
                 _ => {}
             }
-            *is_raw_sample_file = true;
+            *is_tbprofiler_groupable_raw_result_file = true;
         }
     }
     for item in &mut items {
         let name = item.name.clone();
         if let ItemMetadata::Path {
-            is_raw_sample_file, ..
+            is_tbprofiler_groupable_raw_result_file, ..
         } = &mut item.metadata
-            && *is_raw_sample_file
+            && *is_tbprofiler_groupable_raw_result_file
         {
             let sample_id = name.find('.').map(|i| &name[..i]);
             if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none())) {
-                *is_raw_sample_file = false;
+                *is_tbprofiler_groupable_raw_result_file = false;
             }
         }
     }
@@ -1244,11 +1244,11 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
     for item in &mut items {
         let name = item.name.clone();
         if let ItemMetadata::Path {
-            is_raw_sample_file,
+            is_tbprofiler_groupable_raw_result_file,
             is_susceptible,
             ..
         } = &mut item.metadata
-            && *is_raw_sample_file
+            && *is_tbprofiler_groupable_raw_result_file
             && let Some(id) = name.find('.').map(|i| &name[..i])
             && let Some(&sus) = sample_susceptibility.get(id)
         {
@@ -1280,7 +1280,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             is_ab1: false,
             sequence_opt: None,
             is_tbprofiler_result_as_sample: true,
-            is_raw_sample_file: false,
+            is_tbprofiler_groupable_raw_result_file: false,
             sample_json_path_opt: files.json,
             sample_csv_path_opt: files.csv,
             sample_docx_path_opt: files.docx,
@@ -2186,7 +2186,7 @@ pub enum ItemMetadata {
         is_ab1: bool,
         sequence_opt: Option<SeqData>,
         is_tbprofiler_result_as_sample: bool,
-        is_raw_sample_file: bool,
+        is_tbprofiler_groupable_raw_result_file: bool,
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
@@ -2216,7 +2216,7 @@ pub enum ItemMetadata {
         is_tbprofiler_json: bool,
         tbprofilerjson_opt: Option<TbProfilerJson>,
         is_tbprofiler_result_as_sample: bool,
-        is_raw_sample_file: bool,
+        is_tbprofiler_groupable_raw_result_file: bool,
         sample_json_path_opt: Option<PathBuf>,
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
@@ -2434,12 +2434,12 @@ impl ItemMetadata {
     pub fn is_groupable_as_sample_tbprofiler_result_item(&self) -> bool {
         match self {
             Self::Path {
-                is_raw_sample_file, ..
-            } => *is_raw_sample_file,
+                is_tbprofiler_groupable_raw_result_file, ..
+            } => *is_tbprofiler_groupable_raw_result_file,
             #[cfg(feature = "russh")]
             Self::RusshPath {
-                is_raw_sample_file, ..
-            } => *is_raw_sample_file,
+                is_tbprofiler_groupable_raw_result_file, ..
+            } => *is_tbprofiler_groupable_raw_result_file,
             _ => false,
         }
     }
