@@ -879,7 +879,7 @@ pub fn item_from_entry(
     let is_rpob = !is_fasta && (lower_name.contains("rpob") || lower_name.contains("rpo"));
     let is_16s = !is_fasta && lower_name.contains("mbak14");
     let is_23s_ntm = !is_fasta && (lower_name.contains("rrl") || lower_name.contains("mclr"));
-    let sequence = if is_ab1 && !remote {
+    let sequence_opt = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
@@ -945,7 +945,7 @@ pub fn item_from_entry(
         None
     };
 
-    let is_susceptible = sequence.as_ref().and_then(|s| {
+    let is_susceptible = sequence_opt.as_ref().and_then(|s| {
         let hit = s.seq_id_hits.first()?;
         let pos = hit.erm41position28_opt.as_ref()?;
         is_susceptible_erm41(pos, &hit.erm41_snp_calls)
@@ -963,7 +963,7 @@ pub fn item_from_entry(
             children_opt,
             tbprofilerjson_opt,
             is_ab1,
-            sequence_opt: sequence,
+            sequence_opt,
             is_tbprofiler_result_as_sample: false,
             is_tbprofiler_groupable_raw_result_file: false,
             sample_json_path_opt: None,
