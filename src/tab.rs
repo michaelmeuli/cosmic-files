@@ -1194,7 +1194,8 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         let name = item.name.clone();
         let path = item.path_opt().cloned();
         if let ItemMetadata::Path {
-            is_tbprofiler_groupable_raw_result_file, ..
+            is_tbprofiler_groupable_raw_result_file,
+            ..
         } = &mut item.metadata
             && let Some((sample_id, suffix)) = name.split_once(".results.")
         {
@@ -1217,7 +1218,8 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
     for item in &mut items {
         let name = item.name.clone();
         if let ItemMetadata::Path {
-            is_tbprofiler_groupable_raw_result_file, ..
+            is_tbprofiler_groupable_raw_result_file,
+            ..
         } = &mut item.metadata
             && *is_tbprofiler_groupable_raw_result_file
         {
@@ -2424,9 +2426,15 @@ impl ItemMetadata {
 
     pub fn is_tbprofiler_result_as_sample(&self) -> bool {
         match self {
-            Self::Path { is_tbprofiler_result_as_sample, .. } => *is_tbprofiler_result_as_sample,
+            Self::Path {
+                is_tbprofiler_result_as_sample,
+                ..
+            } => *is_tbprofiler_result_as_sample,
             #[cfg(feature = "russh")]
-            Self::RusshPath { is_tbprofiler_result_as_sample, .. } => *is_tbprofiler_result_as_sample,
+            Self::RusshPath {
+                is_tbprofiler_result_as_sample,
+                ..
+            } => *is_tbprofiler_result_as_sample,
             _ => false,
         }
     }
@@ -2434,11 +2442,13 @@ impl ItemMetadata {
     pub fn is_groupable_as_sample_tbprofiler_result_item(&self) -> bool {
         match self {
             Self::Path {
-                is_tbprofiler_groupable_raw_result_file, ..
+                is_tbprofiler_groupable_raw_result_file,
+                ..
             } => *is_tbprofiler_groupable_raw_result_file,
             #[cfg(feature = "russh")]
             Self::RusshPath {
-                is_tbprofiler_groupable_raw_result_file, ..
+                is_tbprofiler_groupable_raw_result_file,
+                ..
             } => *is_tbprofiler_groupable_raw_result_file,
             _ => false,
         }
@@ -3370,14 +3380,13 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
-        
-        if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
-            details = details.push(widget::text::body("Could not align sequence to references"));
+        if hits.is_empty()
+            || self.metadata.sequence_length() == Some(0)
+            || !self.metadata.is_seq_id()
+        {
+            details = details.push(widget::text::body("Could not align sequence to references."));
         } else {
             let best = &hits[0];
-            if !self.metadata.is_seq_id() {
-                details = details.push(widget::text::body("Percent identity is less than 60%."));
-            }
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
@@ -3408,9 +3417,7 @@ impl Item {
             }
             details = details.push(widget::text::body(""));
             if !best.erm41_snp_calls.is_empty() {
-                details = details.push(widget::text::body(
-                    "erm(41) loss-of-function SNPs:",
-                ));
+                details = details.push(widget::text::body("erm(41) loss-of-function SNPs:"));
                 details = details.push(widget::text::body(format!(
                     "(Using commit: {} of ntm-db repository)",
                     env!("NTM_DB_COMMIT")
@@ -3451,12 +3458,16 @@ impl Item {
                 details = details.push(widget::text::body(""));
             }
             match self.metadata.is_susceptible() {
-                Some(true) => details = details.push(widget::text::heading(
-                    "Predicted to be susceptible to macrolides.",
-                )),
-                Some(false) => details = details.push(widget::text::heading(
-                    "Predicted inducible macrolide resistance.",
-                )),
+                Some(true) => {
+                    details = details.push(widget::text::heading(
+                        "Predicted to be susceptible to macrolides.",
+                    ))
+                }
+                Some(false) => {
+                    details = details.push(widget::text::heading(
+                        "Predicted inducible macrolide resistance.",
+                    ))
+                }
                 None => {}
             }
         }
@@ -3477,12 +3488,12 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
-        if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
-            details = details.push(widget::text::body("Could not align sequence to references"));
+        if hits.is_empty()
+            || self.metadata.sequence_length() == Some(0)
+            || !self.metadata.is_seq_id()
+        {
+            details = details.push(widget::text::body("Could not align sequence to references."));
         } else {
-            if !self.metadata.is_seq_id() {
-                details = details.push(widget::text::body("Percent identity is less than 60%."));
-            }
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
@@ -3623,16 +3634,13 @@ impl Item {
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.metadata.seq_id_hits();
-
-        if hits.is_empty() || self.metadata.sequence_length() == Some(0) {
-            details = details.push(widget::text::body("Could not align sequence to references"));
+        if hits.is_empty()
+            || self.metadata.sequence_length() == Some(0)
+            || !self.metadata.is_seq_id() 
+        {
+            details = details.push(widget::text::body("Could not align sequence to references."));
         } else {
             let best = &hits[0];
-            if !self.metadata.is_seq_id() {
-                details = details.push(widget::text::body(
-                    "Percent identity to reference is less than 60%.",
-                ));
-            }
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
@@ -7025,12 +7033,21 @@ impl Tab {
                     susceptible_hidden += 1;
                     continue;
                 }
-                if item.metadata.is_groupable_as_sample_tbprofiler_result_item() && show_as_samples {
+                if item
+                    .metadata
+                    .is_groupable_as_sample_tbprofiler_result_item()
+                    && show_as_samples
+                {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_item() && !show_as_samples {
+                if item.metadata.is_tbprofiler_result_as_sample()
+                    && !item
+                        .metadata
+                        .is_groupable_as_sample_tbprofiler_result_item()
+                    && !show_as_samples
+                {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
@@ -7362,12 +7379,21 @@ impl Tab {
                 }
                 // When show_as_samples is on, hide raw .results.* files (shown as grouped items).
                 // When show_as_samples is off, hide grouped sample items.
-                if item.metadata.is_groupable_as_sample_tbprofiler_result_item() && show_as_samples {
+                if item
+                    .metadata
+                    .is_groupable_as_sample_tbprofiler_result_item()
+                    && show_as_samples
+                {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
                 }
-                if item.metadata.is_tbprofiler_result_as_sample() && !item.metadata.is_groupable_as_sample_tbprofiler_result_item() && !show_as_samples {
+                if item.metadata.is_tbprofiler_result_as_sample()
+                    && !item
+                        .metadata
+                        .is_groupable_as_sample_tbprofiler_result_item()
+                    && !show_as_samples
+                {
                     item.pos_opt.set(None);
                     item.rect_opt.set(None);
                     continue;
