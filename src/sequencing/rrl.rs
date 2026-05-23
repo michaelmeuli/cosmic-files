@@ -11,6 +11,62 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum rrlPosition_2057_2058 {
+    SusceptibleWildtype, // A2057 and A2058
+    ResistanceConferringMutation, // Any mutation at 2057 or 2058 that is not wildtype.
+    Undetermined,
+}
+
+impl rrlPosition_2057_2058 {
+    pub fn is_susceptible(&self) -> Option<bool> {
+        match self {
+            Self::SusceptibleWildtype => Some(true),
+            Self::ResistanceConferringMutation => Some(false),
+            Self::Undetermined => None,
+        }
+    }
+
+    fn call_position_2057_2058(read: &[u8]) -> Option<(u8, u8)> {
+        let anchor_len = RRL_ANCHOR_L.len();
+        let hit = read
+            .windows(anchor_len)
+            .position(|w| w.eq_ignore_ascii_case(RRL_ANCHOR_L))?;
+        let pos2057 = hit + anchor_len;
+        let base2057 = read.get(pos2057).copied()?.to_ascii_uppercase();
+        let pos2058 = pos2057 + 1;
+        let base2058 = read.get(pos2058).copied()?.to_ascii_uppercase();
+        let right_start = pos2058 + 1;
+        let right_end = right_start + RRL_ANCHOR_R.len();
+        if right_end > read.len() {
+            return None;
+        }
+        let right_ok = read[right_start..right_end].eq_ignore_ascii_case(RRL_ANCHOR_R);
+        if !right_ok {
+            return None;
+        }
+        Some((base2057, base2058))
+    }
+
+    fn from_bases(bases: Option<(u8, u8)>) -> Option<Self> {
+        match bases {
+            Some((b'A', b'A')) => Some(Self::SusceptibleWildtype),
+            Some((_, _)) => Some(Self::ResistanceConferringMutation),
+            None => Some(Self::Undetermined),
+        }
+    }
+
+    pub fn from_single_read(read: &[u8]) -> Self {
+        if let Some(call) = Self::from_bases(Self::call_position_2057_2058(read)) {
+            return call;
+        }
+        let rc = reverse_complement(read);
+        Self::from_bases(Self::call_position_2057_2058(&rc)).unwrap_or(Self::Undetermined)
+    }
+}
+
+
 #[derive(Debug, Deserialize, Clone)]
 struct ResistanceVariant {
     #[serde(rename = "Gene")]

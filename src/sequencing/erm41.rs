@@ -11,7 +11,6 @@ pub enum Erm41Position28 {
     T28,          // Thymine  — inducible macrolide resistance (ATCC 19977 type)
     G28,          // Guanine
     A28,          // Adenine
-    Ambiguous,    // Fwd/rev disagree
     Undetermined, // Anchor not found in read
 }
 
@@ -22,7 +21,6 @@ impl std::fmt::Display for Erm41Position28 {
             Self::T28 => write!(f, "T28 — inducible macrolide resistance"),
             Self::G28 => write!(f, "G28"),
             Self::A28 => write!(f, "A28"),
-            Self::Ambiguous => write!(f, "Ambiguous (strand disagreement)"),
             Self::Undetermined => write!(f, "Undetermined (anchor not found)"),
         }
     }
@@ -51,7 +49,7 @@ impl Erm41Position28 {
         match self {
             Self::C28 | Self::G28 | Self::A28 => Some(true),
             Self::T28 => Some(false),
-            Self::Ambiguous | Self::Undetermined => None,
+            Self::Undetermined => None,
         }
     }
 
@@ -86,22 +84,6 @@ impl Erm41Position28 {
             Some(b'G') => Some(Self::G28),
             Some(b'A') => Some(Self::A28),
             _ => None,
-        }
-    }
-
-    /// Consider both forward and reverse reads for Erm41Position28.
-    /// Function is not used at the moment.
-    pub fn from_fw_rev(fwd_read: &[u8], rev_read: &[u8]) -> Self {
-        let fwd = Self::from_base(Self::call_position28(fwd_read));
-        let rc = reverse_complement(rev_read);
-        let rev = Self::from_base(Self::call_position28(&rc));
-
-        match (fwd, rev) {
-            (Some(a), Some(b)) if a == b => a,
-            (Some(a), None) => a,
-            (None, Some(b)) => b,
-            (Some(_), Some(_)) => Self::Ambiguous,
-            (None, None) => Self::Undetermined,
         }
     }
 
