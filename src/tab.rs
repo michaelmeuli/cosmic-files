@@ -2943,11 +2943,13 @@ impl Item {
     }
 
     pub fn is_16s(&self) -> bool {
-        !self.is_fasta() && self.name.to_ascii_lowercase().contains("mbak14")
+        let lower = self.name.to_ascii_lowercase();
+        !self.is_fasta() && lower.contains("mbak14")
     }
 
     pub fn is_rrl_ntm(&self) -> bool {
-        !self.is_fasta() && self.name.to_ascii_lowercase().contains("mclr")
+        let lower = self.name.to_ascii_lowercase();
+        !self.is_fasta() && (lower.contains("mclr") || lower.contains("rrl"))
     }
 
     pub fn can_gallery(&self) -> bool {
