@@ -1,29 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic::{
-    Element,
-    app::Core,
-    iced::{
-        Alignment, Background, Border, Length, advanced::widget::text::Style as TextStyle,
-        keyboard::Modifiers,
-    },
-    theme,
-    widget::{
-        self, Row, button, column, container, divider,
-        menu::{self, ItemHeight, ItemWidth, MenuBar, key_bind::KeyBind},
-        responsive_menu_bar, space, text,
-    },
+use cosmic::app::Core;
+use cosmic::iced::advanced::widget::text::Style as TextStyle;
+use cosmic::iced::keyboard::Modifiers;
+use cosmic::iced::{Alignment, Background, Border, Length};
+use cosmic::widget::menu::key_bind::KeyBind;
+use cosmic::widget::menu::{self, ItemHeight, ItemWidth, MenuBar};
+use cosmic::widget::{
+    self, Row, button, column, container, divider, responsive_menu_bar, space, text,
 };
+use cosmic::{Element, theme};
 use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
-use std::{collections::HashMap, sync::LazyLock};
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
-use crate::{
-    app::{Action, Message},
-    config::Config,
-    fl,
-    tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab},
-};
+use crate::app::{Action, Message};
+use crate::config::{Config, ContextActionPreset};
+use crate::fl;
+use crate::tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab};
+use crate::trash::{Trash, TrashExt};
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
     LazyLock::new(|| cosmic::widget::Id::new("responsive-menu"));
@@ -37,7 +33,7 @@ macro_rules! menu_button {
             .height(Length::Fixed(24.0))
             .align_y(Alignment::Center)
         )
-        .padding([theme::active().cosmic().spacing.space_xxs, 16])
+        .padding([theme::spacing().space_xxs, 16])
         .width(Length::Fill)
         .class(theme::Button::MenuItem)
     );
@@ -60,6 +56,7 @@ pub fn context_menu<'a>(
     key_binds: &HashMap<KeyBind, Action>,
     modifiers: &Modifiers,
     clipboard_paste_available: bool,
+    context_actions: &[ContextActionPreset],
 ) -> Element<'a, tab::Message> {
     let find_key = |action: &Action| -> String {
         for (key_bind, key_action) in key_binds {
@@ -74,6 +71,7 @@ pub fn context_menu<'a>(
         color.alpha *= 0.75;
         TextStyle {
             color: Some(color.into()),
+            ..Default::default()
         }
     }
     fn disabled_style(theme: &cosmic::Theme) -> TextStyle {
@@ -81,6 +79,7 @@ pub fn context_menu<'a>(
         color.alpha *= 0.5;
         TextStyle {
             color: Some(color.into()),
+            ..Default::default()
         }
     }
 
@@ -141,12 +140,11 @@ pub fn context_menu<'a>(
                     Some(Location::Trash) | Some(Location::Search(SearchLocation::Trash, ..)) => {
                         selected_trash_only = true
                     }
-                    Some(Location::Path(path)) => {
+                    Some(Location::Path(path))
                         if selected == 1
-                            && path.extension().and_then(|s| s.to_str()) == Some("desktop")
-                        {
-                            selected_desktop_entry = Some(&**path);
-                        }
+                            && path.extension().and_then(|s| s.to_str()) == Some("desktop") =>
+                    {
+                        selected_desktop_entry = Some(&**path);
                     }
                     _ => (),
                 }
@@ -157,6 +155,14 @@ pub fn context_menu<'a>(
     selected_types.sort_unstable();
     selected_types.dedup();
     selected_trash_only = selected_trash_only && selected == 1;
+    let context_action_items = |selected: usize, selected_dir: usize| {
+        context_actions
+            .iter()
+            .enumerate()
+            .filter(|(_, action)| action.matches_selection(selected, selected_dir))
+            .map(|(i, action)| menu_item(action.name.clone(), Action::RunContextAction(i)).into())
+            .collect::<Vec<Element<'a, tab::Message>>>()
+    };
     // Parse the desktop entry if it is the only selection
     #[cfg(feature = "desktop")]
     let selected_desktop_entry = selected_desktop_entry.and_then(|path| {
@@ -183,7 +189,7 @@ pub fn context_menu<'a>(
         ) => {
             if selected_trash_only {
                 children.push(menu_item(fl!("open"), Action::Open).into());
-                if !trash::os_limited::is_empty().unwrap_or(true) {
+                if !Trash::is_empty() {
                     children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash).into());
                 }
             } else if let Some(entry) = selected_desktop_entry {
@@ -204,6 +210,11 @@ pub fn context_menu<'a>(
                 }
                 // Should this simply bypass trash and remove the shortcut?
                 children.push(menu_item(fl!("move-to-trash"), Action::Delete).into());
+                let action_items = context_action_items(selected, selected_dir);
+                if !action_items.is_empty() {
+                    children.push(divider::horizontal::light().into());
+                    children.extend(action_items);
+                }
             } else if selected > 0 {
                 if selected_dir == 1 && selected == 1 || selected_dir == 0 {
                     children.push(menu_item(fl!("open"), Action::Open).into());
@@ -225,6 +236,11 @@ pub fn context_menu<'a>(
                     children.push(menu_item(fl!("open-in-new-tab"), Action::OpenInNewTab).into());
                     children
                         .push(menu_item(fl!("open-in-new-window"), Action::OpenInNewWindow).into());
+                }
+                let action_items = context_action_items(selected, selected_dir);
+                if !action_items.is_empty() {
+                    children.push(divider::horizontal::light().into());
+                    children.extend(action_items);
                 }
                 children.push(divider::horizontal::light().into());
                 if selected_mount_point == 0 {
@@ -559,7 +575,7 @@ pub fn dialog_menu(
     ])
     .item_height(ItemHeight::Dynamic(40))
     .item_width(ItemWidth::Uniform(360))
-    .spacing(theme::active().cosmic().spacing.space_xxxs.into())
+    .spacing(theme::spacing().space_xxxs.into())
     .into()
 }
 
@@ -614,7 +630,7 @@ pub fn menu_bar<'a>(
     responsive_menu_bar()
         .item_height(ItemHeight::Dynamic(40))
         .item_width(ItemWidth::Uniform(360))
-        .spacing(theme::active().cosmic().spacing.space_xxxs.into())
+        .spacing(theme::spacing().space_xxxs.into())
         .into_element(
             core,
             key_binds,

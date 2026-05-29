@@ -99,6 +99,13 @@ open-with-title = How do you want to open "{$name}"?
 browse-store = Browse {$store}
 other-apps = Other applications
 related-apps = Related applications
+context-action = Context action
+context-action-confirm-title = Run "{$name}"?
+context-action-confirm-warning = This will run on {$items} {$items ->
+    [one] item
+    *[other] items
+  }.
+run = Run
 
 ## Permanently delete Dialog
 selected-items = The {$items} selected items
@@ -109,6 +116,7 @@ permanently-delete-warning = {$target} will be permanently deleted. This action 
 ## Rename Dialog
 rename-file = Rename file
 rename-folder = Rename folder
+rename-confirm = Rename
 
 ## Replace Dialog
 replace = Replace

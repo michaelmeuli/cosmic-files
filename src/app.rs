@@ -1,6 +1,24 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use cosmic::app::{self, Core, Task, context_drawer};
+use cosmic::cosmic_config::{self, ConfigSet};
+use cosmic::iced::clipboard::dnd::DndAction;
+use cosmic::iced::core::SmolStr;
+use cosmic::iced::core::widget::operation::focusable::unfocus;
+use cosmic::iced::futures::{self, SinkExt};
+use cosmic::iced::keyboard::key::Physical;
+use cosmic::iced::keyboard::{Event as KeyEvent, Key, Modifiers};
+#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
+use cosmic::iced::platform_specific::shell::wayland::commands::overlap_notify::overlap_notify;
+use cosmic::iced::runtime::{clipboard, task};
+use cosmic::iced::widget::button::focus;
+use cosmic::iced::widget::scrollable;
+use cosmic::iced::widget::scrollable::AbsoluteOffset;
+use cosmic::iced::window::{self, Event as WindowEvent, Id as WindowId};
+use cosmic::iced::{
+    self, Alignment, Event, Length, Rectangle, Size, Subscription, event, mouse, stream,
+};
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced::{
     Limits, Point,
@@ -12,93 +30,59 @@ use cosmic::iced::{
         Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
     },
 };
-#[cfg(all(feature = "wayland", feature = "desktop-applet"))]
-use cosmic::iced_winit::commands::overlap_notify::overlap_notify;
-use cosmic::{
-    Application, ApplicationExt, Element,
-    app::{self, Core, Task, context_drawer},
-    cosmic_config::{self, ConfigSet},
-    cosmic_theme,
-    desktop::fde::DesktopEntry,
-    executor,
-    iced::{
-        self, Alignment, Event, Length, Rectangle, Size, Subscription,
-        clipboard::dnd::DndAction,
-        core::SmolStr,
-        event,
-        futures::{self, SinkExt},
-        keyboard::{Event as KeyEvent, Key, Modifiers},
-        mouse, stream,
-        widget::scrollable,
-        window::{self, Event as WindowEvent, Id as WindowId},
-    },
-    iced_runtime::clipboard,
-    iced_widget::{button::focus, scrollable::AbsoluteOffset},
-    style, surface, theme,
-    widget::{
-        self,
-        about::About,
-        dnd_destination::DragId,
-        icon,
-        menu::{action::MenuAction, key_bind::KeyBind},
-        segmented_button::{self, Entity, ReorderEvent},
-        space,
-    },
-};
+use cosmic::widget::about::About;
+use cosmic::widget::dnd_destination::DragId;
+use cosmic::widget::menu::action::MenuAction;
+use cosmic::widget::menu::key_bind::KeyBind;
+use cosmic::widget::segmented_button::{self, Entity, ReorderEvent};
+use cosmic::widget::{self, icon, settings, space};
+use cosmic::{Application, ApplicationExt, Element, cosmic_theme, executor, style, surface, theme};
 use mime_guess::Mime;
-use notify_debouncer_full::{
-    DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
-    notify::{self, RecommendedWatcher},
-};
+use notify_debouncer_full::notify::{self, RecommendedWatcher};
+use notify_debouncer_full::{DebouncedEvent, Debouncer, RecommendedCache, new_debouncer};
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::Key as SlotMapKey;
-use std::{
-    any::TypeId,
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
-    env, fmt, fs,
-    future::Future,
-    io,
-    num::NonZeroU16,
-    path::{Path, PathBuf},
-    pin::Pin,
-    process,
-    sync::{Arc, LazyLock, Mutex},
-    time::{self, Duration, Instant},
-};
+use std::any::TypeId;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::future::Future;
+use std::num::NonZeroU16;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{self, Duration, Instant};
+use std::{env, fmt, fs, io, process};
 use tokio::sync::mpsc;
 use trash::TrashItem;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use wayland_client::{Proxy, protocol::wl_output::WlOutput};
 
-use crate::{
-    FxOrderMap,
-    clipboard::{
-        ClipboardCache, ClipboardCopy, ClipboardKind, ClipboardPaste, ClipboardPasteImage,
-        ClipboardPasteText, ClipboardPasteVideo,
-    },
-    config::{
-        AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TIME_CONFIG_ID, TabConfig,
-        TimeConfig, TypeToSearch,
-    },
-    dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings},
-    fl, home_dir,
-    key_bind::key_binds,
-    localize::LANGUAGE_SORTER,
-    menu,
-    mime_app::{self, MimeApp, MimeAppCache},
-    mime_icon,
-    mounter::{MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage},
-    operation::{
-        Controller, Operation, OperationError, OperationErrorType, OperationSelection,
-        ReplaceResult, copy_unique_path,
-    },
-    spawn_detached::spawn_detached,
-    tab::{
-        self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
-        SearchLocation, Tab,
-    },
-    zoom::{zoom_in_view, zoom_out_view, zoom_to_default},
+use crate::clipboard::{
+    ClipboardCache, ClipboardCopy, ClipboardKind, ClipboardPaste, ClipboardPasteImage,
+    ClipboardPasteText, ClipboardPasteVideo,
 };
+use crate::config::{
+    AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TIME_CONFIG_ID, TabConfig,
+    TimeConfig, TypeToSearch,
+};
+use crate::dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings};
+use crate::key_bind::key_binds;
+use crate::localize::LANGUAGE_SORTER;
+use crate::mime_app::{self, MimeApp, MimeAppCache};
+use crate::mounter::{
+    MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage,
+};
+use crate::operation::{
+    Controller, Operation, OperationError, OperationErrorType, OperationSelection, ReplaceResult,
+    copy_unique_path,
+};
+use crate::spawn_detached::spawn_detached;
+use crate::tab::{
+    self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
+    SearchLocation, Tab,
+};
+use crate::trash::{Trash, TrashExt};
+use crate::zoom::{zoom_in_view, zoom_out_view, zoom_to_default};
+use crate::{FxOrderMap, context_action, fl, home_dir, menu, mime_icon};
 
 static PERMANENT_DELETE_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("permanent-delete-button"));
@@ -108,6 +92,9 @@ static DELETE_TRASH_BUTTON_ID: LazyLock<widget::Id> =
 
 static CONFIRM_OPEN_WITH_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("confirm-open-with-button"));
+
+static CONFIRM_CONTEXT_ACTION_BUTTON_ID: LazyLock<widget::Id> =
+    LazyLock::new(|| widget::Id::new("confirm-context-action-button"));
 
 static EMPTY_TRASH_BUTTON_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("empty-trash-button"));
@@ -180,6 +167,7 @@ pub enum Action {
     OpenItemLocation,
     OpenTerminal,
     OpenWith,
+    RunContextAction(usize),
     Paste,
     PermanentlyDelete,
     Preview,
@@ -252,6 +240,9 @@ impl Action {
             Self::OpenItemLocation => Message::OpenItemLocation(entity_opt),
             Self::OpenTerminal => Message::OpenTerminal(entity_opt),
             Self::OpenWith => Message::OpenWithDialog(entity_opt),
+            Self::RunContextAction(action) => {
+                Message::TabMessage(entity_opt, tab::Message::RunContextAction(*action))
+            }
             Self::Paste => Message::Paste(entity_opt),
             Self::PermanentlyDelete => Message::PermanentlyDelete(entity_opt),
             Self::Preview => Message::Preview(entity_opt),
@@ -297,7 +288,7 @@ impl MenuAction for Action {
 }
 
 #[derive(Clone, Debug)]
-pub struct PreviewItem(pub tab::Item);
+pub struct PreviewItem(pub Box<tab::Item>);
 
 impl PartialEq for PreviewItem {
     fn eq(&self, other: &Self) -> bool {
@@ -323,6 +314,7 @@ pub enum NavMenuAction {
     OpenInNewTab(segmented_button::Entity),
     OpenInNewWindow(segmented_button::Entity),
     Preview(segmented_button::Entity),
+    RunContextAction(segmented_button::Entity, usize),
     RemoveFromSidebar(segmented_button::Entity),
 }
 
@@ -364,7 +356,7 @@ pub enum Message {
     ExtractToResult(DialogResult),
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     Focused(window::Id),
-    Key(window::Id, Modifiers, Key, Option<SmolStr>),
+    Key(window::Id, Modifiers, Key, Physical, Option<SmolStr>),
     LaunchUrl(String),
     MaybeExit,
     ModifiersChanged(window::Id, Modifiers),
@@ -412,6 +404,7 @@ pub enum Message {
     CheckClipboardImage,
     CheckClipboardVideo,
     CheckClipboardText,
+    RetryCheckClipboard(ClipboardCache),
     ClipboardCached(ClipboardCache),
     PendingCancel(u64),
     PendingCancelAll,
@@ -450,7 +443,7 @@ pub enum Message {
     TabRescan(
         Entity,
         Location,
-        Option<tab::Item>,
+        Option<Box<tab::Item>>,
         Vec<tab::Item>,
         Option<Vec<PathBuf>>,
     ),
@@ -558,6 +551,10 @@ pub enum DialogPage {
         name: String,
         dir: bool,
     },
+    RunContextAction {
+        action: usize,
+        paths: Box<[PathBuf]>,
+    },
     OpenWith {
         path: PathBuf,
         mime: mime_guess::Mime,
@@ -577,8 +574,8 @@ pub enum DialogPage {
         dir: bool,
     },
     Replace {
-        from: tab::Item,
-        to: tab::Item,
+        from: Box<tab::Item>,
+        to: Box<tab::Item>,
         multiple: bool,
         apply_to_all: bool,
         conflict_count: usize,
@@ -819,9 +816,12 @@ impl App {
 
             // First launch apps that can be launched directly
             if mime == "application/x-desktop" {
-                // Try opening desktop application
-                Self::launch_desktop_entries(&paths);
-                continue;
+                #[cfg(feature = "desktop")]
+                {
+                    // Try opening desktop application
+                    Self::launch_desktop_entries(&paths);
+                    continue;
+                }
             } else if mime == "application/x-executable" || mime == "application/vnd.appimage" {
                 // Try opening executable
                 for path in paths {
@@ -882,31 +882,42 @@ impl App {
         Task::batch(tasks)
     }
 
+    #[cfg(feature = "desktop")]
     fn launch_desktop_entries(paths: &[impl AsRef<Path>]) {
+        use cosmic::desktop::fde::DesktopEntry;
+        let locales = cosmic::desktop::fde::get_languages_from_env();
+
         for path in paths.iter().map(AsRef::as_ref) {
             match DesktopEntry::from_path::<&str>(path, None) {
                 Ok(entry) => match entry.exec() {
-                    Some(exec) => match mime_app::exec_to_command(exec, &[] as &[&str; 0]) {
-                        Some(commands) => {
-                            let cwd_opt = entry.desktop_entry("Path");
+                    Some(exec) => {
+                        match mime_app::exec_to_command(
+                            exec,
+                            entry.name(&locales).as_deref().unwrap_or_default(),
+                            Some(path),
+                            &[] as &[&str; 0],
+                        ) {
+                            Some(commands) => {
+                                let cwd_opt = entry.desktop_entry("Path");
 
-                            for mut command in commands {
-                                if let Some(cwd) = cwd_opt {
-                                    command.current_dir(cwd);
-                                }
+                                for mut command in commands {
+                                    if let Some(cwd) = cwd_opt {
+                                        command.current_dir(cwd);
+                                    }
 
-                                if let Err(err) = spawn_detached(&mut command) {
-                                    log::warn!("failed to execute {}: {}", path.display(), err);
+                                    if let Err(err) = spawn_detached(&mut command) {
+                                        log::warn!("failed to execute {}: {}", path.display(), err);
+                                    }
                                 }
                             }
+                            None => {
+                                log::warn!(
+                                    "failed to parse {}: invalid Desktop Entry/Exec",
+                                    path.display()
+                                );
+                            }
                         }
-                        None => {
-                            log::warn!(
-                                "failed to parse {}: invalid Desktop Entry/Exec",
-                                path.display()
-                            );
-                        }
-                    },
+                    }
                     None => {
                         log::warn!(
                             "failed to parse {}: missing Desktop Entry/Exec",
@@ -1177,14 +1188,14 @@ impl App {
             entity.id()
         };
 
-        (
-            entity,
-            Task::batch([
-                self.update_title(),
-                self.update_watcher(),
-                self.update_tab(entity, location, selection_paths),
-            ]),
-        )
+        let mut tasks = Vec::with_capacity(4);
+        if activate {
+            tasks.push(task::widget(unfocus()));
+        }
+        tasks.push(self.update_title());
+        tasks.push(self.update_watcher());
+        tasks.push(self.update_tab(entity, location, selection_paths));
+        (entity, Task::batch(tasks))
     }
 
     fn open_tab(
@@ -1252,31 +1263,28 @@ impl App {
             .insert(id, (operation.clone(), controller.clone()));
 
         // Use a task to send operations to the compio runtime thread.
-        cosmic::Task::stream(cosmic::iced_futures::stream::channel(
-            4,
-            move |msg_tx| async move {
-                let (tx, rx) = tokio::sync::oneshot::channel();
+        cosmic::Task::stream(cosmic::iced::stream::channel(4, move |msg_tx| async move {
+            let (tx, rx) = tokio::sync::oneshot::channel();
 
-                let msg_tx = Arc::new(tokio::sync::Mutex::new(msg_tx));
+            let msg_tx = Arc::new(tokio::sync::Mutex::new(msg_tx));
 
-                let msg_tx_clone = msg_tx.clone();
+            let msg_tx_clone = msg_tx.clone();
 
-                _ = compio_tx
-                    .send(Box::pin(async move {
-                        let msg = match operation.perform(&msg_tx_clone, controller).await {
-                            Ok(result_paths) => Message::PendingComplete(id, result_paths),
-                            Err(err) => Message::PendingError(id, err),
-                        };
+            _ = compio_tx
+                .send(Box::pin(async move {
+                    let msg = match operation.perform(&msg_tx_clone, controller).await {
+                        Ok(result_paths) => Message::PendingComplete(id, result_paths),
+                        Err(err) => Message::PendingError(id, err),
+                    };
 
-                        _ = tx.send(msg);
-                    }))
-                    .await;
+                    _ = tx.send(msg);
+                }))
+                .await;
 
-                if let Ok(msg) = rx.await {
-                    let _ = msg_tx.lock().await.send(msg).await;
-                }
-            },
-        ))
+            if let Ok(msg) = rx.await {
+                let _ = msg_tx.lock().await.send(msg).await;
+            }
+        }))
         .map(cosmic::Action::App)
     }
 
@@ -1384,7 +1392,7 @@ impl App {
         // Manually rescan any trash tabs after any operation is completed
         commands.push(self.rescan_trash());
 
-        return Task::batch(commands);
+        Task::batch(commands)
     }
 
     fn handle_operation_errors(&mut self, errors: Vec<(u64, OperationError)>) -> Task<Message> {
@@ -1429,7 +1437,7 @@ impl App {
         }
         // Manually rescan any trash tabs after any operation is completed
         tasks.push(self.rescan_trash());
-        return Task::batch(tasks);
+        Task::batch(tasks)
     }
 
     fn remove_window(&mut self, id: &window::Id) {
@@ -1754,6 +1762,8 @@ impl App {
             if let Some(path) = favorite.path_opt() {
                 let name = if matches!(favorite, Favorite::Home) {
                     fl!("home")
+                } else if let Favorite::Network { name, .. } = favorite {
+                    name.clone()
                 } else if let Some(file_name) = path.file_name().and_then(|x| x.to_str()) {
                     file_name.to_string()
                 } else {
@@ -1782,7 +1792,7 @@ impl App {
 
         nav_model = nav_model.insert(|b| {
             b.text(fl!("trash"))
-                .icon(icon::icon(tab::trash_helpers::trash_icon_symbolic(16)))
+                .icon(icon::icon(Trash::icon_symbolic(16)))
                 .data(Location::Trash)
                 .divider_above()
         });
@@ -1929,7 +1939,7 @@ impl App {
     fn network_drive(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxs, space_m, ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
         let mut table = widget::column::with_capacity(8);
         for (i, line) in fl!("network-drive-schemes").lines().enumerate() {
             let mut row = widget::row::with_capacity(2);
@@ -1960,25 +1970,23 @@ impl App {
     fn desktop_view_options(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_m, space_l, ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
         let config = self.config.desktop;
 
-        let mut column = widget::column::with_capacity(2);
-
-        let mut section = widget::settings::section().title(fl!("show-on-desktop"));
-        section = section.add(
-            widget::settings::item::builder(fl!("desktop-folder-content")).toggler(
-                config.show_content,
-                move |show_content| {
-                    Message::DesktopConfig(DesktopConfig {
-                        show_content,
-                        ..config
-                    })
-                },
-            ),
-        );
-        section = section.add(
-            widget::settings::item::builder(fl!("mounted-drives")).toggler(
+        let show_on_desktop = settings::section()
+            .title(fl!("show-on-desktop"))
+            .add(
+                settings::item::builder(fl!("desktop-folder-content")).toggler(
+                    config.show_content,
+                    move |show_content| {
+                        Message::DesktopConfig(DesktopConfig {
+                            show_content,
+                            ..config
+                        })
+                    },
+                ),
+            )
+            .add(settings::item::builder(fl!("mounted-drives")).toggler(
                 config.show_mounted_drives,
                 move |show_mounted_drives| {
                     Message::DesktopConfig(DesktopConfig {
@@ -1986,10 +1994,8 @@ impl App {
                         ..config
                     })
                 },
-            ),
-        );
-        section = section.add(
-            widget::settings::item::builder(fl!("trash-folder-icon")).toggler(
+            ))
+            .add(settings::item::builder(fl!("trash-folder-icon")).toggler(
                 config.show_trash,
                 move |show_trash| {
                     Message::DesktopConfig(DesktopConfig {
@@ -1997,50 +2003,49 @@ impl App {
                         ..config
                     })
                 },
-            ),
-        );
-        column = column.push(section);
+            ));
 
-        let mut section = widget::settings::section().title(fl!("icon-size-and-spacing"));
         let icon_size = config.icon_size;
-        section = section.add(
-            widget::settings::item::builder(fl!("icon-size"))
-                .description(format!("{icon_size}%"))
-                .control(
-                    widget::slider(50..=500, icon_size.get(), move |new_value| {
-                        Message::DesktopConfig(DesktopConfig {
-                            icon_size: NonZeroU16::new(new_value).unwrap_or(icon_size),
-                            ..config
-                        })
-                    })
-                    .step(25u16),
-                ),
-        );
-
         let grid_spacing = config.grid_spacing;
-        section = section.add(
-            widget::settings::item::builder(fl!("grid-spacing"))
-                .description(format!("{grid_spacing}%"))
-                .control(
-                    widget::slider(50..=500, grid_spacing.get(), move |new_value| {
-                        Message::DesktopConfig(DesktopConfig {
-                            grid_spacing: NonZeroU16::new(new_value).unwrap_or(grid_spacing),
-                            ..config
+        let icon_size_and_spacing = settings::section()
+            .title(fl!("icon-size-and-spacing"))
+            .add(
+                settings::item::builder(fl!("icon-size"))
+                    .description(format!("{icon_size}%"))
+                    .control(
+                        widget::slider(50..=500, icon_size.get(), move |new_value| {
+                            Message::DesktopConfig(DesktopConfig {
+                                icon_size: NonZeroU16::new(new_value).unwrap_or(icon_size),
+                                ..config
+                            })
                         })
-                    })
-                    .step(25u16),
-                ),
-        );
-        column = column.push(section);
+                        .step(25u16),
+                    ),
+            )
+            .add(
+                settings::item::builder(fl!("grid-spacing"))
+                    .description(format!("{grid_spacing}%"))
+                    .control(
+                        widget::slider(50..=500, grid_spacing.get(), move |new_value| {
+                            Message::DesktopConfig(DesktopConfig {
+                                grid_spacing: NonZeroU16::new(new_value).unwrap_or(grid_spacing),
+                                ..config
+                            })
+                        })
+                        .step(25u16),
+                    ),
+            );
 
-        column
+        widget::column::with_capacity(2)
             .padding([0, space_l, space_l, space_l])
             .spacing(space_m)
+            .push(show_on_desktop)
+            .push(icon_size_and_spacing)
             .into()
     }
 
     fn edit_history(&self) -> Element<'_, Message> {
-        let cosmic_theme::Spacing { space_m, .. } = theme::active().cosmic().spacing;
+        let cosmic_theme::Spacing { space_m, .. } = theme::spacing();
 
         let mut children = Vec::new();
 
@@ -2053,7 +2058,8 @@ impl App {
                 let progress = controller.progress();
                 section = section.add(widget::column::with_children([
                     widget::row::with_children([
-                        widget::progress_bar(0.0..=1.0, progress)
+                        widget::determinate_linear(progress)
+                            .width(Length::Fill)
                             .girth(progress_bar_height)
                             .into(),
                         if controller.is_paused() {
@@ -2131,7 +2137,7 @@ impl App {
         kind: &'a PreviewKind,
         context_drawer: bool,
     ) -> Element<'a, tab::Message> {
-        let cosmic_theme::Spacing { space_l, .. } = theme::active().cosmic().spacing;
+        let cosmic_theme::Spacing { space_l, .. } = theme::spacing();
 
         let mut children = Vec::with_capacity(1);
         let entity = entity_opt.unwrap_or_else(|| self.tab_model.active());
@@ -2201,8 +2207,8 @@ impl App {
         let tab_config = self.config.tab;
 
         // TODO: Should dialog be updated here too?
-        widget::settings::view_column(vec![
-            widget::settings::section()
+        settings::view_column(vec![
+            settings::section()
                 .title(fl!("appearance"))
                 .add({
                     let app_theme_selected = match self.config.app_theme {
@@ -2210,7 +2216,7 @@ impl App {
                         AppTheme::Light => 2,
                         AppTheme::System => 0,
                     };
-                    widget::settings::item::builder(fl!("theme")).control(widget::dropdown(
+                    settings::item::builder(fl!("theme")).control(widget::dropdown(
                         &self.app_themes,
                         Some(app_theme_selected),
                         move |index| {
@@ -2223,31 +2229,32 @@ impl App {
                     ))
                 })
                 .into(),
-            widget::settings::section()
+            settings::section()
                 .title(fl!("type-to-search"))
-                .add(widget::radio(
-                    widget::text::body(fl!("type-to-search-recursive")),
-                    TypeToSearch::Recursive,
-                    Some(self.config.type_to_search),
-                    Message::SetTypeToSearch,
-                ))
-                .add(widget::radio(
-                    widget::text::body(fl!("type-to-search-enter-path")),
-                    TypeToSearch::EnterPath,
-                    Some(self.config.type_to_search),
-                    Message::SetTypeToSearch,
-                ))
-                .add(widget::radio(
-                    widget::text::body(fl!("type-to-search-select")),
+                .add(
+                    settings::item::builder(fl!("type-to-search-recursive")).radio(
+                        TypeToSearch::Recursive,
+                        Some(self.config.type_to_search),
+                        Message::SetTypeToSearch,
+                    ),
+                )
+                .add(
+                    settings::item::builder(fl!("type-to-search-enter-path")).radio(
+                        TypeToSearch::EnterPath,
+                        Some(self.config.type_to_search),
+                        Message::SetTypeToSearch,
+                    ),
+                )
+                .add(settings::item::builder(fl!("type-to-search-select")).radio(
                     TypeToSearch::SelectByPrefix,
                     Some(self.config.type_to_search),
                     Message::SetTypeToSearch,
                 ))
                 .into(),
-            widget::settings::section()
+            settings::section()
                 .title(fl!("other"))
                 .add({
-                    widget::settings::item::builder(fl!("single-click")).toggler(
+                    settings::item::builder(fl!("single-click")).toggler(
                         tab_config.single_click,
                         move |single_click| {
                             Message::TabConfig(TabConfig {
@@ -2258,7 +2265,7 @@ impl App {
                     )
                 })
                 .add({
-                    widget::settings::item::builder(fl!("show-recents"))
+                    settings::item::builder(fl!("show-recents"))
                         .toggler(self.config.show_recents, Message::SetShowRecents)
                 })
                 .into(),
@@ -2595,6 +2602,28 @@ impl Application for App {
                 NavMenuAction::OpenInNewWindow(entity),
             ));
         }
+        if let Some(path) = location_opt.and_then(Location::path_opt) {
+            let selected_dir = usize::from(path.is_dir());
+            let action_items: Vec<_> = self
+                .config
+                .context_actions
+                .iter()
+                .enumerate()
+                .filter(|(_, action)| action.matches_selection(1, selected_dir))
+                .map(|(i, action)| {
+                    cosmic::widget::menu::Item::Button(
+                        action.name.clone(),
+                        None,
+                        NavMenuAction::RunContextAction(entity, i),
+                    )
+                })
+                .collect();
+
+            if !action_items.is_empty() {
+                items.push(cosmic::widget::menu::Item::Divider);
+                items.extend(action_items);
+            }
+        }
         items.push(cosmic::widget::menu::Item::Divider);
         if matches!(location_opt, Some(Location::Path(..))) {
             items.push(cosmic::widget::menu::Item::Button(
@@ -2620,9 +2649,7 @@ impl Application for App {
             ));
         }
 
-        if matches!(location_opt, Some(Location::Trash))
-            && !trash::os_limited::is_empty().unwrap_or(true)
-        {
+        if matches!(location_opt, Some(Location::Trash)) && !Trash::is_empty() {
             items.push(cosmic::widget::menu::Item::Button(
                 fl!("empty-trash"),
                 None,
@@ -2923,10 +2950,12 @@ impl Application for App {
             Message::Config(config) => {
                 if config != self.config {
                     log::info!("update config");
-                    // Show details is preserved for existing instances
+                    // Show details and military time are preserved for existing instances
                     let show_details = self.config.show_details;
+                    let military_time = self.config.tab.military_time;
                     self.config = config;
                     self.config.show_details = show_details;
+                    self.config.tab.military_time = military_time;
                     return self.update_config();
                 }
             }
@@ -3187,6 +3216,9 @@ impl Application for App {
                                 Operation::NewFile { path }
                             }));
                         }
+                        DialogPage::RunContextAction { action, paths } => {
+                            context_action::run(&self.config.context_actions, action, &paths);
+                        }
                         DialogPage::OpenWith {
                             path,
                             mime,
@@ -3320,7 +3352,7 @@ impl Application for App {
                     return dialog.update(dialog_message);
                 }
             }
-            Message::Key(window_id, modifiers, key, text) => {
+            Message::Key(window_id, modifiers, key, physical_key, text) => {
                 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
                 let in_surface_ids = self.surface_ids.values().any(|id| *id == window_id);
                 #[cfg(not(all(feature = "wayland", feature = "desktop-applet")))]
@@ -3328,7 +3360,7 @@ impl Application for App {
                 if self.core.main_window_id() == Some(window_id) || in_surface_ids {
                     let entity = self.tab_model.active();
                     for (key_bind, action) in &self.key_binds {
-                        if key_bind.matches(modifiers, &key) {
+                        if key_bind.matches(modifiers, &key, Some(&physical_key)) {
                             return self.update(action.message(Some(entity)));
                         }
                     }
@@ -3852,6 +3884,24 @@ impl Application for App {
                     // Use cached clipboard data if available (needed for Wayland popups)
                     match &self.clipboard_cache {
                         ClipboardCache::Files(contents) => {
+                            if contents.paths.is_empty() {
+                                return iced::Task::future(tokio::time::sleep(
+                                    std::time::Duration::from_millis(300),
+                                ))
+                                .discard()
+                                .chain(
+                                    clipboard::read_data::<ClipboardPaste>().map(
+                                        move |contents_opt| match contents_opt {
+                                            Some(contents) => cosmic::action::app(
+                                                Message::PasteContents(to.clone(), contents),
+                                            ),
+                                            None => {
+                                                cosmic::action::app(Message::PasteImage(to.clone()))
+                                            }
+                                        },
+                                    ),
+                                );
+                            }
                             return self
                                 .update(Message::PasteContents(to.clone(), contents.clone()));
                         }
@@ -3999,9 +4049,12 @@ impl Application for App {
                 // Check if clipboard has any paste-able content and cache it
                 return clipboard::read_data::<ClipboardPaste>().map(|contents_opt| {
                     match contents_opt {
-                        Some(contents) if !contents.paths.is_empty() => cosmic::action::app(
-                            Message::ClipboardCached(ClipboardCache::Files(contents)),
+                        Some(contents) if contents.paths.is_empty() => cosmic::action::app(
+                            Message::RetryCheckClipboard(ClipboardCache::Files(contents)),
                         ),
+                        Some(contents) => cosmic::action::app(Message::ClipboardCached(
+                            ClipboardCache::Files(contents),
+                        )),
                         _ => cosmic::action::app(Message::CheckClipboardImage),
                     }
                 });
@@ -4033,6 +4086,28 @@ impl Application for App {
                         None => ClipboardCache::Empty,
                     }))
                 });
+            }
+            Message::RetryCheckClipboard(cache) => {
+                let mut cmds = Vec::new();
+                cmds.push(self.update(Message::ClipboardCached(cache)));
+
+                cmds.push(
+                    iced::Task::future(tokio::time::sleep(Duration::from_millis(300)))
+                        .discard()
+                        .chain(
+                            clipboard::read_data::<ClipboardPaste>().map(|contents_opt| {
+                                match contents_opt {
+                                    Some(contents) if !contents.paths.is_empty() => {
+                                        cosmic::action::app(Message::ClipboardCached(
+                                            ClipboardCache::Files(contents),
+                                        ))
+                                    }
+                                    _ => cosmic::action::app(Message::CheckClipboardImage),
+                                }
+                            }),
+                        ),
+                );
+                return Task::batch(cmds);
             }
             Message::ClipboardCached(cache) => {
                 self.clipboard_cache = cache;
@@ -4156,10 +4231,8 @@ impl Application for App {
                         .is_some_and(|loc| matches!(loc, Location::Trash))
                 });
                 if let Some(entity) = maybe_entity {
-                    self.nav_model.icon_set(
-                        entity,
-                        icon::icon(tab::trash_helpers::trash_icon_symbolic(16)),
-                    );
+                    self.nav_model
+                        .icon_set(entity, icon::icon(Trash::icon_symbolic(16)));
                 }
 
                 return Task::batch([self.rescan_trash(), self.update_desktop()]);
@@ -4181,12 +4254,14 @@ impl Application for App {
                         .collect();
                     if !selected.is_empty() {
                         //TODO: batch rename
-                        let tasks = selected
+                        let mut last_name = String::new();
+                        let tasks: Vec<_> = selected
                             .into_iter()
                             .filter_map(|path| {
                                 let parent = path.parent()?.to_path_buf();
                                 let name = path.file_name()?.to_str()?.to_string();
                                 let dir = path.is_dir();
+                                last_name = name.clone();
                                 Some(self.dialog_pages.push_back(DialogPage::RenameItem {
                                     from: path,
                                     parent,
@@ -4194,9 +4269,15 @@ impl Application for App {
                                     dir,
                                 }))
                             })
-                            .chain(std::iter::once(widget::text_input::focus(
+                            .collect();
+                        let tasks = tasks.into_iter().chain([
+                            widget::text_input::focus(self.dialog_text_input.clone()),
+                            widget::text_input::select_until_last(
                                 self.dialog_text_input.clone(),
-                            )));
+                                &last_name,
+                                '.',
+                            ),
+                        ]);
                         return Task::batch(tasks);
                     }
                 }
@@ -4430,7 +4511,7 @@ impl Application for App {
                                     use cctk::wayland_protocols::xdg::shell::client::xdg_positioner::{
                                         Anchor, Gravity,
                                     };
-                                    use cosmic::iced_runtime::platform_specific::wayland::popup::{
+                                    use cosmic::iced::runtime::platform_specific::wayland::popup::{
                                         SctkPopupSettings, SctkPositioner,
                                     };
                                     let window_id = WindowId::unique();
@@ -4441,6 +4522,7 @@ impl Application for App {
                                             widget::Id::unique(),
                                         )),
                                     );
+                                    commands.push(self.update(Message::CheckClipboard));
                                     commands.push(self.update(Message::Surface(
                                         cosmic::surface::action::app_popup(
                                             move |app: &mut Self| -> SctkPopupSettings {
@@ -4497,6 +4579,14 @@ impl Application for App {
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }
+                        tab::Command::ClearRecents => {
+                            match recently_used_xbel::clear_recently_used() {
+                                Ok(()) => {}
+                                Err(err) => {
+                                    log::warn!("failed to clear recents history: {}", err);
+                                }
+                            }
+                        }
                         tab::Command::EmptyTrash => {
                             return self.push_dialog(
                                 DialogPage::EmptyTrash,
@@ -4506,6 +4596,25 @@ impl Application for App {
                         #[cfg(feature = "desktop")]
                         tab::Command::ExecEntryAction(entry, action) => {
                             Self::exec_entry_action(&entry, action);
+                        }
+                        tab::Command::RunContextAction(action) => {
+                            let paths: Box<[_]> = self.selected_paths(Some(entity)).collect();
+                            if let Some(preset) = self.config.context_actions.get(action) {
+                                if preset.confirm {
+                                    commands.push(self.push_dialog(
+                                        DialogPage::RunContextAction { action, paths },
+                                        Some(CONFIRM_CONTEXT_ACTION_BUTTON_ID.clone()),
+                                    ));
+                                } else {
+                                    context_action::run(
+                                        &self.config.context_actions,
+                                        action,
+                                        &paths,
+                                    );
+                                }
+                            } else {
+                                log::warn!("invalid context action index `{action}`");
+                            }
                         }
                         tab::Command::Iced(iced_command) => {
                             commands.push(iced_command.0.map(move |x| {
@@ -5014,6 +5123,30 @@ impl Application for App {
                         }
                     }
                 }
+                NavMenuAction::RunContextAction(entity, action) => {
+                    if let Some(path) = self
+                        .nav_model
+                        .data::<Location>(entity)
+                        .and_then(Location::path_opt)
+                        .cloned()
+                    {
+                        let paths = vec![path];
+                        if let Some(preset) = self.config.context_actions.get(action) {
+                            if preset.confirm {
+                                return self.push_dialog(
+                                    DialogPage::RunContextAction {
+                                        action,
+                                        paths: paths.into_boxed_slice(),
+                                    },
+                                    Some(CONFIRM_CONTEXT_ACTION_BUTTON_ID.clone()),
+                                );
+                            }
+                            context_action::run(&self.config.context_actions, action, &paths);
+                        } else {
+                            log::warn!("invalid context action index `{action}`");
+                        }
+                    }
+                }
                 NavMenuAction::OpenInNewTab(entity) => {
                     let open_task = match self.nav_model.data::<Location>(entity) {
                         Some(Location::Network(uri, display_name, path)) => self.open_tab(
@@ -5085,7 +5218,7 @@ impl Application for App {
                             Ok(item) => {
                                 self.context_page = ContextPage::Preview(
                                     None,
-                                    PreviewKind::Custom(PreviewItem(item)),
+                                    PreviewKind::Custom(PreviewItem(Box::new(item))),
                                 );
                                 self.set_show_context(true);
                             }
@@ -5264,7 +5397,11 @@ impl Application for App {
                     };
                 }
                 // Check clipboard when window gains focus
-                return self.update(Message::CheckClipboard);
+                // HACK: Wait a moment for the data to be available.
+                return cosmic::task::future(async {
+                    _ = tokio::time::sleep(Duration::from_millis(300)).await;
+                    cosmic::action::app(Message::CheckClipboard)
+                });
             }
             Message::Surface(action) => {
                 return cosmic::task::message(cosmic::Action::Cosmic(
@@ -5388,7 +5525,7 @@ impl Application for App {
 
         let cosmic_theme::Spacing {
             space_xxs, space_s, ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let dialog = match dialog_page {
             DialogPage::Compress {
@@ -5527,7 +5664,7 @@ impl Application for App {
             }
             DialogPage::FailedOperations(ids) => {
                 let errors: Vec<String> = ids
-                    .into_iter()
+                    .iter()
                     .filter_map(|id| match self.failed_operations.get(id) {
                         Some((operation, _, err)) => Some(format!("{operation:#?}\n{err}")),
                         _ => None,
@@ -5790,6 +5927,26 @@ impl Application for App {
                         .spacing(space_xxs),
                     )
             }
+            DialogPage::RunContextAction { action, paths } => {
+                let name = self
+                    .config
+                    .context_actions
+                    .get(*action)
+                    .map_or_else(|| fl!("context-action"), |preset| preset.name.clone());
+
+                widget::dialog()
+                    .title(fl!("context-action-confirm-title", name = name))
+                    .body(fl!("context-action-confirm-warning", items = paths.len()))
+                    .icon(icon::from_name("dialog-error").size(64))
+                    .primary_action(
+                        widget::button::suggested(fl!("run"))
+                            .on_press(Message::DialogComplete)
+                            .id(CONFIRM_CONTEXT_ACTION_BUTTON_ID.clone()),
+                    )
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    )
+            }
             DialogPage::OpenWith {
                 path,
                 mime,
@@ -5986,7 +6143,7 @@ impl Application for App {
 
                 dialog
                     .primary_action(
-                        widget::button::suggested(fl!("rename"))
+                        widget::button::suggested(fl!("rename-confirm"))
                             .on_press_maybe(complete_maybe.clone()),
                     )
                     .secondary_action(
@@ -6002,6 +6159,7 @@ impl Application for App {
                             .into(),
                             widget::text_input("", name.as_str())
                                 .id(self.dialog_text_input.clone())
+                                .double_click_select_delimiter('.')
                                 .on_input(move |name| {
                                     Message::DialogUpdate(DialogPage::RenameItem {
                                         from: from.clone(),
@@ -6129,7 +6287,7 @@ impl Application for App {
 
         let cosmic_theme::Spacing {
             space_xs, space_s, ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let mut title = String::new();
         let mut total_progress = 0.0;
@@ -6177,8 +6335,9 @@ impl Application for App {
 
         //TODO: get height from theme?
         let progress_bar_height = Length::Fixed(4.0);
-        let progress_bar =
-            widget::progress_bar(0.0..=1.0, total_progress).girth(progress_bar_height);
+        let progress_bar = widget::determinate_linear(total_progress)
+            .width(Length::Fill)
+            .girth(progress_bar_height);
 
         let container = widget::layer_container(widget::column::with_children([
             widget::row::with_children([
@@ -6285,7 +6444,7 @@ impl Application for App {
     fn view(&self) -> Element<'_, Self::Message> {
         let cosmic_theme::Spacing {
             space_xxs, space_s, ..
-        } = theme::active().cosmic().spacing;
+        } = theme::spacing();
 
         let mut tab_column = widget::column::with_capacity(4);
 
@@ -6335,6 +6494,7 @@ impl Application for App {
                     &self.key_binds,
                     &self.modifiers,
                     self.clipboard_has_content(),
+                    &self.config.context_actions,
                 )
                 .map(move |message| Message::TabMessage(Some(entity), message));
             tab_column = tab_column.push(tab_view);
@@ -6363,6 +6523,7 @@ impl Application for App {
                                 &self.key_binds,
                                 &window.modifiers,
                                 self.clipboard_has_content(),
+                                &self.config.context_actions,
                             )
                             .map(|x| Message::TabMessage(Some(*entity), x)),
                             id.clone(),
@@ -6380,6 +6541,7 @@ impl Application for App {
                                 &self.key_binds,
                                 &window.modifiers,
                                 self.clipboard_has_content(),
+                                &self.config.context_actions,
                             )
                             .map(move |message| Message::TabMessage(Some(*entity), message)),
                         None => widget::space::vertical().into(),
@@ -6472,11 +6634,14 @@ impl Application for App {
                 },
                 Event::Keyboard(KeyEvent::KeyPressed {
                     key,
+                    physical_key,
                     modifiers,
                     text,
                     ..
                 }) => match status {
-                    event::Status::Ignored => Some(Message::Key(window_id, modifiers, key, text)),
+                    event::Status::Ignored => {
+                        Some(Message::Key(window_id, modifiers, key, physical_key, text))
+                    }
                     event::Status::Captured => None,
                 },
                 Event::Keyboard(KeyEvent::ModifiersChanged(modifiers)) => {
@@ -6641,14 +6806,7 @@ impl Application for App {
                             },
                         );
 
-                        // TODO: Trash watching support for Windows, macOS, and other OSes
-                        #[cfg(all(
-                            unix,
-                            not(target_os = "macos"),
-                            not(target_os = "ios"),
-                            not(target_os = "android")
-                        ))]
-                        match (watcher_res, trash::os_limited::trash_folders()) {
+                        match (watcher_res, Trash::folders()) {
                             (Ok(mut watcher), Ok(trash_bins)) => {
                                 // Watch the "bins" themselves as well as the files folder where
                                 // trashed items are placed. This allows us to avoid recursively
@@ -6805,8 +6963,7 @@ impl Application for App {
                         |_| {
                             stream::channel(
                                 1,
-                                move |msg_tx: futures::channel::mpsc::Sender<_>| async move {
-                                    let msg_tx = Arc::new(tokio::sync::Mutex::new(msg_tx));
+                                move |mut msg_tx: futures::channel::mpsc::Sender<_>| async move {
                                     tokio::task::spawn_blocking(move || {
                                         match notify_rust::Notification::new()
                                             .summary(&fl!("notification-in-progress"))
@@ -6816,8 +6973,6 @@ impl Application for App {
                                             Ok(notification) => {
                                                 let _ = futures::executor::block_on(async {
                                                     msg_tx
-                                                        .lock()
-                                                        .await
                                                         .send(Message::Notification(Arc::new(
                                                             Mutex::new(notification),
                                                         )))
@@ -6884,21 +7039,17 @@ impl Application for App {
 // Ideally, tests would use the cap-std crate which limits path traversal.
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use std::{
-        cmp::Ordering,
-        fs::File,
-        io::{self, Write},
-        iter,
-        path::Path,
-    };
+    use std::cmp::Ordering;
+    use std::fs::File;
+    use std::io::{self, Write};
+    use std::iter;
+    use std::path::Path;
 
     use log::{debug, trace};
     use tempfile::{TempDir, tempdir};
 
-    use crate::{
-        config::{IconSizes, TabConfig, ThumbCfg},
-        tab::Item,
-    };
+    use crate::config::{IconSizes, TabConfig, ThumbCfg};
+    use crate::tab::Item;
 
     use super::*;
 
