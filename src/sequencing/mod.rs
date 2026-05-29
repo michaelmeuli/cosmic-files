@@ -11,6 +11,8 @@ pub use rrl::RrlSnpCall;
 use erm41::Erm41Position28;
 pub use erm41::Erm41LofCall;
 
+use crate::{operation::recursive::Op, sequencing::rrl::rrlPosition_2057_2058};
+
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
@@ -724,6 +726,8 @@ pub struct SeqIdHit {
     pub alignment_offset: isize,
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41position28_opt: Option<Erm41Position28>,
+    /// rrl position 2057 2058 call; `None` for non-rrl targets.
+    pub rrl_position_2057_2058_opt: Option<rrlPosition_2057_2058>,
     /// Full reference sequence for this hit (used for pairwise display).
     pub ref_seq: Vec<u8>,
 }
