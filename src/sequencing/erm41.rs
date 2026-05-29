@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Erm41Position28 {
     C28,          // Cytosine — reference allele in some strains
     T28,          // Thymine  — inducible macrolide resistance (ATCC 19977 type)
@@ -368,7 +368,7 @@ pub(super) fn find_erm41_display_window(
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, ERM41_FWD_START, ERM41_FWD_END);
     let rc = reverse_complement(query);
-    let erm41_pos28 = Erm41Position28::from_single_read(query);
+    let erm41_position_28 = Erm41Position28::from_single_read(query);
 
     let refs: &[(&str, &str, &str)] = &[
         (
@@ -416,7 +416,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 erm41_snp_calls,
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
-                erm41position28_opt: Some(erm41_pos28.clone()),
+                erm41_position_28_opt: Some(erm41_position_28),
                 rrl_position_2057_2058_opt: None,
                 ref_seq: refseq,
             }

@@ -952,7 +952,7 @@ pub fn item_from_entry(
 
     let is_susceptible = sequence_opt.as_ref().and_then(|s| {
         let hit = s.seq_id_hits.first()?;
-        let pos = hit.erm41position28_opt.as_ref()?;
+        let pos = hit.erm41_position_28_opt.as_ref()?;
         is_susceptible_erm41(pos, &hit.erm41_snp_calls)
     });
 
@@ -2313,7 +2313,7 @@ impl ItemMetadata {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .and_then(|s| s.seq_id_hits.first()?.erm41position28_opt.clone())
+                .and_then(|s| s.seq_id_hits.first()?.erm41_position_28_opt.clone())
                 .unwrap_or(Erm41Position28::Undetermined),
             _ => Erm41Position28::Undetermined,
         }

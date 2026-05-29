@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum rrlPosition_2057_2058 {
     SusceptibleWildtype, // A2057 and A2058
     ResistanceConferringMutation, // Any mutation at 2057 or 2058 that is not wildtype.
@@ -261,8 +261,8 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 erm41_snp_calls: vec![],
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
-                erm41position28_opt: None,
-                rrl_position_2057_2058_opt: Some(rrl_position_2057_2058.clone()),
+                erm41_position_28_opt: None,
+                rrl_position_2057_2058_opt: Some(rrl_position_2057_2058),
                 ref_seq: refseq,
             }
         })
