@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
-      "Bash(cargo search *)"
+      "Bash(cargo search *)",
+      "Bash(Get-Content \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\src\\\\sequencing\\\\rrs.rs\")"
     ]
   }
 }

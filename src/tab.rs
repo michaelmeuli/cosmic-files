@@ -64,7 +64,7 @@ use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
 use crate::sequencing::{
-    Ab1Channels, SeqData, SeqIdHit, SpeciesHit,
+    Ab1Channels, SeqData, SeqIdHit,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
@@ -2067,7 +2067,7 @@ pub enum Command {
     Iced(TaskWrapper),
     OpenFile(Vec<PathBuf>),
     OpenSeqAlignment(Box<SeqIdHit>),
-    OpenSpeciesAlignment(Box<SpeciesHit>),
+    OpenSpeciesAlignment(Box<SeqIdHit>),
     OpenInNewTab(PathBuf),
     OpenUriInNewTab(String, String, Option<PathBuf>),
     OpenInNewWindow(PathBuf),
@@ -2157,7 +2157,7 @@ pub enum Message {
     DirectorySize(PathBuf, DirSize),
     ImageDecoded(PathBuf, u32, u32, Vec<u8>, Option<(u32, u32)>, u64), // path, width, height, pixels, display_size, generation
     OpenSeqAlignment(Box<SeqIdHit>),
-    OpenSpeciesAlignment(Box<SpeciesHit>),
+    OpenSpeciesAlignment(Box<SeqIdHit>),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -2340,7 +2340,7 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_species_hits(&self) -> &[SpeciesHit] {
+    pub fn ab1_species_hits(&self) -> &[SeqIdHit] {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
