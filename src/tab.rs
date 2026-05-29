@@ -9329,6 +9329,15 @@ mod tests {
         let item_metadata = ItemMetadata::Path {
             metadata,
             children_opt: None,
+            tbprofilerjson_opt: None,
+            is_ab1: false,
+            sequence_opt: None,
+            is_tbprofiler_result_as_sample: false,
+            is_tbprofiler_groupable_raw_result_file: false,
+            sample_json_path_opt: None,
+            sample_csv_path_opt: None,
+            sample_docx_path_opt: None,
+            is_susceptible: None,
         };
         let thumb = ItemThumbnail::new(
             &path,
@@ -9355,6 +9364,15 @@ mod tests {
         let item_metadata = ItemMetadata::Path {
             metadata,
             children_opt: None,
+            tbprofilerjson_opt: None,
+            is_ab1: false,
+            sequence_opt: None,
+            is_tbprofiler_result_as_sample: false,
+            is_tbprofiler_groupable_raw_result_file: false,
+            sample_json_path_opt: None,
+            sample_csv_path_opt: None,
+            sample_docx_path_opt: None,
+            is_susceptible: None,
         };
         let thumb = ItemThumbnail::new(
             &path,
@@ -9382,6 +9400,15 @@ mod tests {
         let item_metadata = ItemMetadata::Path {
             metadata,
             children_opt: None,
+            tbprofilerjson_opt: None,
+            is_ab1: false,
+            sequence_opt: None,
+            is_tbprofiler_result_as_sample: false,
+            is_tbprofiler_groupable_raw_result_file: false,
+            sample_json_path_opt: None,
+            sample_csv_path_opt: None,
+            sample_docx_path_opt: None,
+            is_susceptible: None,
         };
         let thumb = ItemThumbnail::new(
             &path,
