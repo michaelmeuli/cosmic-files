@@ -127,53 +127,6 @@ pub(crate) fn parse_fasta_seq(fasta: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Parse a FASTA string into `(accession, description, sequence_bytes)`.
-pub(crate) fn parse_fasta(fasta: &str) -> (String, String, Vec<u8>) {
-    let mut accession = String::new();
-    let mut description = String::new();
-    let mut seq: Vec<u8> = Vec::new();
-    for line in fasta.lines() {
-        if let Some(rest) = line.strip_prefix('>') {
-            let parts: Vec<&str> = rest.splitn(4, '|').collect();
-            if parts.len() >= 2 {
-                // Pipe-delimited NCBI format: >db|accession|description...
-                accession = parts[1].to_string();
-                description = parts
-                    .get(2)
-                    .and_then(|s| s.split_once(' ').map(|x| x.1))
-                    .map(|s| {
-                        let mut words = s.splitn(3, ' ');
-                        let genus = words.next().unwrap_or("");
-                        let species = words.next().unwrap_or("");
-                        format!("{} {}", genus, species)
-                    })
-                    .unwrap_or_default();
-            } else {
-                // Modern NCBI format: >AF547836.1 Mycobacterium gastri ...
-                let mut words = rest.splitn(2, ' ');
-                let acc_field = words.next().unwrap_or("");
-                accession = acc_field
-                    .rsplit_once('.')
-                    .map(|(base, _)| base)
-                    .unwrap_or(acc_field)
-                    .to_string();
-                description = words
-                    .next()
-                    .map(|s| {
-                        let mut ws = s.splitn(3, ' ');
-                        let genus = ws.next().unwrap_or("");
-                        let species = ws.next().unwrap_or("");
-                        format!("{} {}", genus, species)
-                    })
-                    .unwrap_or_default();
-            }
-        } else {
-            seq.extend(line.bytes().filter(|b| b.is_ascii_alphabetic()));
-        }
-    }
-    (accession, description, seq)
-}
-
 /// Parse a multi-FASTA string into `(accession, description, sequence)` tuples.
 fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
     let mut result = Vec::new();
