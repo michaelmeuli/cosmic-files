@@ -44,6 +44,7 @@ fn call_kansasii_gastri_snps(query: &[u8], alignment_offset: isize) -> Vec<Kansa
         .collect()
 }
 
+/// Call diagnostic SNPs that distinguish *M. marinum* from *M. ulcerans* at known hsp65 positions.
 fn call_marinum_ulcerans_snps(
     query: &[u8],
     alignment_offset: isize,
@@ -67,6 +68,12 @@ fn call_marinum_ulcerans_snps(
         .collect()
 }
 
+/// Trim hsp65 amplification primers from a sequencing read.
+///
+/// Unlike [`trim_start_end`](super::trim_start_end), which takes a single primer per boundary,
+/// hsp65 amplification uses two alternative primer pairs (Telenti and Patel sets), so each
+/// boundary is defined by a *set* of candidates — the earliest match wins for the start and the
+/// latest for the end.
 pub fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
     const FWD_START: &[&[u8]] = &[b"ATGGTGTGTCCATCGCCAAG", b"GAGGACCCGTACGAGAAGATCGGCGCTGA"];
     const FWD_END: &[&[u8]] = &[b"GAGCTCACCGAGGGTATGCG", b"CGCTGTCCACCCTGGTCGTC"];

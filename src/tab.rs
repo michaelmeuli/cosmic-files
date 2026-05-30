@@ -66,10 +66,9 @@ use crate::russh::CLIENTS;
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
-    hsp65::identify_sequence_hsp65,
-    identify_species_16s, identify_species_23s_ntm, identify_species_erm41, identify_species_hsp65,
-    identify_species_rpob, parse_ab1_quality, parse_ab1_sequence,
+    hsp65::identify_sequence_hsp65, parse_ab1_quality, parse_ab1_sequence,
     rrl::identify_sequence_rrl_ntm,
+    rrs::identify_sequence_16s,
     tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
     trim_to_min_quality,
 };
@@ -888,7 +887,7 @@ pub fn item_from_entry(
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
-            let (seq_id_hits, species_hits, trimmed_length, trimmed_avg_quality_opt) =
+            let (seq_id_hits, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let trimmed: &[u8] = match &ab1_qual {
                         Some(qual) => trim_to_min_quality(seq, qual, 10),
@@ -912,36 +911,23 @@ pub fn item_from_entry(
                         identify_sequence_hsp65(trimmed)
                     } else if is_23s_ntm {
                         identify_sequence_rrl_ntm(trimmed)
-                    } else {
-                        Vec::new()
-                    };
-                    let species_hits = if is_hsp65 {
-                        identify_species_hsp65(trimmed)
-                    } else if is_erm41 {
-                        identify_species_erm41(trimmed)
-                    } else if is_rpob {
-                        identify_species_rpob(trimmed)
                     } else if is_16s {
-                        identify_species_16s(trimmed)
-                    } else if is_23s_ntm {
-                        identify_species_23s_ntm(trimmed)
+                        identify_sequence_16s(trimmed)
                     } else {
                         Vec::new()
                     };
                     (
                         seq_id_hits,
-                        species_hits,
                         trimmed_length,
                         trimmed_avg_quality_opt,
                     )
                 } else {
-                    (Vec::new(), Vec::new(), 0, None)
+                    (Vec::new(), 0, None)
                 };
             let chromatogram_opt = Ab1Channels::from_bytes(&bytes);
             SeqData {
                 chromatogram_opt,
                 seq_id_hits,
-                species_hits,
                 trimmed_length,
                 trimmed_avg_quality_opt,
             }
@@ -2340,16 +2326,6 @@ impl ItemMetadata {
         }
     }
 
-    pub fn ab1_species_hits(&self) -> &[SeqIdHit] {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .map(|s| s.species_hits.as_slice())
-                .unwrap_or(&[]),
-            _ => &[],
-        }
-    }
-
     pub fn is_seq_id(&self) -> bool {
         self.seq_id_hits()
             .first()
@@ -3627,7 +3603,7 @@ impl Item {
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let species_hits = self.metadata.ab1_species_hits();
+        let species_hits = self.metadata.seq_id_hits();
         if species_hits.is_empty() {
             details = details.push(widget::text::body("No species match found"));
         } else {
