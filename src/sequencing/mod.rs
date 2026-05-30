@@ -9,6 +9,9 @@
 //! [NCBI Taxonomy Database](http://www.ncbi.nlm.nih.gov/taxonomy).
 //! 
 //! See fn fetch_myco_sequences() in build.rs for details on how the sequences were fetched from NCBI at build time.
+//! 
+//! `myco_erm41.fasta` is generated at build time but unused; erm41 identification uses
+//! per-subspecies references (`erm41_abscessus_ATCC_19977.fasta`, `erm41_bolletii_CIP_108541.fasta`, `erm41_massiliense_CCUG_48898.fasta`) instead.
 
 pub mod bed;
 pub mod erm41;
@@ -17,16 +20,9 @@ pub mod rrs;
 pub mod rrl;
 pub mod tb_data;
 
-use hsp65::trim_hsp65_primers;
-pub use rrl::RrlSnpCall;
-pub use rrs::identify_sequence_16s;
-pub use hsp65::identify_sequence_hsp65;
-pub use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
-
-use erm41::Erm41Position28;
-pub use erm41::Erm41LofCall;
-
-use crate::{sequencing::rrl::rrlPosition_2057_2058};
+use erm41::{Erm41Position28, Erm41LofCall};
+use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
+use rrl::{RrlSnpCall, rrlPosition_2057_2058};
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -58,8 +54,6 @@ const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
 const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 /// rpoB reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
-/// erm(41) reference sequences — Mycobacteriaceae (all strains, no type-material filter), fetched from NCBI at build time.
-const REF_MYCO_ERM41: &str = include_str!("../../res/sequences/myco_erm41.fasta");
 /// 23S rRNA (rrl) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 
