@@ -890,7 +890,32 @@ pub fn item_from_entry(
             let (seq_id_hits, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => trim_to_min_quality(seq, qual, 10).unwrap_or(seq.as_slice()),
+                        Some(qual) => match trim_to_min_quality(seq, qual, 10) {
+                            Some(trimmed) => {
+                                let removed = seq.len() - trimmed.len();
+                                if removed > 0 {
+                                    log::info!(
+                                        "{}: quality trimming removed {} of {} bases",
+                                        path.display(),
+                                        removed,
+                                        seq.len()
+                                    );
+                                } else {
+                                    log::info!(
+                                        "{}: quality trimming removed no bases, using full sequence",
+                                        path.display()
+                                    );
+                                }
+                                trimmed
+                            }
+                            None => {
+                                log::warn!(
+                                    "{}: quality trimming found no bases above threshold, using full sequence",
+                                    path.display()
+                                );
+                                seq.as_slice()
+                            }
+                        },
                         None => seq.as_slice(),
                     };
                     let trimmed_length = trimmed.len();
