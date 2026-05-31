@@ -2357,7 +2357,7 @@ impl ItemMetadata {
             .is_some_and(|h| h.identity >= 80.0)
     }
 
-    pub fn sequence_length(&self) -> Option<usize> {
+    pub fn sequence_length_trimmed(&self) -> Option<usize> {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.trimmed_length),
             _ => None,
@@ -3409,16 +3409,16 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length() == Some(0)
+            || self.metadata.sequence_length_trimmed() == Some(0)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body("Could not align sequence to references."));
         } else {
             let best = &hits[0];
-            if let Some(sequence_length) = self.metadata.sequence_length() {
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
-                    sequence_length
+                    sequence_length_trimmed
                 )));
             }
             if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
@@ -3517,15 +3517,15 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length() == Some(0)
+            || self.metadata.sequence_length_trimmed() == Some(0)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body("Could not align sequence to references."));
         } else {
-            if let Some(sequence_length) = self.metadata.sequence_length() {
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
-                    sequence_length
+                    sequence_length_trimmed
                 )));
             }
             if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
@@ -3663,16 +3663,22 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length() == Some(0)
+            || self.metadata.sequence_length_trimmed() == Some(0)
             || !self.metadata.is_seq_id() 
         {
             details = details.push(widget::text::body("Could not align sequence to references."));
-        } else {
-            let best = &hits[0];
-            if let Some(sequence_length) = self.metadata.sequence_length() {
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
-                    sequence_length
+                    sequence_length_trimmed
+                )));
+            }
+        } else {
+            let best = &hits[0];
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length_trimmed
                 )));
             }
             details = details.push(widget::text::body(format!(
