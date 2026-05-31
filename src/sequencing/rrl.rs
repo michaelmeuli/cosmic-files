@@ -196,6 +196,34 @@ fn call_rrl_snps(
 }
 
 
+/// Locate the SNP site in a Sanger read and return the scan-coordinate window
+/// to display around it.
+///
+/// Returns `Some((start_scan, end_scan, is_reverse_complement, snp_base_idx))`
+/// or `None` if the anchor sequence cannot be found or the window falls
+/// outside the trace.
+///
+/// # How it works
+///
+/// The rrl SNP of interest sits at a fixed position relative to two flanking
+/// anchor sequences (`RRL_ANCHOR_L` on the left, `RRL_ANCHOR_R` on the right).
+/// The function tries both read orientations:
+///
+/// 1. **Forward** — searches `bases` for `RRL_ANCHOR_L`.  If found, the SNP
+///    position is the base immediately after the anchor.  A display window of
+///    9 bases to the left and 10 to the right is converted to scan coordinates
+///    via [`super::scan_window`], and `is_reverse_complement` is set to
+///    `false`.
+///
+/// 2. **Reverse-complement** — searches `bases` for the reverse complement of
+///    `RRL_ANCHOR_R`.  If found, the SNP position is again the base
+///    immediately after that match (which corresponds to the SNP on the
+///    complementary strand).  The left/right margins are swapped (10 left, 9
+///    right) so the displayed window covers the same biological region.
+///    `is_reverse_complement` is set to `true`.
+///
+/// The forward orientation is tried first; the reverse-complement is only
+/// attempted if the forward search fails.
 pub(super) fn find_rrl_ntm_display_window(
     bases: &[u8],
     peak_locs: &[u16],

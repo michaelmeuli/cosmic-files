@@ -98,8 +98,8 @@ pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'
 
 
 /// Trim leading and trailing bases whose Phred quality score is below `min_q`.
-/// Returns an empty slice if no base meets the threshold or the trimmed region is empty.
-pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8] {
+/// Returns `None` if no base meets the threshold (the caller decides the fallback).
+pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> Option<&'a [u8]> {
     let start = seq
         .iter()
         .enumerate()
@@ -115,7 +115,7 @@ pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> &'a [u8
         .map(|(i, _)| i + 1)
         .unwrap_or(0);
 
-    if start >= end { &[] } else { &seq[start..end] }
+    if start >= end { None } else { Some(&seq[start..end]) }
 }
 
 /// Parse a FASTA string, returning just the sequence bytes (ignores header).
@@ -251,7 +251,42 @@ fn kmer_hash(kmer: &[u8]) -> u64 {
     h
 }
 
-pub(crate) fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
+/// Find the best **gapless** alignment between `query` and `reference` and return
+/// `(percent_identity, offset)`.
+///
+/// # What it computes
+///
+/// The function considers only *diagonal* (shift-only, no-indel) alignments.
+/// It picks the starting offset of the shorter sequence inside the longer one
+/// that maximises the number of case-insensitive matching bases, then expresses
+/// that as a percentage of the shorter sequence's length.
+///
+/// The signed `offset` tells you how the two sequences are positioned relative
+/// to each other:
+/// - `offset > 0`: `query` is the shorter sequence and its best match starts
+///   `offset` bases into `reference` (reference extends to the left of query).
+/// - `offset < 0`: `reference` is the shorter sequence and its best match
+///   starts `|offset|` bases into `query` (query extends to the left of
+///   reference).
+/// - `offset == 0`: both sequences start at the same position, or one is
+///   empty.
+///
+/// # Algorithm (two phases)
+///
+/// **Phase 1 – Seed.**  A k-mer index (word size 11) is built over the shorter
+/// sequence.  The longer sequence is then scanned with a sliding window of the
+/// same size.  Every exact k-mer match (verified byte-by-byte to rule out hash
+/// collisions) pins a *diagonal*, i.e. a candidate offset.  This drastically
+/// reduces the number of offsets that need full scoring and makes the function
+/// sub-linear in the common case of high-identity pairs.
+///
+/// **Phase 2 – Extend.**  Each candidate diagonal is scored by counting all
+/// matching positions across the full length of the shorter sequence (not just
+/// the seed window).  If Phase 1 produced no seeds — because the sequences are
+/// shorter than the word size or share no 11-mer — the fallback is to score
+/// every possible offset exhaustively.  The offset with the highest match count
+/// wins.
+fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
     const WORD_SIZE: usize = 11;
 
     if query.is_empty() || reference.is_empty() {
@@ -329,7 +364,7 @@ pub(crate) fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
     (identity, offset)
 }
 
-pub(super) fn scan_window(
+fn scan_window(
     center: usize,
     left: usize,
     right: usize,
