@@ -722,6 +722,7 @@ impl SeqIdHit {
 pub struct SeqData {
     pub chromatogram_opt: Option<Ab1Channels>,
     pub seq_id_hits: Vec<SeqIdHit>,
+    pub length: usize,
     pub trimmed_length: usize,
     pub trimmed_avg_quality_opt: Option<f32>,
 }

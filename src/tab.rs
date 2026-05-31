@@ -66,7 +66,8 @@ use crate::russh::CLIENTS;
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
-    hsp65::identify_sequence_hsp65, parse_ab1_quality, parse_ab1_sequence,
+    hsp65::identify_sequence_hsp65,
+    parse_ab1_quality, parse_ab1_sequence,
     rrl::identify_sequence_rrl_ntm,
     rrs::identify_sequence_16s,
     tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
@@ -887,8 +888,9 @@ pub fn item_from_entry(
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
-            let (seq_id_hits, trimmed_length, trimmed_avg_quality_opt) =
+            let (seq_id_hits, length, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
+                    let length = seq.len();
                     let trimmed: &[u8] = match &ab1_qual {
                         Some(qual) => match trim_to_min_quality(seq, qual, 10) {
                             Some(trimmed) => {
@@ -943,16 +945,18 @@ pub fn item_from_entry(
                     };
                     (
                         seq_id_hits,
+                        length,
                         trimmed_length,
                         trimmed_avg_quality_opt,
                     )
                 } else {
-                    (Vec::new(), 0, None)
+                    (Vec::new(), 0, 0, None)
                 };
             let chromatogram_opt = Ab1Channels::from_bytes(&bytes);
             SeqData {
                 chromatogram_opt,
                 seq_id_hits,
+                length,
                 trimmed_length,
                 trimmed_avg_quality_opt,
             }
@@ -2357,6 +2361,13 @@ impl ItemMetadata {
             .is_some_and(|h| h.identity >= 80.0)
     }
 
+    pub fn sequence_length(&self) -> Option<usize> {
+        match self {
+            Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.length),
+            _ => None,
+        }
+    }
+
     pub fn sequence_length_trimmed(&self) -> Option<usize> {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.trimmed_length),
@@ -2364,7 +2375,7 @@ impl ItemMetadata {
         }
     }
 
-    pub fn sequence_avg_quality(&self) -> Option<f32> {
+    pub fn sequence_avg_quality_trimmed(&self) -> Option<f32> {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.trimmed_avg_quality_opt,
             _ => None,
@@ -3412,16 +3423,40 @@ impl Item {
             || self.metadata.sequence_length_trimmed() == Some(0)
             || !self.metadata.is_seq_id()
         {
-            details = details.push(widget::text::body("Could not align sequence to references."));
-        } else {
-            let best = &hits[0];
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+            details = details.push(widget::text::body(
+                "Could not align sequence to references.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
                     sequence_length_trimmed
                 )));
             }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+        } else {
+            let best = &hits[0];
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
                     avg_qual
@@ -3520,15 +3555,40 @@ impl Item {
             || self.metadata.sequence_length_trimmed() == Some(0)
             || !self.metadata.is_seq_id()
         {
-            details = details.push(widget::text::body("Could not align sequence to references."));
-        } else {
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+            details = details.push(widget::text::body(
+                "Could not align sequence to references.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
                     sequence_length_trimmed
                 )));
             }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+        } else {
+            let best = &hits[0];
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
                     avg_qual
@@ -3540,17 +3600,13 @@ impl Item {
             ));
             for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
-                    widget::button::link(format!(
-                        "{} ({:.1}%), {}",
-                        hit.description, hit.identity, hit.accession
-                    ))
-                    .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                    .padding(0),
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
                 );
             }
-            let best = &hits[0];
-            details = details.push(widget::text::body(""));
 
+            details = details.push(widget::text::body(""));
             if best.is_kansasii() || best.is_gastri() {
                 let gastri_n = best
                     .kansasii_gastri_snp_calls
@@ -3628,20 +3684,59 @@ impl Item {
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let species_hits = self.metadata.seq_id_hits();
-        if species_hits.is_empty() {
-            details = details.push(widget::text::body("No species match found"));
+        let hits = self.metadata.seq_id_hits();
+        if hits.is_empty()
+            || self.metadata.sequence_length_trimmed() == Some(0)
+            || !self.metadata.is_seq_id()
+        {
+            details = details.push(widget::text::body(
+                "Could not align sequence to references.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
         } else {
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::body("Species identification (16S database):"));
-            for hit in &species_hits[..species_hits.len().min(3)] {
+            let best = &hits[0];
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading(
+                "Species identification (16S database):",
+            ));
+            for hit in &hits[..hits.len().min(3)] {
                 details = details.push(
-                    widget::button::link(format!(
-                        "{} ({:.1}%), {}",
-                        hit.description, hit.identity, hit.accession
-                    ))
-                    .on_press(Message::OpenSpeciesAlignment(Box::new(hit.clone())))
-                    .padding(0),
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
                 );
             }
         }
@@ -3664,28 +3759,42 @@ impl Item {
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
             || self.metadata.sequence_length_trimmed() == Some(0)
-            || !self.metadata.is_seq_id() 
+            || !self.metadata.is_seq_id()
         {
-            details = details.push(widget::text::body("Could not align sequence to references."));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+            details = details.push(widget::text::body(
+                "Could not align sequence to references.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
                     "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
                     sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
                 )));
             }
         } else {
             let best = &hits[0];
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
             details = details.push(widget::text::body(format!(
                 "Sequence identity to {}: {:.1}%",
                 best.description, best.identity
             )));
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality() {
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Average quality score: {:.1}",
                     avg_qual
