@@ -63,6 +63,7 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
+use crate::sequencing::rrl::RrlPosition_2057_2058;
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
@@ -2343,6 +2344,20 @@ impl ItemMetadata {
             Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.chromatogram_opt.as_ref(),
             _ => None,
         }
+    }
+
+    pub fn rrl_position_2057_2058_call(&self) -> RrlPosition_2057_2058 {
+        match self {
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()
+                .and_then(|s| s.seq_id_hits.first()?.rrl_position_2057_2058_opt)
+                .unwrap_or(RrlPosition_2057_2058::Undetermined),
+            _ => RrlPosition_2057_2058::Undetermined,
+        }
+    }
+
+    pub fn is_rrl_position_2057_2058(&self) -> bool {
+        !matches!(self.rrl_position_2057_2058_call(), RrlPosition_2057_2058::Undetermined)
     }
 
     pub fn seq_id_hits(&self) -> &[SeqIdHit] {

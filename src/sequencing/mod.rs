@@ -22,7 +22,7 @@ pub mod tb_data;
 
 use erm41::{Erm41Position28, Erm41LofCall};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
-use rrl::{RrlSnpCall, rrlPosition_2057_2058};
+use rrl::{RrlSnpCall, RrlPosition_2057_2058};
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -583,17 +583,35 @@ impl Ab1Channels {
     }
 }
 
+/// Chromatogram display parameters for the erm(41) region.
+///
+/// Built in [`Ab1Channels::parse`] via [`erm41::find_erm41_display_window`]
+/// when [`ERM41_ANCHOR_L`] is found in the basecall sequence. Stored inside
+/// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
+/// diagnostic position 28 site.
 #[derive(Clone, Copy, Debug)]
 pub struct Erm41ViewState {
+    /// Scan-index range (inclusive start, exclusive end) of the display window.
     pub window: (u16, u16),
+    /// `true` when the reverse complement matched the anchor.
     pub is_reverse: bool,
+    /// Index into `bases` / `peak_locs` that corresponds to position 28.
     pub pos28_base_idx: u16,
 }
 
+/// Chromatogram display parameters for the rrl / NTM macrolide-resistance region.
+///
+/// Built in [`Ab1Channels::parse`] via [`rrl::find_rrl_ntm_display_window`]
+/// when [`RRL_ANCHOR_L`] is found in the basecall sequence. Stored inside
+/// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
+/// diagnostic SNP site (positions 2057–2058).
 #[derive(Clone, Copy, Debug)]
 pub struct RrlNtmViewState {
+    /// Scan-index range (inclusive start, exclusive end) of the display window.
     pub window: (u16, u16),
+    /// `true` when the reverse complement matched the anchor.
     pub is_reverse: bool,
+    /// Index into `bases` / `peak_locs` that corresponds to the SNP site.
     pub snp_base_idx: u16,
 }
 
@@ -650,7 +668,7 @@ pub struct SeqIdHit {
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41_position_28_opt: Option<Erm41Position28>,
     /// rrl position 2057 2058 call; `None` for non-rrl targets.
-    pub rrl_position_2057_2058_opt: Option<rrlPosition_2057_2058>,
+    pub rrl_position_2057_2058_opt: Option<RrlPosition_2057_2058>,
     /// Full reference sequence for this hit (used for pairwise display).
     pub ref_seq: Vec<u8>,
 }
@@ -718,6 +736,12 @@ impl SeqIdHit {
 }
 
 
+/// Top-level result for a processed AB1 read.
+///
+/// Owns the raw chromatogram and read-quality statistics, plus all
+/// [`SeqIdHit`] entries produced by aligning the read against the reference
+/// database. Each [`SeqIdHit`] carries the species identification and all
+/// downstream SNP / resistance calls for one reference match.
 #[derive(Clone, Debug)]
 pub struct SeqData {
     pub chromatogram_opt: Option<Ab1Channels>,
