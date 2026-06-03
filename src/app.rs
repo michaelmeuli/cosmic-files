@@ -416,6 +416,7 @@ pub enum Message {
     PendingPauseAll(bool),
     PermanentlyDelete(Option<Entity>),
     Preview(Option<Entity>),
+    ReloadMimeAppCache,
     ReorderTab(ReorderEvent),
     RescanRecents,
     RescanTrash,
@@ -559,7 +560,7 @@ pub enum DialogPage {
         path: PathBuf,
         mime: mime_guess::Mime,
         selected: usize,
-        store_opt: Option<MimeApp>,
+        store_opt: Option<Arc<MimeApp>>,
     },
     PermanentlyDelete {
         paths: Box<[PathBuf]>,
@@ -2273,7 +2274,7 @@ impl App {
         .into()
     }
 
-    fn get_apps_for_mime(&self, mime_type: &Mime) -> Vec<(&MimeApp, MimeAppMatch)> {
+    fn get_apps_for_mime(&self, mime_type: &Mime) -> Vec<(&Arc<MimeApp>, MimeAppMatch)> {
         let mut results = Vec::new();
 
         let mut dedupe = FxHashSet::default();
@@ -4220,6 +4221,9 @@ impl Application for App {
                 let paths: Box<[_]> = self.selected_paths(entity_opt).collect();
                 return self.operation(Operation::RemoveFromRecents { paths });
             }
+            Message::ReloadMimeAppCache => {
+                self.mime_app_cache.reload();
+            }
             Message::RescanRecents => {
                 return self.rescan_recents();
             }
@@ -5982,7 +5986,7 @@ impl Application for App {
                             widget::button::custom(
                                 widget::row::with_children([
                                     icon(app.icon.clone()).size(32).into(),
-                                    if app.is_default && !displayed_default {
+                                    if app.is_default() && !displayed_default {
                                         displayed_default = true;
                                         widget::text::body(fl!(
                                             "default-app",
@@ -6768,6 +6772,22 @@ impl Application for App {
                                 log::warn!("failed to create file watcher: {err:?}");
                             }
                         }
+
+                        std::future::pending().await
+                    },
+                )
+            }),
+            #[cfg(feature = "desktop")]
+            Subscription::run(|| {
+                stream::channel(
+                    1,
+                    |mut output: futures::channel::mpsc::Sender<Message>| async move {
+                        mime_app::watch(move || {
+                            futures::executor::block_on(async {
+                                _ = output.send(Message::ReloadMimeAppCache).await;
+                            })
+                        })
+                        .await;
 
                         std::future::pending().await
                     },
