@@ -3083,8 +3083,11 @@ impl Item {
                     widget::settings::item::builder(fl!("open-with")).control(
                         Element::from(
                             widget::dropdown(
-                                mime_apps,
-                                mime_apps.iter().position(|x| x.is_default),
+                                mime_apps
+                                    .iter()
+                                    .map(|app| Cow::Owned(app.name.clone()))
+                                    .collect::<Vec<Cow<'static, str>>>(),
+                                mime_apps.iter().position(|x| x.is_default()),
                                 move |index| index,
                             )
                             .icons(Cow::Borrowed(mime_app_cache.icons(&self.mime))),
@@ -8413,8 +8416,11 @@ impl Tab {
                     widget::settings::item::builder(fl!("open-with")).control(
                         Element::from(
                             widget::dropdown(
-                                mime_apps,
-                                mime_apps.iter().position(|x| x.is_default),
+                                mime_apps
+                                    .iter()
+                                    .map(|app| Cow::Owned(app.name.clone()))
+                                    .collect::<Vec<Cow<'static, str>>>(),
+                                mime_apps.iter().position(|x| x.is_default()),
                                 move |index| (index, mime_closure.clone()),
                             )
                             .icons(Cow::Borrowed(mime_app_cache.icons(&mime))),
