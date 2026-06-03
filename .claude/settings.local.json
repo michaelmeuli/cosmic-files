@@ -4,7 +4,10 @@
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo search *)",
-      "Bash(Get-Content \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\src\\\\sequencing\\\\rrs.rs\")"
+      "Bash(Get-Content \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\src\\\\sequencing\\\\rrs.rs\")",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\" /c/Users/micha/rust/cosmic-files/src/*.rs)",
+      "Bash(grep:*)",
+      "Bash(git push:*)"
     ]
   }
 }

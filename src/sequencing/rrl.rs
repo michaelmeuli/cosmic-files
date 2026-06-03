@@ -13,13 +13,14 @@ use std::sync::LazyLock;
 
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RrlPosition_2057_2058 {
+pub enum RrlPosition2057_2058 {
     SusceptibleWildtype, // A2057 and A2058
     ResistanceConferringMutation, // Any mutation at 2057 or 2058 that is not wildtype.
     Undetermined,
 }
 
-impl RrlPosition_2057_2058 {
+
+impl RrlPosition2057_2058 {
     pub fn is_susceptible(&self) -> Option<bool> {
         match self {
             Self::SusceptibleWildtype => Some(true),
@@ -53,7 +54,7 @@ impl RrlPosition_2057_2058 {
         match bases {
             Some((b'A', b'A')) => Some(Self::SusceptibleWildtype),
             Some((_, _)) => Some(Self::ResistanceConferringMutation),
-            None => Some(Self::Undetermined),
+            None => None,
         }
     }
 
@@ -262,7 +263,7 @@ pub(super) fn find_rrl_ntm_display_window(
 pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
-    let rrl_position_2057_2058 = RrlPosition_2057_2058::from_single_read(query);
+    let rrl_position_2057_2058 = RrlPosition2057_2058::from_single_read(query);
 
     let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRL)
         .into_iter()

@@ -63,7 +63,7 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
-use crate::sequencing::rrl::RrlPosition_2057_2058;
+use crate::sequencing::rrl::RrlPosition2057_2058;
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
@@ -2346,18 +2346,18 @@ impl ItemMetadata {
         }
     }
 
-    pub fn rrl_position_2057_2058_call(&self) -> RrlPosition_2057_2058 {
+    pub fn rrl_position_2057_2058_call(&self) -> RrlPosition2057_2058 {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
                 .and_then(|s| s.seq_id_hits.first()?.rrl_position_2057_2058_opt)
-                .unwrap_or(RrlPosition_2057_2058::Undetermined),
-            _ => RrlPosition_2057_2058::Undetermined,
+                .unwrap_or(RrlPosition2057_2058::Undetermined),
+            _ => RrlPosition2057_2058::Undetermined,
         }
     }
 
     pub fn is_rrl_position_2057_2058(&self) -> bool {
-        !matches!(self.rrl_position_2057_2058_call(), RrlPosition_2057_2058::Undetermined)
+        !matches!(self.rrl_position_2057_2058_call(), RrlPosition2057_2058::Undetermined)
     }
 
     pub fn seq_id_hits(&self) -> &[SeqIdHit] {
@@ -3871,6 +3871,19 @@ impl Item {
                 .height(Length::Fixed(200.0));
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
+            }
+            match self.metadata.rrl_position_2057_2058_call().is_susceptible() {
+                Some(true) => {
+                    details = details.push(widget::text::heading(
+                        "E. coli positions A2057 and A2058 are wt (macrolide susceptible).",
+                    ))
+                }
+                Some(false) => {
+                    details = details.push(widget::text::heading(
+                        "Mutation in E. coli A2057 and/or A2058. Predicted macrolide resistance.",
+                    ))
+                }
+                None => {}
             }
         }
 

@@ -22,7 +22,7 @@ pub mod tb_data;
 
 use erm41::{Erm41Position28, Erm41LofCall};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
-use rrl::{RrlSnpCall, RrlPosition_2057_2058};
+use rrl::{RrlSnpCall, RrlPosition2057_2058};
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -668,7 +668,7 @@ pub struct SeqIdHit {
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41_position_28_opt: Option<Erm41Position28>,
     /// rrl position 2057 2058 call; `None` for non-rrl targets.
-    pub rrl_position_2057_2058_opt: Option<RrlPosition_2057_2058>,
+    pub rrl_position_2057_2058_opt: Option<RrlPosition2057_2058>,
     /// Full reference sequence for this hit (used for pairwise display).
     pub ref_seq: Vec<u8>,
 }
