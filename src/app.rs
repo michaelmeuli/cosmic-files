@@ -2469,6 +2469,8 @@ impl App {
                                         Some(item.preview_erm41())
                                     } else if item.is_hsp65() {
                                         Some(item.preview_hsp65())
+                                    } else if item.is_rpob() {
+                                        Some(item.preview_rpob())
                                     } else if item.is_16s() {
                                         Some(item.preview_16s())
                                     } else if item.is_rrl_ntm() {

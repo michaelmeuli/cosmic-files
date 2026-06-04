@@ -69,6 +69,7 @@ use crate::sequencing::{
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
+    rpob::identify_sequence_rpob,
     rrl::identify_sequence_rrl_ntm,
     rrs::identify_sequence_16s,
     tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
@@ -937,6 +938,8 @@ pub fn item_from_entry(
                         identify_sequence_erm41(trimmed)
                     } else if is_hsp65 {
                         identify_sequence_hsp65(trimmed)
+                    } else if is_rpob {
+                        identify_sequence_rpob(trimmed)
                     } else if is_23s_ntm {
                         identify_sequence_rrl_ntm(trimmed)
                     } else if is_16s {
@@ -2969,6 +2972,11 @@ impl Item {
         !self.is_fasta() && (lower.contains("hsp65") || lower.contains("65kda"))
     }
 
+    pub fn is_rpob(&self) -> bool {
+        let lower = self.name.to_ascii_lowercase();
+        !self.is_fasta() && (lower.contains("rpob") || lower.contains("2573f") || lower.contains("3337r"))
+    }
+
     pub fn is_16s(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
         !self.is_fasta() && lower.contains("mbak14")
@@ -3684,6 +3692,78 @@ impl Item {
                     )));
                 }
                 details = details.push(widget::text::body(""));
+            }
+        }
+
+        column = column.push(details);
+        column.into()
+    }
+
+    pub fn preview_rpob(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        let hits = self.metadata.seq_id_hits();
+        if hits.is_empty()
+            || self.metadata.sequence_length_trimmed() == Some(0)
+            || !self.metadata.is_seq_id()
+        {
+            details = details.push(widget::text::body(
+                "Could not align sequence to references.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+        } else {
+            let best = &hits[0];
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading(
+                "Species identification (rpoB database):",
+            ));
+            for hit in &hits[..hits.len().min(3)] {
+                details = details.push(
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
+                );
             }
         }
 

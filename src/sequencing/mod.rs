@@ -16,6 +16,7 @@
 pub mod bed;
 pub mod erm41;
 pub mod hsp65;
+pub mod rpob;
 pub mod rrs;
 pub mod rrl;
 pub mod tb_data;
