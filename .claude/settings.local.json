@@ -7,7 +7,8 @@
       "Bash(Get-Content \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\src\\\\sequencing\\\\rrs.rs\")",
       "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\" /c/Users/micha/rust/cosmic-files/src/*.rs)",
       "Bash(grep:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_erm41.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_hsp65.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_rpob.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_rrl.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_rrs.fasta\")"
     ]
   }
 }
