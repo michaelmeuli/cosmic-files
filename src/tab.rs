@@ -62,7 +62,7 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
-use crate::sequencing::rrl::RrlPosition2057_2058;
+use crate::sequencing::rrl::{RrlPosition2057_2058, is_susceptible_rrl};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
@@ -976,8 +976,13 @@ pub fn item_from_entry(
 
     let is_susceptible = sequence_opt.as_ref().and_then(|s| {
         let hit = s.seq_id_hits.first()?;
-        let pos = hit.erm41_position_28_opt.as_ref()?;
-        is_susceptible_erm41(pos, &hit.erm41_snp_calls)
+        if let Some(pos) = hit.erm41_position_28_opt.as_ref() {
+            is_susceptible_erm41(pos, &hit.erm41_snp_calls)
+        } else if let Some(pos) = hit.rrl_position_2057_2058_opt.as_ref() {
+            is_susceptible_rrl(pos)
+        } else {
+            None
+        }
     });
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
@@ -3958,7 +3963,7 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.rrl_position_2057_2058_call().is_susceptible() {
+            match self.metadata.is_susceptible() {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "E. coli positions A2057 and A2058 are wt (macrolide susceptible).",

@@ -25,14 +25,6 @@ pub enum RrlPosition2057_2058 {
 
 
 impl RrlPosition2057_2058 {
-    pub fn is_susceptible(&self) -> Option<bool> {
-        match self {
-            Self::SusceptibleWildtype => Some(true),
-            Self::ResistanceConferringMutation => Some(false),
-            Self::Undetermined => None,
-        }
-    }
-
     fn call_position_2057_2058(read: &[u8]) -> Option<(u8, u8)> {
         let anchor_len = RRL_ANCHOR_L.len();
         let hit = read
@@ -68,6 +60,16 @@ impl RrlPosition2057_2058 {
         }
         let rc = reverse_complement(read);
         Self::from_bases(Self::call_position_2057_2058(&rc)).unwrap_or(Self::Undetermined)
+    }
+}
+
+/// Returns `Some(true)` for wildtype (susceptible), `Some(false)` for a resistance-conferring
+/// mutation, and `None` when the call is undetermined.
+pub fn is_susceptible_rrl(pos: &RrlPosition2057_2058) -> Option<bool> {
+    match pos {
+        RrlPosition2057_2058::SusceptibleWildtype => Some(true),
+        RrlPosition2057_2058::ResistanceConferringMutation => Some(false),
+        RrlPosition2057_2058::Undetermined => None,
     }
 }
 
