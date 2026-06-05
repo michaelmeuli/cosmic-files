@@ -979,7 +979,7 @@ pub fn item_from_entry(
         if let Some(pos) = hit.erm41_position_28_opt.as_ref() {
             is_susceptible_erm41(pos, &hit.erm41_snp_calls)
         } else if let Some(pos) = hit.rrl_position_2057_2058_opt.as_ref() {
-            is_susceptible_rrl(pos)
+            is_susceptible_rrl(pos, &hit.rrl_snp_calls)
         } else {
             None
         }
@@ -990,7 +990,7 @@ pub fn item_from_entry(
             erm41: hit.erm41_position_28_opt.as_ref()
                 .and_then(|pos| is_susceptible_erm41(pos, &hit.erm41_snp_calls)),
             rrl: hit.rrl_position_2057_2058_opt.as_ref()
-                .and_then(is_susceptible_rrl),
+                .and_then(|pos| is_susceptible_rrl(pos, &hit.rrl_snp_calls)),
         })
         .unwrap_or_default();
 

@@ -65,11 +65,21 @@ impl RrlPosition2057_2058 {
 
 /// Returns `Some(true)` for wildtype (susceptible), `Some(false)` for a resistance-conferring
 /// mutation, and `None` when the call is undetermined.
-pub fn is_susceptible_rrl(pos: &RrlPosition2057_2058) -> Option<bool> {
-    match pos {
-        RrlPosition2057_2058::SusceptibleWildtype => Some(true),
-        RrlPosition2057_2058::ResistanceConferringMutation => Some(false),
-        RrlPosition2057_2058::Undetermined => None,
+///
+/// If any `snp_calls` entry shows a resistance-conferring alt base, returns `Some(false)`
+/// regardless of `pos`. Otherwise delegates to the position-based call.
+pub fn is_susceptible_rrl(pos: &RrlPosition2057_2058, snp_calls: &[RrlSnpCall]) -> Option<bool> {
+    let has_resistance = snp_calls
+        .iter()
+        .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)));
+    if has_resistance {
+        Some(false)
+    } else {
+        match pos {
+            RrlPosition2057_2058::SusceptibleWildtype => Some(true),
+            RrlPosition2057_2058::ResistanceConferringMutation => Some(false),
+            RrlPosition2057_2058::Undetermined => None,
+        }
     }
 }
 
