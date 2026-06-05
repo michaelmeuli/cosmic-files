@@ -103,6 +103,7 @@ impl MounterItem {
 pub type MounterItems = Vec<MounterItem>;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum MounterMessage {
     Items(MounterItems),
     MountResult(MounterItem, Result<bool, String>),

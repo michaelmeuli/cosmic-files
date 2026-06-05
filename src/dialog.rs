@@ -547,6 +547,7 @@ struct App {
     title: String,
     accept_label: DialogLabel,
     choices: Vec<DialogChoice>,
+    #[allow(dead_code)]
     context_menu_window: Option<window::Id>,
     context_page: ContextPage,
     dialog_pages: VecDeque<DialogPage>,

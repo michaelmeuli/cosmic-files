@@ -13,8 +13,11 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, atomic};
+#[cfg(feature = "desktop")]
 use std::time::{self, Instant};
-use std::{fs, io, process};
+#[cfg(feature = "desktop")]
+use std::{fs, io};
+use std::process;
 
 #[cfg(feature = "desktop")]
 pub async fn watch(mut emitter: impl FnMut() + 'static + Send) {

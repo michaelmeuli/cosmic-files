@@ -9,6 +9,7 @@ pub const RGBA_BYTES_PER_PIXEL: u64 = 4;
 /// System memory reserve in MB to maintain for system stability (prevents thrashing)
 /// Note: RAM checking is currently only available on Linux via procfs.
 /// On Windows and macOS, only GPU buffer limits are enforced.
+#[allow(dead_code)]
 const SYSTEM_MEMORY_RESERVE_MB: u64 = 500;
 
 /// Maximum memory allocation for gallery image decoding in MB.

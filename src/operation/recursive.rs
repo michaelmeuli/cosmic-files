@@ -10,7 +10,6 @@ use compio::driver::ToSharedFd;
 use compio::driver::op::AsyncifyFd;
 use compio::io::{AsyncReadAt, AsyncWriteAt};
 use cosmic::iced::futures;
-use futures::{FutureExt, StreamExt};
 use std::cell::Cell;
 use std::error::Error;
 use std::fs;

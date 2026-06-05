@@ -5,6 +5,10 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+/// Maps a reference position to `(wt_base, alts)` where `alts` maps each LoF alt base to
+/// `(mutation_label, drug)`.
+type Erm41LofSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Erm41Position28 {
     C28,          // Cytosine — reference allele in some strains
@@ -34,7 +38,7 @@ impl std::fmt::Display for Erm41Position28 {
 pub fn is_susceptible_erm41(pos: &Erm41Position28, snp_calls: &[Erm41LofCall]) -> Option<bool> {
     let has_lof = snp_calls
         .iter()
-        .any(|c| c.query_base.map_or(false, |b| c.lof_alts.contains_key(&b)));
+        .any(|c| c.query_base.is_some_and(|b| c.lof_alts.contains_key(&b)));
     if has_lof {
         Some(true)
     } else {
@@ -195,9 +199,9 @@ struct Erm41LofRow {
 fn parse_erm41_lof_snps(
     csv: &str,
     refseq: &[u8],
-) -> BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)> {
+) -> Erm41LofSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
-    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)> = BTreeMap::new();
+    let mut map: Erm41LofSnpMap = BTreeMap::new();
     for row in rdr.deserialize::<Erm41LofRow>() {
         let row = match row {
             Ok(r) => r,
@@ -266,9 +270,7 @@ fn parse_erm41_lof_snps(
     map
 }
 
-static ERM41_LOF_SNPS: LazyLock<
-    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>>,
-> = LazyLock::new(|| {
+static ERM41_LOF_SNPS: LazyLock<BTreeMap<&'static str, Erm41LofSnpMap>> = LazyLock::new(|| {
     [(
         "M. abscessus subsp. abscessus",
         include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"),
@@ -307,7 +309,7 @@ impl Erm41LofCall {
 /// `snps` maps each reference position to `(wt_base, lof_alts)`, where `lof_alts` maps each
 /// loss-of-function alternate base to a `(mutation_label, drug)` pair.
 fn call_erm41_lof_snps(
-    snps: &BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>,
+    snps: &Erm41LofSnpMap,
     query: &[u8],
     alignment_offset: isize,
 ) -> Vec<Erm41LofCall> {

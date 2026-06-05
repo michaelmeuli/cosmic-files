@@ -18,7 +18,6 @@ use cosmic::widget::menu::action::MenuAction;
 use cosmic::widget::menu::key_bind::KeyBind;
 use cosmic::widget::{self, DndDestination, DndSource, Id, RcElementWrapper, Widget, space};
 use cosmic::{Apply, Element, cosmic_theme, font, theme};
-use i18n_embed::LanguageLoader;
 use icu::datetime::input::DateTime;
 use icu::datetime::options::TimePrecision;
 use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences, fieldsets};
@@ -109,6 +108,7 @@ pub(crate) static SORT_OPTION_FALLBACK: LazyLock<FxHashMap<String, (HeadingOptio
         }))
     });
 
+#[cfg_attr(not(unix), allow(dead_code))]
 static MODE_NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
     vec![
         // Mode 0
@@ -162,6 +162,7 @@ static SPECIAL_DIRS: LazyLock<FxHashMap<PathBuf, &'static str>> = LazyLock::new(
     special_dirs
 });
 
+#[allow(clippy::too_many_arguments)]
 fn button_appearance(
     theme: &theme::Theme,
     selected: bool,
@@ -371,10 +372,14 @@ fn format_size(size: u64) -> String {
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 const MODE_SHIFT_USER: u32 = 6;
+#[cfg_attr(not(unix), allow(dead_code))]
 const MODE_SHIFT_GROUP: u32 = 3;
+#[cfg_attr(not(unix), allow(dead_code))]
 const MODE_SHIFT_OTHER: u32 = 0;
 
+#[cfg_attr(not(unix), allow(dead_code))]
 const fn get_mode_part(mode: u32, shift: u32) -> u32 {
     (mode >> shift) & 0o7
 }
@@ -557,7 +562,7 @@ pub fn fs_kind(_metadata: &Metadata) -> FsKind {
 }
 
 #[cfg(not(feature = "desktop"))]
-fn get_desktop_file_display_name(path: &Path) -> Option<String> {
+fn get_desktop_file_display_name(_path: &Path) -> Option<String> {
     None
 }
 
@@ -2204,6 +2209,7 @@ pub enum DirSize {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ItemMetadata {
     Path {
         metadata: Metadata,
@@ -2332,7 +2338,7 @@ impl ItemMetadata {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .and_then(|s| s.seq_id_hits.first()?.erm41_position_28_opt.clone())
+                .and_then(|s| s.seq_id_hits.first()?.erm41_position_28_opt)
                 .unwrap_or(Erm41Position28::Undetermined),
             _ => Erm41Position28::Undetermined,
         }
@@ -3229,13 +3235,11 @@ impl Item {
                             details =
                                 details.push(widget::text::body(fl!("items", items = children)));
                         }
-                    } else {
-                        if let Some(size) = self.metadata.file_size() {
-                            details = details.push(widget::text::body(fl!(
-                                "item-size",
-                                size = format_size(size)
-                            )));
-                        }
+                    } else if let Some(size) = self.metadata.file_size() {
+                        details = details.push(widget::text::body(fl!(
+                            "item-size",
+                            size = format_size(size)
+                        )));
                     }
                     let date_time_formatter = date_time_formatter(military_time);
                     let time_formatter = time_formatter(military_time);
@@ -3264,16 +3268,15 @@ impl Item {
                             widget::button::standard(fl!("open")).on_press(Message::Open(None)),
                         );
                     }
-                } else {
-                    if let Some(Location::Remote(uri, _user, path_opt)) = self.location_opt.clone()
-                        && self.selected
-                        && path_opt.is_some()
-                    {
-                        column =
-                            column.push(widget::button::standard(fl!("download")).on_press(
-                                Message::Download(Some((path_opt.unwrap(), uri.clone()))),
-                            ));
-                    }
+                } else if let Some(Location::Remote(uri, _user, path_opt)) =
+                    self.location_opt.clone()
+                    && self.selected
+                    && path_opt.is_some()
+                {
+                    column =
+                        column.push(widget::button::standard(fl!("download")).on_press(
+                            Message::Download(Some((path_opt.unwrap(), uri.clone()))),
+                        ));
                 }
             }
             _ => {
@@ -8381,10 +8384,8 @@ impl Tab {
                     ItemMetadata::RusshPath { .. } => {
                         if item.metadata.is_dir() {
                             show_size = false;
-                        } else {
-                            if let Some(size) = item.metadata.file_size() {
-                                total_size = total_size.saturating_add(size);
-                            }
+                        } else if let Some(size) = item.metadata.file_size() {
+                            total_size = total_size.saturating_add(size);
                         }
                     }
                     _ => (),

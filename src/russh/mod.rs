@@ -7,10 +7,10 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{config::IconSizes, config::TBConfig, russh::russh::RemoteFile, tab};
+use crate::{config::IconSizes, config::TBConfig, russh::client::RemoteFile, tab};
 
 #[cfg(feature = "russh")]
-mod russh;
+mod client;
 
 pub fn same_uri(a: &str, b: &str) -> bool {
     let Ok(a_file) = a.parse::<RemoteFile>() else {
@@ -54,9 +54,10 @@ impl fmt::Debug for ClientAuth {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ClientItem {
     #[cfg(feature = "russh")]
-    Russh(russh::Item),
+    Russh(client::Item),
     #[allow(dead_code)]
     None,
 }
@@ -176,7 +177,7 @@ pub fn clients() -> Clients {
 
     #[cfg(feature = "russh")]
     {
-        clients.insert(ClientKey("russh"), Box::new(russh::Russh::new()));
+        clients.insert(ClientKey("russh"), Box::new(client::Russh::new()));
     }
 
     Clients::new(clients)

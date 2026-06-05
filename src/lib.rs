@@ -4,7 +4,9 @@
 use cosmic::app::Settings;
 use cosmic::iced::Limits;
 use std::path::PathBuf;
-use std::{env, fs, process};
+use std::{env, fs};
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "redox"))))]
+use std::process;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -40,6 +42,7 @@ mod zoom;
 
 pub(crate) type FxOrderMap<K, V> = ordermap::OrderMap<K, V, rustc_hash::FxBuildHasher>;
 
+#[allow(dead_code)]
 pub(crate) fn err_str<T: ToString>(err: T) -> String {
     err.to_string()
 }

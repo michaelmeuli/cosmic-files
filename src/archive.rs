@@ -209,7 +209,7 @@ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
                     None => archive.by_name(&target),
                     Some(pwd) => archive.by_name_decrypt(&target, pwd.as_bytes()),
                 }
-                .map_or(false, |x| x.is_dir());
+                .is_ok_and(|x| x.is_dir());
                 let target_path = directory.as_ref().join(OsString::from(target.to_string()));
                 let target_is_dir = if target_is_dir_from_archive {
                     true

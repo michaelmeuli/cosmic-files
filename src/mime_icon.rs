@@ -16,6 +16,7 @@ struct MimeIconKey {
 }
 
 struct MimeIconCache {
+    #[allow(dead_code)]
     cache: FxHashMap<MimeIconKey, Option<icon::Handle>>,
     #[cfg(unix)]
     shared_mime_info: xdg_mime::SharedMimeInfo,
@@ -68,8 +69,8 @@ static MIME_ICON_CACHE: LazyLock<Mutex<MimeIconCache>> =
 #[cfg(not(unix))]
 pub fn mime_for_path(
     path: impl AsRef<Path>,
-    metadata_opt: Option<&fs::Metadata>,
-    remote: bool,
+    _metadata_opt: Option<&fs::Metadata>,
+    _remote: bool,
 ) -> Mime {
     mime_guess::from_path(path).first_or_octet_stream()
 }
@@ -124,6 +125,7 @@ pub fn mime_for_path(
     }
 }
 
+#[allow(dead_code)]
 fn guess_generic_icon_name(mime: &Mime) -> Option<&'static str> {
     let ty = mime.type_().as_str();
     let sub = mime.subtype().as_str();

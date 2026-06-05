@@ -97,6 +97,7 @@ impl ThumbnailCacher {
         #[cfg(not(unix))]
         {
             let mut permissions = fs::metadata(temp_file.path())?.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
             permissions.set_readonly(false);
             fs::set_permissions(temp_file.path(), permissions)?;
         }
@@ -138,6 +139,7 @@ impl ThumbnailCacher {
             #[cfg(windows)]
             {
                 let mut perms = fs::metadata(dir)?.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
                 perms.set_readonly(false);
                 fs::set_permissions(dir, perms)?;
             }

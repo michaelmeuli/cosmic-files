@@ -17,7 +17,7 @@ use cosmic::iced::widget::scrollable;
 use cosmic::iced::widget::scrollable::AbsoluteOffset;
 use cosmic::iced::window::{self, Event as WindowEvent, Id as WindowId};
 use cosmic::iced::{
-    self, Alignment, Event, Length, Rectangle, Size, Subscription, event, mouse, stream,
+    self, Alignment, Event, Length, Size, Subscription, event, mouse, stream,
 };
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced::{
@@ -48,7 +48,7 @@ use std::future::Future;
 use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::time::{self, Duration, Instant};
 use std::{env, fmt, fs, io, process};
 use tokio::sync::mpsc;
@@ -67,7 +67,9 @@ use crate::config::{
 use crate::dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings};
 use crate::key_bind::key_binds;
 use crate::localize::LANGUAGE_SORTER;
-use crate::mime_app::{self, MimeApp, MimeAppCache};
+use crate::mime_app::{MimeApp, MimeAppCache};
+#[cfg(feature = "desktop")]
+use crate::mime_app as mime_app;
 use crate::mounter::{
     MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage,
 };

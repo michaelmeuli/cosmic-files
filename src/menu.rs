@@ -10,7 +10,6 @@ use cosmic::widget::{
     self, Row, button, column, container, divider, responsive_menu_bar, space, text,
 };
 use cosmic::{Element, theme};
-use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
 use std::collections::HashMap;
 use std::collections::HashSet;

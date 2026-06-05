@@ -11,6 +11,10 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+/// Maps a reference position to `(wt_base, alts)` where `alts` maps each resistance alt to
+/// `(drugs, E.coli nomenclature)`.
+type RrlSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
+
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RrlPosition2057_2058 {
@@ -82,9 +86,9 @@ struct ResistanceVariant {
     ecoli_nomenclature: String,
 }
 
-fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)> {
+fn parse_rrl_resistance_snps(csv: &str) -> RrlSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
-    let mut map: BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)> = BTreeMap::new();
+    let mut map: RrlSnpMap = BTreeMap::new();
     for row in rdr.deserialize::<ResistanceVariant>() {
         let row = row.unwrap();
         if row.gene.trim() != "rrl" {
@@ -121,9 +125,7 @@ fn parse_rrl_resistance_snps(csv: &str) -> BTreeMap<usize, (u8, BTreeMap<u8, (Ve
     map
 }
 
-static RRL_RESISTANCE_SNPS: LazyLock<
-    BTreeMap<&'static str, BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>>,
-> = LazyLock::new(|| {
+static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrlSnpMap>> = LazyLock::new(|| {
     [
         ("Mycobacterium abscessus", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
         ("Mycobacterium avium",          include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv")),
@@ -174,7 +176,7 @@ impl RrlSnpCall {
 }
 
 fn call_rrl_snps(
-    snps: &BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>,
+    snps: &RrlSnpMap,
     query: &[u8],
     alignment_offset: isize,
 ) -> Vec<RrlSnpCall> {

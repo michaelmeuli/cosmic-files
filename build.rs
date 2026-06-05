@@ -171,10 +171,10 @@ fn parse_feature_table(ft: &str, locus_tag: &str) -> Result<(u64, u64, u8), Stri
             }
         } else {
             let parts: Vec<&str> = stripped.split('\t').collect();
-            if parts.len() >= 2 && parts[0] == "locus_tag" && parts[1] == locus_tag {
-                if let (Some(s), Some(e)) = (cur_start, cur_stop) {
-                    return Ok((s, e, cur_strand));
-                }
+            if parts.len() >= 2 && parts[0] == "locus_tag" && parts[1] == locus_tag
+                && let (Some(s), Some(e)) = (cur_start, cur_stop)
+            {
+                return Ok((s, e, cur_strand));
             }
         }
     }

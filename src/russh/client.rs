@@ -1002,6 +1002,7 @@ pub async fn delete_tbprofiler_results(
     Ok(res.stdout)
 }
 
+#[allow(dead_code)]
 fn request_password(uri: String, event_tx: mpsc::UnboundedSender<Event>) -> ClientAuth {
     let auth = ClientAuth {
         message: String::new(),
@@ -1113,6 +1114,7 @@ enum Cmd {
         mpsc::Sender<Result<Vec<tab::Item>, String>>,
     ),
     RemoteParent(String, IconSizes, mpsc::Sender<Result<tab::Item, String>>),
+    #[allow(clippy::type_complexity)]
     DirInfo(
         String,
         mpsc::Sender<Result<(String, String, Option<PathBuf>), anyhow::Error>>,
@@ -1149,6 +1151,7 @@ enum Event {
     Changed,
     Items(ClientItems),
     ClientResult(ClientItem, Result<bool, String>),
+    #[allow(dead_code)]
     RemoteAuth(String, ClientAuth, mpsc::Sender<ClientAuth>),
     RemoteResult(String, Result<bool, String>),
     RunTbProfilerResult(String, Result<SlurmJobId, String>),
