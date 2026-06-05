@@ -62,7 +62,7 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
-use crate::sequencing::rrl::{RrlPosition2057_2058, is_susceptible_rrl};
+use crate::sequencing::rrl::{RrlPosition2058_2059, is_susceptible_rrl};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
@@ -978,7 +978,7 @@ pub fn item_from_entry(
         let hit = s.seq_id_hits.first()?;
         if let Some(pos) = hit.erm41_position_28_opt.as_ref() {
             is_susceptible_erm41(pos, &hit.erm41_snp_calls)
-        } else if let Some(pos) = hit.rrl_position_2057_2058_opt.as_ref() {
+        } else if let Some(pos) = hit.rrl_position_2058_2059_opt.as_ref() {
             is_susceptible_rrl(pos, &hit.rrl_snp_calls)
         } else {
             None
@@ -989,7 +989,7 @@ pub fn item_from_entry(
         .map(|hit| SusceptibilityCalls {
             erm41: hit.erm41_position_28_opt.as_ref()
                 .and_then(|pos| is_susceptible_erm41(pos, &hit.erm41_snp_calls)),
-            rrl: hit.rrl_position_2057_2058_opt.as_ref()
+            rrl: hit.rrl_position_2058_2059_opt.as_ref()
                 .and_then(|pos| is_susceptible_rrl(pos, &hit.rrl_snp_calls)),
         })
         .unwrap_or_default();
@@ -2372,18 +2372,18 @@ impl ItemMetadata {
         }
     }
 
-    pub fn rrl_position_2057_2058_call(&self) -> RrlPosition2057_2058 {
+    pub fn rrl_position_2058_2059_call(&self) -> RrlPosition2058_2059 {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
-                .and_then(|s| s.seq_id_hits.first()?.rrl_position_2057_2058_opt)
-                .unwrap_or(RrlPosition2057_2058::Undetermined),
-            _ => RrlPosition2057_2058::Undetermined,
+                .and_then(|s| s.seq_id_hits.first()?.rrl_position_2058_2059_opt)
+                .unwrap_or(RrlPosition2058_2059::Undetermined),
+            _ => RrlPosition2058_2059::Undetermined,
         }
     }
 
-    pub fn is_rrl_position_2057_2058(&self) -> bool {
-        !matches!(self.rrl_position_2057_2058_call(), RrlPosition2057_2058::Undetermined)
+    pub fn is_rrl_position_2058_2059(&self) -> bool {
+        !matches!(self.rrl_position_2058_2059_call(), RrlPosition2058_2059::Undetermined)
     }
 
     pub fn seq_id_hits(&self) -> &[SeqIdHit] {
@@ -3985,12 +3985,12 @@ impl Item {
             match self.metadata.susceptibility_calls().rrl {
                 Some(true) => {
                     details = details.push(widget::text::heading(
-                        "E. coli positions A2057 and A2058 are wt (macrolide susceptible).",
+                        "E. coli positions A2058 and A2059 are wt (macrolide susceptible).",
                     ))
                 }
                 Some(false) => {
                     details = details.push(widget::text::heading(
-                        "Mutation in E. coli A2057 and/or A2058. Predicted macrolide resistance.",
+                        "Mutation in E. coli A2058 and/or A2059. Predicted macrolide resistance.",
                     ))
                 }
                 None => {}

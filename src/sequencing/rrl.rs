@@ -17,24 +17,24 @@ type RrlSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RrlPosition2057_2058 {
-    SusceptibleWildtype, // A2057 and A2058
-    ResistanceConferringMutation, // Any mutation at 2057 or 2058 that is not wildtype.
+pub enum RrlPosition2058_2059 {
+    SusceptibleWildtype, // A2058 and A2059
+    ResistanceConferringMutation, // Any mutation at 2058 or 2059 that is not wildtype.
     Undetermined,
 }
 
 
-impl RrlPosition2057_2058 {
-    fn call_position_2057_2058(read: &[u8]) -> Option<(u8, u8)> {
+impl RrlPosition2058_2059 {
+    fn call_position_2058_2059(read: &[u8]) -> Option<(u8, u8)> {
         let anchor_len = RRL_ANCHOR_L.len();
         let hit = read
             .windows(anchor_len)
             .position(|w| w.eq_ignore_ascii_case(RRL_ANCHOR_L))?;
-        let pos2057 = hit + anchor_len;
-        let base2057 = read.get(pos2057).copied()?.to_ascii_uppercase();
-        let pos2058 = pos2057 + 1;
+        let pos2058 = hit + anchor_len;
         let base2058 = read.get(pos2058).copied()?.to_ascii_uppercase();
-        let right_start = pos2058 + 1;
+        let pos2059 = pos2058 + 1;
+        let base2059 = read.get(pos2059).copied()?.to_ascii_uppercase();
+        let right_start = pos2059 + 1;
         let right_end = right_start + RRL_ANCHOR_R.len();
         if right_end > read.len() {
             return None;
@@ -43,7 +43,7 @@ impl RrlPosition2057_2058 {
         if !right_ok {
             return None;
         }
-        Some((base2057, base2058))
+        Some((base2058, base2059))
     }
 
     fn from_bases(bases: Option<(u8, u8)>) -> Option<Self> {
@@ -55,11 +55,11 @@ impl RrlPosition2057_2058 {
     }
 
     pub fn from_single_read(read: &[u8]) -> Self {
-        if let Some(call) = Self::from_bases(Self::call_position_2057_2058(read)) {
+        if let Some(call) = Self::from_bases(Self::call_position_2058_2059(read)) {
             return call;
         }
         let rc = reverse_complement(read);
-        Self::from_bases(Self::call_position_2057_2058(&rc)).unwrap_or(Self::Undetermined)
+        Self::from_bases(Self::call_position_2058_2059(&rc)).unwrap_or(Self::Undetermined)
     }
 }
 
@@ -68,7 +68,7 @@ impl RrlPosition2057_2058 {
 ///
 /// If any `snp_calls` entry shows a resistance-conferring alt base, returns `Some(false)`
 /// regardless of `pos`. Otherwise delegates to the position-based call.
-pub fn is_susceptible_rrl(pos: &RrlPosition2057_2058, snp_calls: &[RrlSnpCall]) -> Option<bool> {
+pub fn is_susceptible_rrl(pos: &RrlPosition2058_2059, snp_calls: &[RrlSnpCall]) -> Option<bool> {
     let has_resistance = snp_calls
         .iter()
         .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)));
@@ -76,9 +76,9 @@ pub fn is_susceptible_rrl(pos: &RrlPosition2057_2058, snp_calls: &[RrlSnpCall]) 
         Some(false)
     } else {
         match pos {
-            RrlPosition2057_2058::SusceptibleWildtype => Some(true),
-            RrlPosition2057_2058::ResistanceConferringMutation => Some(false),
-            RrlPosition2057_2058::Undetermined => None,
+            RrlPosition2058_2059::SusceptibleWildtype => Some(true),
+            RrlPosition2058_2059::ResistanceConferringMutation => Some(false),
+            RrlPosition2058_2059::Undetermined => None,
         }
     }
 }
@@ -164,7 +164,7 @@ pub struct RrlSnpCall {
 
 impl RrlSnpCall {
     pub fn call_tag(&self) -> String {
-        // E.coli position prefix shared by all alts at this position (e.g. "A2058").
+        // E.coli position prefix shared by all alts at this position (e.g. "A2059").
         let ecoli_prefix: Option<&str> = self.resistance_bases.values()
             .next()
             .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
@@ -277,7 +277,7 @@ pub(super) fn find_rrl_ntm_display_window(
 pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
-    let rrl_position_2057_2058 = RrlPosition2057_2058::from_single_read(query);
+    let rrl_position_2058_2059 = RrlPosition2058_2059::from_single_read(query);
 
     let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRL)
         .into_iter()
@@ -305,7 +305,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
                 erm41_position_28_opt: None,
-                rrl_position_2057_2058_opt: Some(rrl_position_2057_2058),
+                rrl_position_2058_2059_opt: Some(rrl_position_2058_2059),
                 ref_seq: refseq,
             }
         })

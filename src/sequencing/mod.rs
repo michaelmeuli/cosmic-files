@@ -23,7 +23,7 @@ pub mod tb_data;
 
 use erm41::{Erm41Position28, Erm41LofCall};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
-use rrl::{RrlSnpCall, RrlPosition2057_2058};
+use rrl::{RrlSnpCall, RrlPosition2058_2059};
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -612,7 +612,7 @@ pub struct Erm41ViewState {
 /// Built in [`Ab1Channels::parse`] via [`rrl::find_rrl_ntm_display_window`]
 /// when [`RRL_ANCHOR_L`] is found in the basecall sequence. Stored inside
 /// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
-/// diagnostic SNP site (positions 2057–2058).
+/// diagnostic SNP site (positions 2058–2059).
 #[derive(Clone, Copy, Debug)]
 pub struct RrlNtmViewState {
     /// Scan-index range (inclusive start, exclusive end) of the display window.
@@ -675,8 +675,8 @@ pub struct SeqIdHit {
     pub alignment_offset: isize,
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41_position_28_opt: Option<Erm41Position28>,
-    /// rrl position 2057 2058 call; `None` for non-rrl targets.
-    pub rrl_position_2057_2058_opt: Option<RrlPosition2057_2058>,
+    /// rrl position 2058 2059 call; `None` for non-rrl targets.
+    pub rrl_position_2058_2059_opt: Option<RrlPosition2058_2059>,
     /// Full reference sequence for this hit (used for pairwise display).
     pub ref_seq: Vec<u8>,
 }
