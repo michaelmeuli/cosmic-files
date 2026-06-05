@@ -58,6 +58,13 @@ const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
 /// 23S rRNA (rrl) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 
+/// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SusceptibilityCalls {
+    pub erm41: Option<bool>,
+    pub rrl: Option<bool>,
+}
+
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()
         .rev()

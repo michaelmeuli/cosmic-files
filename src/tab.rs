@@ -64,7 +64,7 @@ use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
 use crate::sequencing::rrl::{RrlPosition2057_2058, is_susceptible_rrl};
 use crate::sequencing::{
-    Ab1Channels, SeqData, SeqIdHit,
+    Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
@@ -984,6 +984,15 @@ pub fn item_from_entry(
             None
         }
     });
+    let susceptibility_calls = sequence_opt.as_ref()
+        .and_then(|s| s.seq_id_hits.first())
+        .map(|hit| SusceptibilityCalls {
+            erm41: hit.erm41_position_28_opt.as_ref()
+                .and_then(|pos| is_susceptible_erm41(pos, &hit.erm41_snp_calls)),
+            rrl: hit.rrl_position_2057_2058_opt.as_ref()
+                .and_then(is_susceptible_rrl),
+        })
+        .unwrap_or_default();
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
 
@@ -1004,6 +1013,7 @@ pub fn item_from_entry(
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
             is_susceptible,
+            susceptibility_calls,
         },
         hidden,
         location_opt: Some(Location::Path(path)),
@@ -1321,6 +1331,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
             sample_csv_path_opt: files.csv,
             sample_docx_path_opt: files.docx,
             is_susceptible,
+            susceptibility_calls: SusceptibilityCalls::default(),
         };
         items.push(Item {
             name: sample_id.clone(),
@@ -2228,6 +2239,7 @@ pub enum ItemMetadata {
         sample_csv_path_opt: Option<PathBuf>,
         sample_docx_path_opt: Option<PathBuf>,
         is_susceptible: Option<bool>,
+        susceptibility_calls: SusceptibilityCalls,
     },
     Trash {
         metadata: trash::TrashItemMetadata,
@@ -2551,6 +2563,13 @@ impl ItemMetadata {
             #[cfg(feature = "russh")]
             Self::RusshPath { is_susceptible, .. } => *is_susceptible,
             _ => None,
+        }
+    }
+
+    pub fn susceptibility_calls(&self) -> SusceptibilityCalls {
+        match self {
+            Self::Path { susceptibility_calls, .. } => *susceptibility_calls,
+            _ => SusceptibilityCalls::default(),
         }
     }
 }
@@ -3554,7 +3573,7 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.is_susceptible() {
+            match self.metadata.susceptibility_calls().erm41 {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "Predicted to be susceptible to macrolides.",
@@ -3963,7 +3982,7 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.is_susceptible() {
+            match self.metadata.susceptibility_calls().rrl {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "E. coli positions A2057 and A2058 are wt (macrolide susceptible).",
@@ -9576,6 +9595,7 @@ mod tests {
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
             is_susceptible: None,
+            susceptibility_calls: SusceptibilityCalls::default(),
         };
         let thumb = ItemThumbnail::new(
             &path,
@@ -9611,6 +9631,7 @@ mod tests {
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
             is_susceptible: None,
+            susceptibility_calls: SusceptibilityCalls::default(),
         };
         let thumb = ItemThumbnail::new(
             &path,
@@ -9647,6 +9668,7 @@ mod tests {
             sample_csv_path_opt: None,
             sample_docx_path_opt: None,
             is_susceptible: None,
+            susceptibility_calls: SusceptibilityCalls::default(),
         };
         let thumb = ItemThumbnail::new(
             &path,
