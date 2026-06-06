@@ -46,6 +46,32 @@ pub fn is_susceptible_erm41(pos: &Erm41Position28, snp_calls: &[Erm41LofCall]) -
     }
 }
 
+/// Returns `Some(true)` if any observed SNP base is a known LOF alt (erm(41) inactivated →
+/// susceptible), or `None` if no LOF alt is observed.
+pub fn is_susceptible_erm41_by_lof_snps(snp_calls: &[Erm41LofCall]) -> Option<bool> {
+    if snp_calls
+        .iter()
+        .any(|c| c.query_base.is_some_and(|b| c.lof_alts.contains_key(&b)))
+    {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+/// Returns susceptibility based on position 28 alone, without considering LOF SNP calls.
+pub fn is_susceptible_erm41_by_position28(pos: &Erm41Position28) -> Option<bool> {
+    pos.is_susceptible()
+}
+
+/// All erm(41) susceptibility evidence for one sample, ready for UI display.
+#[derive(Debug, Clone, Default)]
+pub struct Erm41SusceptibilityCalls {
+    pub position_28: Option<Erm41Position28>,
+    pub lof_snp_calls: Vec<Erm41LofCall>,
+    pub is_susceptible: Option<bool>,
+}
+
 impl Erm41Position28 {
     /// Returns `Some(true)` for susceptible alleles (C28, G28, A28), `Some(false)` for T28
     /// (inducible resistance), and `None` when the call is ambiguous or undetermined.

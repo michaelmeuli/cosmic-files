@@ -21,9 +21,9 @@ pub mod rrs;
 pub mod rrl;
 pub mod tb_data;
 
-use erm41::{Erm41Position28, Erm41LofCall};
+use erm41::{Erm41LofCall, Erm41Position28, Erm41SusceptibilityCalls};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
-use rrl::{RrlSnpCall, RrlPosition2058_2059};
+use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -59,10 +59,10 @@ const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SusceptibilityCalls {
-    pub erm41: Option<bool>,
-    pub rrl: Option<bool>,
+    pub erm41: Erm41SusceptibilityCalls,
+    pub rrl: RrlSusceptibilityCalls,
 }
 
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {

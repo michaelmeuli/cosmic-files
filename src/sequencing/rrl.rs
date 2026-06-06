@@ -25,6 +25,16 @@ pub enum RrlPosition2058_2059 {
 
 
 impl RrlPosition2058_2059 {
+    /// Returns `Some(true)` for wildtype (susceptible), `Some(false)` for a
+    /// resistance-conferring mutation, and `None` when the call is undetermined.
+    pub fn is_susceptible(&self) -> Option<bool> {
+        match self {
+            Self::SusceptibleWildtype => Some(true),
+            Self::ResistanceConferringMutation => Some(false),
+            Self::Undetermined => None,
+        }
+    }
+
     fn call_position_2058_2059(read: &[u8]) -> Option<(u8, u8)> {
         let anchor_len = RRL_ANCHOR_L.len();
         let hit = read
@@ -75,12 +85,34 @@ pub fn is_susceptible_rrl(pos: &RrlPosition2058_2059, snp_calls: &[RrlSnpCall]) 
     if has_resistance {
         Some(false)
     } else {
-        match pos {
-            RrlPosition2058_2059::SusceptibleWildtype => Some(true),
-            RrlPosition2058_2059::ResistanceConferringMutation => Some(false),
-            RrlPosition2058_2059::Undetermined => None,
-        }
+        pos.is_susceptible()
     }
+}
+
+/// Returns `Some(false)` if any observed SNP base is a resistance-conferring alt, or `None` if
+/// no resistance alt is observed.
+pub fn is_susceptible_rrl_by_snp_calls(snp_calls: &[RrlSnpCall]) -> Option<bool> {
+    if snp_calls
+        .iter()
+        .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)))
+    {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Returns susceptibility based on position 2058/2059 alone, without considering SNP calls.
+pub fn is_susceptible_rrl_by_position(pos: &RrlPosition2058_2059) -> Option<bool> {
+    pos.is_susceptible()
+}
+
+/// All rrl susceptibility evidence for one sample, ready for UI display.
+#[derive(Debug, Clone, Default)]
+pub struct RrlSusceptibilityCalls {
+    pub position_2058_2059: Option<RrlPosition2058_2059>,
+    pub snp_calls: Vec<RrlSnpCall>,
+    pub is_susceptible: Option<bool>,
 }
 
 

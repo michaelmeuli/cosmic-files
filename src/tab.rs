@@ -62,10 +62,10 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
-use crate::sequencing::rrl::{RrlPosition2058_2059, is_susceptible_rrl};
+use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
-    erm41::{Erm41Position28, identify_sequence_erm41, is_susceptible_erm41},
+    erm41::{Erm41Position28, Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
     rpob::identify_sequence_rpob,
@@ -987,10 +987,18 @@ pub fn item_from_entry(
     let susceptibility_calls = sequence_opt.as_ref()
         .and_then(|s| s.seq_id_hits.first())
         .map(|hit| SusceptibilityCalls {
-            erm41: hit.erm41_position_28_opt.as_ref()
-                .and_then(|pos| is_susceptible_erm41(pos, &hit.erm41_snp_calls)),
-            rrl: hit.rrl_position_2058_2059_opt.as_ref()
-                .and_then(|pos| is_susceptible_rrl(pos, &hit.rrl_snp_calls)),
+            erm41: Erm41SusceptibilityCalls {
+                position_28: hit.erm41_position_28_opt,
+                lof_snp_calls: hit.erm41_snp_calls.clone(),
+                is_susceptible: hit.erm41_position_28_opt.as_ref()
+                    .and_then(|pos| is_susceptible_erm41(pos, &hit.erm41_snp_calls)),
+            },
+            rrl: RrlSusceptibilityCalls {
+                position_2058_2059: hit.rrl_position_2058_2059_opt,
+                snp_calls: hit.rrl_snp_calls.clone(),
+                is_susceptible: hit.rrl_position_2058_2059_opt.as_ref()
+                    .and_then(|pos| is_susceptible_rrl(pos, &hit.rrl_snp_calls)),
+            },
         })
         .unwrap_or_default();
 
@@ -2568,7 +2576,7 @@ impl ItemMetadata {
 
     pub fn susceptibility_calls(&self) -> SusceptibilityCalls {
         match self {
-            Self::Path { susceptibility_calls, .. } => *susceptibility_calls,
+            Self::Path { susceptibility_calls, .. } => susceptibility_calls.clone(),
             _ => SusceptibilityCalls::default(),
         }
     }
@@ -3573,7 +3581,7 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.susceptibility_calls().erm41 {
+            match self.metadata.susceptibility_calls().erm41.position_28.and_then(|p| p.is_susceptible()) {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "Predicted to be susceptible to macrolides.",
@@ -3982,7 +3990,7 @@ impl Item {
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.susceptibility_calls().rrl {
+            match self.metadata.susceptibility_calls().rrl.position_2058_2059.and_then(|p| p.is_susceptible()) {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "E. coli positions A2058 and A2059 are wt (macrolide susceptible).",
@@ -7712,6 +7720,7 @@ impl Tab {
                             Some(mtime) => self.format_time(mtime).to_string(),
                             None => String::new(),
                         },
+                        #[cfg(feature = "russh")]
                         ItemMetadata::RusshPath { .. } => match item.metadata.modified() {
                             Some(mtime) => self.format_time(mtime).to_string(),
                             None => String::new(),

@@ -7,11 +7,14 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{config::IconSizes, config::TBConfig, russh::client::RemoteFile, tab};
+#[cfg(feature = "russh")]
+use crate::russh::client::RemoteFile;
+use crate::{config::IconSizes, config::TBConfig, tab};
 
 #[cfg(feature = "russh")]
 mod client;
 
+#[cfg(feature = "russh")]
 pub fn same_uri(a: &str, b: &str) -> bool {
     let Ok(a_file) = a.parse::<RemoteFile>() else {
         return false;
@@ -21,6 +24,11 @@ pub fn same_uri(a: &str, b: &str) -> bool {
     };
 
     a_file.host == b_file.host && a_file.username == b_file.username && a_file.port == b_file.port
+}
+
+#[cfg(not(feature = "russh"))]
+pub fn same_uri(_a: &str, _b: &str) -> bool {
+    false
 }
 
 #[derive(Clone)]
