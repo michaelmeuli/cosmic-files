@@ -4,6 +4,9 @@ use std::process::Command;
 use std::{env, fs};
 use xdgen::{App, Context, FluentString};
 
+const BASE: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+const EMAIL: &str = "michael.meuli@gmail.com";
+
 #[derive(serde::Deserialize)]
 struct SequencesConfig {
     #[serde(default)]
@@ -229,9 +232,7 @@ fn ncbi_fetch_genome_gene(
     }
 }
 
-fn fetch_myco_sequences() {
-    const BASE: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
-    const EMAIL: &str = "michael.meuli@gmail.com";
+fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
     const BATCH: usize = 200;
 
     // (ncbi_query, filename)
@@ -258,12 +259,6 @@ fn fetch_myco_sequences() {
         ),
     ];
 
-    let api_key = std::env::var("NCBI_API_KEY").ok();
-    println!("cargo:rerun-if-env-changed=NCBI_API_KEY");
-
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let seq_dir = manifest_dir.join("res/sequences");
-
     for &(query, filename) in targets {
         let path = seq_dir.join(filename);
         println!("cargo:rerun-if-changed=res/sequences/{}", filename);
@@ -279,88 +274,87 @@ fn fetch_myco_sequences() {
             }
         }
     }
+}
 
-    // User-defined accessions from sequences.toml [[append]] entries.
-    // Each entry names an accession and a target fasta filename; the sequence
-    // is fetched and appended if the accession is not already present.
+fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
     let toml_path = seq_dir.join("sequences.toml");
     println!("cargo:rerun-if-changed=res/sequences/sequences.toml");
-    if let Ok(toml_str) = fs::read_to_string(&toml_path) {
-        match toml::from_str::<SequencesConfig>(&toml_str) {
-            Ok(config) => {
-                let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
-                for entry in &config.genome {
-                    let out_path = seq_dir.join(&entry.output);
-                    println!("cargo:rerun-if-changed=res/sequences/{}", entry.output);
-                    if out_path.exists() && out_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-                        println!("cargo:warning=fetch_myco: {} exists — skip", entry.output);
-                        continue;
-                    }
-                    println!("cargo:warning=fetch_myco: fetching genome gene → {}", entry.output);
-                    if let Some(parent) = out_path.parent() {
-                        let _ = fs::create_dir_all(parent);
-                    }
-                    let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
-                    let fetch_result = if is_genome {
-                        ncbi_fetch_genome_gene(
-                            BASE, EMAIL, api_key.as_deref(), &entry.accession,
-                            entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
-                        )
-                    } else {
-                        ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
-                    };
-                    match fetch_result {
-                        Ok(seq) => {
-                            match fs::write(&out_path, seq.as_bytes()) {
-                                Ok(_) => println!("cargo:warning=fetch_myco: wrote {}", entry.output),
-                                Err(e) => println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.output),
-                            }
-                        }
-                        Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.output),
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                }
-                for entry in &config.append {
-                    let fasta_path = seq_dir.join(&entry.fasta);
-                    let existing = if fasta_path.exists() {
-                        fs::read_to_string(&fasta_path).unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    if existing.contains(entry.accession.as_str()) {
-                        println!("cargo:warning=fetch_myco: {} already in {} — skip", entry.accession, entry.fasta);
-                        continue;
-                    }
-                    println!("cargo:warning=fetch_myco: appending {} → {}", entry.accession, entry.fasta);
-                    let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
-                    let fetch_result = if is_genome {
-                        ncbi_fetch_genome_gene(
-                            BASE, EMAIL, api_key.as_deref(), &entry.accession,
-                            entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
-                        )
-                    } else {
-                        ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
-                    };
-                    match fetch_result {
-                        Ok(seq) => {
-                            match fs::OpenOptions::new().append(true).create(true).open(&fasta_path) {
-                                Ok(mut f) => {
-                                    if let Err(e) = f.write_all(seq.as_bytes()) {
-                                        println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.accession);
-                                    } else {
-                                        println!("cargo:warning=fetch_myco: appended {}", entry.accession);
-                                    }
-                                }
-                                Err(e) => println!("cargo:warning=fetch_myco: open error for {}: {e}", entry.fasta),
-                            }
-                        }
-                        Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.accession),
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                }
-            }
-            Err(e) => println!("cargo:warning=fetch_myco: failed to parse sequences.toml: {e}"),
+    let toml_str = match fs::read_to_string(&toml_path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let config = match toml::from_str::<SequencesConfig>(&toml_str) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("cargo:warning=fetch_myco: failed to parse sequences.toml: {e}");
+            return;
         }
+    };
+    let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
+    for entry in &config.genome {
+        let out_path = seq_dir.join(&entry.output);
+        println!("cargo:rerun-if-changed=res/sequences/{}", entry.output);
+        if out_path.exists() && out_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+            println!("cargo:warning=fetch_myco: {} exists — skip", entry.output);
+            continue;
+        }
+        println!("cargo:warning=fetch_myco: fetching genome gene → {}", entry.output);
+        if let Some(parent) = out_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
+        let fetch_result = if is_genome {
+            ncbi_fetch_genome_gene(
+                BASE, EMAIL, api_key.as_deref(), &entry.accession,
+                entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+            )
+        } else {
+            ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
+        };
+        match fetch_result {
+            Ok(seq) => match fs::write(&out_path, seq.as_bytes()) {
+                Ok(_) => println!("cargo:warning=fetch_myco: wrote {}", entry.output),
+                Err(e) => println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.output),
+            },
+            Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.output),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+    }
+    for entry in &config.append {
+        let fasta_path = seq_dir.join(&entry.fasta);
+        let existing = if fasta_path.exists() {
+            fs::read_to_string(&fasta_path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if existing.contains(entry.accession.as_str()) {
+            println!("cargo:warning=fetch_myco: {} already in {} — skip", entry.accession, entry.fasta);
+            continue;
+        }
+        println!("cargo:warning=fetch_myco: appending {} → {}", entry.accession, entry.fasta);
+        let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
+        let fetch_result = if is_genome {
+            ncbi_fetch_genome_gene(
+                BASE, EMAIL, api_key.as_deref(), &entry.accession,
+                entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+            )
+        } else {
+            ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
+        };
+        match fetch_result {
+            Ok(seq) => match fs::OpenOptions::new().append(true).create(true).open(&fasta_path) {
+                Ok(mut f) => {
+                    if let Err(e) = f.write_all(seq.as_bytes()) {
+                        println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.accession);
+                    } else {
+                        println!("cargo:warning=fetch_myco: appended {}", entry.accession);
+                    }
+                }
+                Err(e) => println!("cargo:warning=fetch_myco: open error for {}: {e}", entry.fasta),
+            },
+            Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.accession),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
     }
 }
 
@@ -587,12 +581,15 @@ fn check_hsp65_integrity(seq_dir: &std::path::Path) {
 }
 
 fn main() {
-    fetch_myco_sequences();
+    let seq_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("res/sequences");
+    let api_key = env::var("NCBI_API_KEY").ok();
+    println!("cargo:rerun-if-env-changed=NCBI_API_KEY");
 
-    let manifest_dir_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    extract_ntm_db_sequences(&manifest_dir_path.join("res/sequences"));
-    check_hsp65_integrity(&manifest_dir_path.join("res/sequences"));
-    check_rrl_integrity(&manifest_dir_path.join("res/sequences"));
+    fetch_myco_sequences(&seq_dir, api_key.as_deref());
+    fetch_sequences_from_toml(&seq_dir, api_key.as_deref());
+    extract_ntm_db_sequences(&seq_dir);
+    check_hsp65_integrity(&seq_dir);
+    check_rrl_integrity(&seq_dir);
 
     // Embed the ntm-db submodule commit hash so the UI can display it.
     let commit = Command::new("git")
