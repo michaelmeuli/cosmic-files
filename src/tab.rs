@@ -9159,6 +9159,7 @@ mod tests {
         eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
     };
     use crate::config::{IconSizes, TBConfig, TabConfig, ThumbCfg};
+    use crate::sequencing::SusceptibilityCalls;
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
     fn tab_selects_item(
