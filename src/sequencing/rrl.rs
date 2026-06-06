@@ -182,6 +182,7 @@ static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrlSnpMap>> = LazyLo
     .collect()
 });
 
+
 #[derive(Clone, Debug)]
 pub struct RrlSnpCall {
     /// 0-based position in the rrl reference sequence.

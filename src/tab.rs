@@ -1241,6 +1241,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         csv: Option<PathBuf>,
         docx: Option<PathBuf>,
     }
+    
     let mut samples: HashMap<String, LocalSampleFiles> = HashMap::new();
     for item in &mut items {
         let name = item.name.clone();

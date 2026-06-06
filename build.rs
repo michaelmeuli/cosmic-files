@@ -530,6 +530,42 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
 /// Keep in sync with the constants in src/sequencing/hsp65.rs.
 const HSP65_REQUIRED_ACCS: &[&str] = &["AF547836", "AF547849", "AY299134", "AY299145"];
 
+/// Species that must appear as descriptions in myco_rrl.fasta for RRL_RESISTANCE_SNPS lookups
+/// to work. Keep in sync with the keys in RRL_RESISTANCE_SNPS in src/sequencing/rrl.rs.
+const RRL_REQUIRED_SPECIES: &[&str] = &[
+    "Mycobacterium abscessus",
+    "Mycobacterium avium",
+    "Mycobacterium fortuitum",
+    "Mycobacterium intracellulare",
+    "Mycobacterium leprae",
+];
+
+fn check_rrl_integrity(seq_dir: &std::path::Path) {
+    let path = seq_dir.join("myco_rrl.fasta");
+    let fasta = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => panic!("cannot read myco_rrl.fasta: {e}"),
+    };
+    // Mirror parse_multi_fasta(): description = word[1] + " " + word[2] of the header.
+    let descriptions: std::collections::HashSet<String> = fasta
+        .lines()
+        .filter(|l| l.starts_with('>'))
+        .filter_map(|l| {
+            let mut words = l[1..].splitn(4, ' ');
+            words.next(); // accession
+            let genus   = words.next()?;
+            let species = words.next()?;
+            Some(format!("{} {}", genus, species))
+        })
+        .collect();
+    for species in RRL_REQUIRED_SPECIES {
+        assert!(
+            descriptions.contains(*species),
+            "myco_rrl.fasta is missing a sequence for \"{species}\" — RRL_RESISTANCE_SNPS lookup will silently return no calls"
+        );
+    }
+}
+
 fn check_hsp65_integrity(seq_dir: &std::path::Path) {
     let path = seq_dir.join("myco_hsp65.fasta");
     let fasta = match fs::read_to_string(&path) {
@@ -556,6 +592,7 @@ fn main() {
     let manifest_dir_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     extract_ntm_db_sequences(&manifest_dir_path.join("res/sequences"));
     check_hsp65_integrity(&manifest_dir_path.join("res/sequences"));
+    check_rrl_integrity(&manifest_dir_path.join("res/sequences"));
 
     // Embed the ntm-db submodule commit hash so the UI can display it.
     let commit = Command::new("git")
