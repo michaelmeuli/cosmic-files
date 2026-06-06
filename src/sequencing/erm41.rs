@@ -441,6 +441,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls: vec![],
+                rrs_snp_calls: vec![],
                 erm41_snp_calls,
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,

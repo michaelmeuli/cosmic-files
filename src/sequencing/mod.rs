@@ -24,6 +24,7 @@ pub mod tb_data;
 use erm41::{Erm41LofCall, Erm41Position28, Erm41SusceptibilityCalls};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
+use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
@@ -63,6 +64,7 @@ const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 pub struct SusceptibilityCalls {
     pub erm41: Erm41SusceptibilityCalls,
     pub rrl: RrlSusceptibilityCalls,
+    pub rrs: RrsSusceptibilityCalls,
 }
 
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
@@ -667,6 +669,8 @@ pub struct SeqIdHit {
     pub marinum_ulcerans_snp_calls: Vec<MarinumUlceransSnpCall>,
     /// Calls at each rrl macrolide-resistance SNP position (23S rRNA).
     pub rrl_snp_calls: Vec<RrlSnpCall>,
+    /// Calls at each rrs aminoglycoside-resistance SNP position (16S rRNA).
+    pub rrs_snp_calls: Vec<RrsSnpCall>,
     /// Calls at each erm(41) loss-of-function variant position.
     pub erm41_snp_calls: Vec<Erm41LofCall>,
     /// The aligned query (forward or reverse-complement, whichever scored best).

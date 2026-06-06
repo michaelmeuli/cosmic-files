@@ -63,6 +63,7 @@ use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
 use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl};
+use crate::sequencing::rrs::{RrsSusceptibilityCalls, is_susceptible_rrs};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41Position28, Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
@@ -998,6 +999,10 @@ pub fn item_from_entry(
                 snp_calls: hit.rrl_snp_calls.clone(),
                 is_susceptible: hit.rrl_position_2058_2059_opt.as_ref()
                     .and_then(|pos| is_susceptible_rrl(pos, &hit.rrl_snp_calls)),
+            },
+            rrs: RrsSusceptibilityCalls {
+                snp_calls: hit.rrs_snp_calls.clone(),
+                is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
             },
         })
         .unwrap_or_default();
@@ -3872,6 +3877,23 @@ impl Item {
                         .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
                         .padding(0),
                 );
+            }
+            if best.rrs_snp_calls.is_empty() {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body(
+                    "16S rRNA amikacin resistance SNPs (rrs):",
+                ));
+                details = details.push(widget::text::body(format!(
+                    "(Using commit: {} of ntm-db repository)",
+                    env!("NTM_DB_COMMIT")
+                )));
+                for snp in &best.rrs_snp_calls {
+                    details = details.push(widget::text::body(format!(
+                        "  pos {}: {}",
+                        snp.ref_pos + 1,
+                        snp.call_tag()
+                    )));
+                }
             }
         }
 
