@@ -173,7 +173,6 @@ static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrlSnpMap>> = LazyLo
     [
         ("Mycobacterium abscessus", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
         ("Mycobacterium avium",          include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv")),
-        ("Mycobacterium fortuitum",      include_str!("../../res/sequences/ntm-db/db/Mycobacterium_fortuitum/variants.csv")),
         ("Mycobacterium intracellulare", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_intracellulare/variants.csv")),
         ("Mycobacterium leprae",         include_str!("../../res/sequences/ntm-db/db/Mycobacterium_leprae/variants.csv")),
     ]

@@ -11,7 +11,8 @@
       "Bash(Remove-Item \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_erm41.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_hsp65.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_rpob.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_rrl.fasta\", \"c:\\\\Users\\\\micha\\\\rust\\\\cosmic-files\\\\res\\\\sequences\\\\myco_rrs.fasta\")",
       "Bash(cargo test *)",
       "Bash(git stash *)",
-      "Bash(Remove-Item src/russh/russh.rs)"
+      "Bash(Remove-Item src/russh/russh.rs)",
+      "WebFetch(domain:eutils.ncbi.nlm.nih.gov)"
     ]
   }
 }

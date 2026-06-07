@@ -529,7 +529,6 @@ const HSP65_REQUIRED_ACCS: &[&str] = &["AF547836", "AF547849", "AY299134", "AY29
 const RRL_REQUIRED_SPECIES: &[&str] = &[
     "Mycobacterium abscessus",
     "Mycobacterium avium",
-    "Mycobacterium fortuitum",
     "Mycobacterium intracellulare",
     "Mycobacterium leprae",
 ];
