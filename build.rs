@@ -530,7 +530,6 @@ const RRL_REQUIRED_SPECIES: &[&str] = &[
     "Mycobacterium abscessus",
     "Mycobacterium avium",
     "Mycobacterium intracellulare",
-    "Mycobacterium leprae",
 ];
 
 fn check_rrl_integrity(seq_dir: &std::path::Path) {

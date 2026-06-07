@@ -12,7 +12,9 @@
       "Bash(cargo test *)",
       "Bash(git stash *)",
       "Bash(Remove-Item src/russh/russh.rs)",
-      "WebFetch(domain:eutils.ncbi.nlm.nih.gov)"
+      "WebFetch(domain:eutils.ncbi.nlm.nih.gov)",
+      "Bash(awk '{print $2, $3}')",
+      "Bash(git -C \"c:/Users/micha/rust/cosmic-files\" submodule status)"
     ]
   }
 }
