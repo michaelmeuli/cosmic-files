@@ -3878,7 +3878,7 @@ impl Item {
                         .padding(0),
                 );
             }
-            if best.rrs_snp_calls.is_empty() {
+            if !best.rrs_snp_calls.is_empty() {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
                     "16S rRNA amikacin resistance SNPs (rrs):",
