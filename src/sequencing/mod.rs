@@ -13,6 +13,7 @@
 //! `myco_erm41.fasta` is generated at build time but unused; erm41 identification uses
 //! per-subspecies references (`erm41_abscessus_ATCC_19977.fasta`, `erm41_bolletii_CIP_108541.fasta`, `erm41_massiliense_CCUG_48898.fasta`) instead.
 
+pub mod batch;
 pub mod bed;
 pub mod erm41;
 pub mod hsp65;
@@ -20,6 +21,8 @@ pub mod rpob;
 pub mod rrs;
 pub mod rrl;
 pub mod tb_data;
+
+pub use batch::SampleSusceptibilityRecord;
 
 use erm41::{Erm41LofCall, Erm41Position28, Erm41SusceptibilityCalls};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};

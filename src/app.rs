@@ -527,6 +527,10 @@ pub enum Message {
     SetTbDocxTemplatePath(String),
     SetTbPair1Suffix(String),
     SetTbPair2Suffix(String),
+    SetTbAb1ScanPath(String),
+    SetTbAb1OutDir(String),
+    ScanAb1Directory,
+    Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2616,6 +2620,18 @@ impl App {
                             .on_input(Message::SetTbPair2Suffix),
                     ),
                 )
+                .add(
+                    widget::settings::item::builder("AB1 scan directory").control(
+                        widget::text_input("", &self.config.tb_config.ab1_scan_path)
+                            .on_input(Message::SetTbAb1ScanPath),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("AB1 output directory").control(
+                        widget::text_input("", &self.config.tb_config.ab1_out_dir)
+                            .on_input(Message::SetTbAb1OutDir),
+                    ),
+                )
                 .into(),
         ])
         .into()
@@ -2851,6 +2867,10 @@ impl Application for App {
         };
 
         let mut commands = vec![app.update_config(), app.update(Message::CheckClipboard)];
+
+        if !app.config.tb_config.ab1_scan_path.is_empty() {
+            commands.push(app.update(Message::ScanAb1Directory));
+        }
 
         for location in flags.locations {
             if let Some(path) = location.path_opt()
@@ -6404,6 +6424,52 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
+            Message::SetTbAb1ScanPath(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_scan_path = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbAb1OutDir(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_out_dir = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::ScanAb1Directory => {
+                let scan_path = self.config.tb_config.ab1_scan_path.clone();
+                if scan_path.is_empty() {
+                    return Task::none();
+                }
+                return Task::future(async move {
+                    let records = tokio::task::spawn_blocking(move || {
+                        crate::sequencing::batch::scan_ab1_directory(
+                            std::path::PathBuf::from(scan_path),
+                        )
+                    })
+                    .await
+                    .unwrap_or_default();
+                    cosmic::action::app(Message::Ab1ScanComplete(records))
+                });
+            }
+            Message::Ab1ScanComplete(records) => {
+                let ab1_out_dir = self.config.tb_config.ab1_out_dir.clone();
+                let scan_path = self.config.tb_config.ab1_scan_path.clone();
+                let out_path = if !ab1_out_dir.is_empty() {
+                    std::path::PathBuf::from(&ab1_out_dir).join("ab1_susceptibility_report.csv")
+                } else {
+                    std::path::PathBuf::from(&scan_path).join("ab1_susceptibility_report.csv")
+                };
+                if let Err(e) = crate::sequencing::batch::write_ab1_csv(&records, &out_path) {
+                    log::warn!("AB1 CSV write failed: {e}");
+                } else {
+                    log::info!(
+                        "AB1 scan complete: {} records → {}",
+                        records.len(),
+                        out_path.display()
+                    );
+                }
+            }
         }
 
         Task::none()
@@ -8220,6 +8286,13 @@ impl Application for App {
                 iced::time::every(time::Duration::from_millis(10))
                     .with(scroll_speed)
                     .map(|(scroll_speed, _)| Message::ScrollTab(scroll_speed)),
+            );
+        }
+
+        if !self.config.tb_config.ab1_scan_path.is_empty() {
+            subscriptions.push(
+                iced::time::every(time::Duration::from_secs(2 * 60 * 60))
+                    .map(|_| Message::ScanAb1Directory),
             );
         }
 

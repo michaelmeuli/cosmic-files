@@ -24,6 +24,16 @@ pub enum RrlPosition2058_2059 {
 }
 
 
+impl std::fmt::Display for RrlPosition2058_2059 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SusceptibleWildtype => write!(f, "A2058/A2059 wildtype"),
+            Self::ResistanceConferringMutation => write!(f, "Mutation 2058/2059"),
+            Self::Undetermined => write!(f, "Undetermined"),
+        }
+    }
+}
+
 impl RrlPosition2058_2059 {
     /// Returns `Some(true)` for wildtype (susceptible), `Some(false)` for a
     /// resistance-conferring mutation, and `None` when the call is undetermined.

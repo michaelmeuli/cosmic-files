@@ -173,6 +173,8 @@ pub struct TBConfig {
     pub docx_template_path: String,
     pub pair1_suffix: String,
     pub pair2_suffix: String,
+    pub ab1_scan_path: String,
+    pub ab1_out_dir: String,
 }
 
 
@@ -243,6 +245,8 @@ impl Config {
             docx_template_path: self.tb_config.docx_template_path.clone(),
             pair1_suffix: self.tb_config.pair1_suffix.clone(),
             pair2_suffix: self.tb_config.pair2_suffix.clone(),
+            ab1_scan_path: self.tb_config.ab1_scan_path.clone(),
+            ab1_out_dir: self.tb_config.ab1_out_dir.clone(),
         }
     }
 }
