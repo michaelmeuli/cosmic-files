@@ -561,6 +561,40 @@ fn check_rrl_integrity(seq_dir: &std::path::Path) {
     }
 }
 
+/// Species that must appear as ntm-db full-gene descriptions in myco_rrs.fasta.
+/// Keep in sync with the keys in RRS_RESISTANCE_SNPS in src/sequencing/rrs.rs.
+const RRS_REQUIRED_SPECIES: &[&str] = &[
+    "Mycobacterium abscessus",
+    "Mycobacterium avium",
+    "Mycobacterium intracellulare",
+];
+
+fn check_rrs_integrity(seq_dir: &std::path::Path) {
+    let path = seq_dir.join("myco_rrs.fasta");
+    let fasta = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => panic!("cannot read myco_rrs.fasta: {e}"),
+    };
+    let ntm_descriptions: std::collections::HashSet<String> = fasta
+        .lines()
+        .filter(|l| l.starts_with('>'))
+        .filter_map(|l| {
+            let mut words = l[1..].splitn(4, ' ');
+            let accession = words.next()?;
+            if !accession.contains(':') { return None; }
+            let genus   = words.next()?;
+            let species = words.next()?;
+            Some(format!("{} {}", genus, species))
+        })
+        .collect();
+    for species in RRS_REQUIRED_SPECIES {
+        assert!(
+            ntm_descriptions.contains(*species),
+            "myco_rrs.fasta has no ntm-db full-gene sequence for \"{species}\" — rrs_snp_calls will always be empty (SNP positions require a full-gene reference)"
+        );
+    }
+}
+
 fn check_hsp65_integrity(seq_dir: &std::path::Path) {
     let path = seq_dir.join("myco_hsp65.fasta");
     let fasta = match fs::read_to_string(&path) {
@@ -591,6 +625,7 @@ fn main() {
     extract_ntm_db_sequences(&seq_dir);
     check_hsp65_integrity(&seq_dir);
     check_rrl_integrity(&seq_dir);
+    check_rrs_integrity(&seq_dir);
 
     // Embed the ntm-db submodule commit hash so the UI can display it.
     let commit = Command::new("git")

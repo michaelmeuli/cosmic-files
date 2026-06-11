@@ -3851,6 +3851,9 @@ impl Item {
             }
         } else {
             let best = &hits[0];
+            let best_snp_hit = hits
+                .iter()
+                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty());
             details = details.push(widget::text::body(format!(
                 "Sequence identity to {}: {:.1}%",
                 best.description, best.identity
@@ -3878,7 +3881,7 @@ impl Item {
                         .padding(0),
                 );
             }
-            if !best.rrs_snp_calls.is_empty() {
+            if let Some(snp_hit) = best_snp_hit {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
                     "16S rRNA amikacin resistance SNPs (rrs):",
@@ -3887,7 +3890,7 @@ impl Item {
                     "(Using commit: {} of ntm-db repository)",
                     env!("NTM_DB_COMMIT")
                 )));
-                for snp in &best.rrs_snp_calls {
+                for snp in &snp_hit.rrs_snp_calls {
                     details = details.push(widget::text::body(format!(
                         "  pos {}: {}",
                         snp.ref_pos + 1,

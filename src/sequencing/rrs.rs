@@ -162,10 +162,14 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query.to_vec(), fwd_off)
             };
-            let rrs_snp_calls = RRS_RESISTANCE_SNPS
-                .get(description.as_str())
-                .map(|snps| call_rrs_snps(snps, &aligned_query, alignment_offset))
-                .unwrap_or_default();
+            let rrs_snp_calls = if accession.contains(':') {
+                RRS_RESISTANCE_SNPS
+                    .get(description.as_str())
+                    .map(|snps| call_rrs_snps(snps, &aligned_query, alignment_offset))
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
             SeqIdHit {
                 accession,
                 description,
