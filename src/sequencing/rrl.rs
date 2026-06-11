@@ -330,10 +330,14 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd_id, false, query, fwd_off)
             };
-            let rrl_snp_calls = RRL_RESISTANCE_SNPS
-                .get(description.as_str())
-                .map(|snps| call_rrl_snps(snps, aligned_query, offset))
-                .unwrap_or_default();
+            let rrl_snp_calls = if accession.contains(':') {
+                RRL_RESISTANCE_SNPS
+                    .get(description.as_str())
+                    .map(|snps| call_rrl_snps(snps, aligned_query, offset))
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
             SeqIdHit {
                 accession,
                 description,

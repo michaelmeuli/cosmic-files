@@ -539,12 +539,15 @@ fn check_rrl_integrity(seq_dir: &std::path::Path) {
         Err(e) => panic!("cannot read myco_rrl.fasta: {e}"),
     };
     // Mirror parse_multi_fasta(): description = word[1] + " " + word[2] of the header.
-    let descriptions: std::collections::HashSet<String> = fasta
+    // Only count ntm-db entries (accession contains ':') — those are full-gene sequences
+    // whose coordinates match the variants.csv SNP positions used in call_rrl_snps.
+    let ntm_descriptions: std::collections::HashSet<String> = fasta
         .lines()
         .filter(|l| l.starts_with('>'))
         .filter_map(|l| {
             let mut words = l[1..].splitn(4, ' ');
-            words.next(); // accession
+            let accession = words.next()?;
+            if !accession.contains(':') { return None; } // skip NCBI partial sequences
             let genus   = words.next()?;
             let species = words.next()?;
             Some(format!("{} {}", genus, species))
@@ -552,8 +555,8 @@ fn check_rrl_integrity(seq_dir: &std::path::Path) {
         .collect();
     for species in RRL_REQUIRED_SPECIES {
         assert!(
-            descriptions.contains(*species),
-            "myco_rrl.fasta is missing a sequence for \"{species}\" — RRL_RESISTANCE_SNPS lookup will silently return no calls"
+            ntm_descriptions.contains(*species),
+            "myco_rrl.fasta has no ntm-db full-gene sequence for \"{species}\" — rrl_snp_calls will always be empty (SNP positions require a full-gene reference)"
         );
     }
 }

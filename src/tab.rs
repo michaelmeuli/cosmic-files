@@ -3940,6 +3940,12 @@ impl Item {
             }
         } else {
             let best = &hits[0];
+            // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
+            // for the winning species, since SNP positions are anchored to the gene start
+            // in the ntm-db full-gene sequences, not to partial NCBI sequences.
+            let best_snp_hit = hits
+                .iter()
+                .find(|h| h.description == best.description && !h.rrl_snp_calls.is_empty());
             details = details.push(widget::text::body(format!(
                 "Sequence identity to {}: {:.1}%",
                 best.description, best.identity
@@ -3968,7 +3974,7 @@ impl Item {
                 );
             }
             details = details.push(widget::text::body(""));
-            if !best.rrl_snp_calls.is_empty() {
+            if let Some(snp_hit) = best_snp_hit {
                 details = details.push(widget::text::body(
                     "23S rRNA macrolide resistance SNPs (rrl):",
                 ));
@@ -3976,7 +3982,7 @@ impl Item {
                     "(Using commit: {} of ntm-db repository)",
                     env!("NTM_DB_COMMIT")
                 )));
-                for snp in &best.rrl_snp_calls {
+                for snp in &snp_hit.rrl_snp_calls {
                     details = details.push(widget::text::body(format!(
                         "  pos {}: {}",
                         snp.ref_pos + 1,
