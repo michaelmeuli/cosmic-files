@@ -26,18 +26,52 @@ pub struct SampleSusceptibilityRecord {
     pub is_susceptible: Option<bool>,
 }
 
+/// Find the first run of exactly 10 consecutive ASCII digits starting with "20"
+/// that is not embedded inside a longer digit run.
+fn find_sample_id(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 10 <= bytes.len() {
+        if bytes[i..i + 2] == *b"20" && bytes[i..i + 10].iter().all(|b| b.is_ascii_digit()) {
+            let before_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
+            let after_ok = i + 10 == bytes.len() || !bytes[i + 10].is_ascii_digit();
+            if before_ok && after_ok {
+                return Some(&s[i..i + 10]);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Extract `(sample_id, gene)` from an AB1 filename.
 ///
-/// For a name like `"2026311072 rrl R 2.4.26_MCLR 21R.ab1"` this returns
-/// `("2026311072".to_string(), Some("rrl".to_string()))`.
+/// `sample_id` is the first token of 10 digits starting with "20", or a
+/// fallback of the full stem when no such token is found.
+/// Gene is inferred from keywords anywhere in the lowercase filename.
 pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
     let stem = std::path::Path::new(name)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(name);
-    let mut tokens = stem.split_whitespace();
-    let sample_id = tokens.next().unwrap_or(stem).to_string();
-    let gene = tokens.next().map(str::to_string);
+
+    let sample_id = find_sample_id(stem).unwrap_or(stem).to_string();
+
+    let lower_name = name.to_ascii_lowercase();
+    let gene = if lower_name.contains("erm41") || lower_name.contains("erm") {
+        Some("erm41".to_string())
+    } else if lower_name.contains("hsp65") || lower_name.contains("65kda") {
+        Some("hsp65".to_string())
+    } else if lower_name.contains("rpob") || lower_name.contains("rpo") {
+        Some("rpoB".to_string())
+    } else if lower_name.contains("mbak14") {
+        Some("16s".to_string())
+    } else if lower_name.contains("rrl") || lower_name.contains("mclr") {
+        Some("rrl".to_string())
+    } else {
+        None
+    };
+
     (sample_id, gene)
 }
 

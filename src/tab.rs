@@ -3560,24 +3560,25 @@ impl Item {
                     )));
                 }
             }
-            if let Some(chrom) = self.metadata.ab1_chromatogram()
-                && chrom.erm41_view_state_opt.is_some()
+            if let Some(chrom) = self.metadata.ab1_chromatogram().filter(|c| c.erm41_view_state_opt.is_some())
                 && !self.metadata.is_massiliense_seq_id()
             {
+                let view_state = chrom.erm41_view_state_opt.unwrap();
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
                     "Shown are bases 19-39, with position 28 in bold.",
                 ));
-                if chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse) {
+                if view_state.is_reverse {
                     details = details.push(widget::text::body("reverse complement"));
                 }
                 details = details.push(widget::text::body(""));
                 let canvas = widget::Canvas::new(ChromatogramProgram {
-                    is_reverse: chrom.erm41_view_state_opt.is_some_and(|e| e.is_reverse),
-                    display_window: chrom.erm41_view_state_opt.map(|e| e.window),
+                    is_reverse: view_state.is_reverse,
+                    display_window: Some(view_state.window),
                     highlighted_scans: chrom
-                        .erm41_view_state_opt
-                        .and_then(|e| chrom.peak_locs.get(e.pos28_base_idx as usize).copied())
+                        .peak_locs
+                        .get(view_state.pos28_base_idx as usize)
+                        .copied()
                         .map(|v| vec![v])
                         .unwrap_or_default(),
                     chrom,
@@ -3918,7 +3919,8 @@ impl Item {
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
             || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            //|| !self.metadata.is_seq_id()  //TODO
+            || !self.metadata.seq_id_hits().first().is_some_and(|h| h.identity >= 60.0)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3993,28 +3995,26 @@ impl Item {
                     )));
                 }
             }
-            if let Some(chrom) = self.metadata.ab1_chromatogram() {
+            if let Some(chrom) = self.metadata.ab1_chromatogram().filter(|c| c.rrl_ntm_view_state_opt.is_some()) {
+                let view_state = chrom.rrl_ntm_view_state_opt.unwrap();
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
                     "Shown in bold are bases coresponding to E. coli positions 2058/2059",
                 ));
-                if chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse) {
+                if view_state.is_reverse {
                     details = details.push(widget::text::body("reverse complement"));
                 }
                 details = details.push(widget::text::body(""));
                 let canvas = widget::Canvas::new(ChromatogramProgram {
-                    is_reverse: chrom.rrl_ntm_view_state_opt.is_some_and(|e| e.is_reverse),
-                    display_window: chrom.rrl_ntm_view_state_opt.map(|e| e.window),
-                    highlighted_scans: chrom
-                        .rrl_ntm_view_state_opt
-                        .map(|e| {
-                            let idx = e.snp_base_idx as usize;
-                            [idx, idx + 1]
-                                .iter()
-                                .filter_map(|&i| chrom.peak_locs.get(i).copied())
-                                .collect()
-                        })
-                        .unwrap_or_default(),
+                    is_reverse: view_state.is_reverse,
+                    display_window: Some(view_state.window),
+                    highlighted_scans: {
+                        let idx = view_state.snp_base_idx as usize;
+                        [idx, idx + 1]
+                            .iter()
+                            .filter_map(|&i| chrom.peak_locs.get(i).copied())
+                            .collect()
+                    },
                     chrom,
                 })
                 .width(Length::Fill)
