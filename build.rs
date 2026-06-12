@@ -617,11 +617,12 @@ fn check_hsp65_integrity(seq_dir: &std::path::Path) {
 
 fn main() {
     let seq_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("res/sequences");
-    let api_key = env::var("NCBI_API_KEY").ok();
     println!("cargo:rerun-if-env-changed=NCBI_API_KEY");
+    let api_key = env::var("NCBI_API_KEY")
+        .expect("NCBI_API_KEY must be set");
 
-    fetch_myco_sequences(&seq_dir, api_key.as_deref());
-    fetch_sequences_from_toml(&seq_dir, api_key.as_deref());
+    fetch_myco_sequences(&seq_dir, Some(api_key.as_str()));
+    fetch_sequences_from_toml(&seq_dir, Some(api_key.as_str()));
     extract_ntm_db_sequences(&seq_dir);
     check_hsp65_integrity(&seq_dir);
     check_rrl_integrity(&seq_dir);
