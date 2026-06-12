@@ -3587,6 +3587,10 @@ impl Item {
                 .height(Length::Fixed(200.0));
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
+            } else {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body("erm(41) chromatogram view is not available."));
+                details = details.push(widget::text::body(""));
             }
             match self.metadata.susceptibility_calls().erm41.position_28.and_then(|p| p.is_susceptible()) {
                 Some(true) => {
@@ -4020,6 +4024,10 @@ impl Item {
                 .width(Length::Fill)
                 .height(Length::Fixed(200.0));
                 details = details.push(canvas);
+                details = details.push(widget::text::body(""));
+            } else {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body("rrl chromatogram view is not available."));
                 details = details.push(widget::text::body(""));
             }
             match self.metadata.susceptibility_calls().rrl.position_2058_2059.and_then(|p| p.is_susceptible()) {
