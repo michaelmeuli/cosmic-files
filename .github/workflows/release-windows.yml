@@ -20,6 +20,12 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache NCBI sequences
+        uses: actions/cache@v4
+        with:
+          path: res/sequences
+          key: ncbi-sequences-v2
+
       - name: Install Rust stable
         run: rustup update stable && rustup default stable
 

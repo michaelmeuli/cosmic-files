@@ -29,6 +29,13 @@ use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 
+const ACC_GASTRI: &str = "AF547836";
+const ACC_KANSASII: &str = "AF547849";
+const ACC_MARINUM: &str = "AY299134";
+const ACC_ULCERANS: &str = "AY299145";
+const KANSASII_GASTRI_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII];
+const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
+
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
@@ -39,6 +46,11 @@ const RRL_FWD_END: &[u8] = b"ctaagttcttaagggcgcat";
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
 
+/// erm(41) CDS extracted from complete/WGS genomes via `res/sequences/sequences.toml`
+/// (`build.rs` → `ncbi_fetch_genome_gene`):
+///   - abscessus: NC_010397.1 locus_tag MAB_2297
+///   - bolletii:  NZ_JRMF01000040.1 locus_tag QP40_RS10855
+///   - massiliense: NZ_MVHY01000001.1 (fetched manually — truncated erm41 copy)
 const REF_ERM41_ABSCESSUS: &str =
     include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
 const REF_ERM41_BOLLETII: &str =
@@ -46,20 +58,25 @@ const REF_ERM41_BOLLETII: &str =
 const REF_ERM41_MASSILENSE: &str =
     include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
 
-const ACC_GASTRI: &str = "AF547836";
-const ACC_KANSASII: &str = "AF547849";
-const ACC_MARINUM: &str = "AY299134";
-const ACC_ULCERANS: &str = "AY299145";
-const KANSASII_GASTRI_ACCS: &[&str] = &[ACC_GASTRI, ACC_KANSASII];
-const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
-
-/// 16S rRNA (rrs) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
+/// 16S rRNA (rrs) reference sequences.
+/// NCBI bulk query (ESearch → EFetch, `build.rs` `fetch_myco_sequences`):
+/// `Bacteria[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 1200:1650[SLEN] AND type_material[Filter]`
+/// Supplemented with ntm-db full-gene sequences (extracted by `extract_ntm_db_sequences`).
 const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
-/// hsp65 / groEL2 reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
+/// hsp65 / groEL2 reference sequences.
+/// NCBI bulk query:
+/// `Mycobacteriales[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]`
+/// Supplemented with ntm-db full-gene sequences.
 const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
-/// rpoB reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
+/// rpoB reference sequences.
+/// NCBI bulk query:
+/// `Mycobacteriales[Organism] AND rpoB[Gene Name] AND 400:3000[SLEN] AND type_material[Filter]`
+/// Supplemented with ntm-db full-gene sequences.
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
-/// 23S rRNA (rrl) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
+/// 23S rRNA (rrl) reference sequences.
+/// NCBI bulk query:
+/// `Mycobacteriales[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]`
+/// Supplemented with ntm-db full-gene sequences.
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
 
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
