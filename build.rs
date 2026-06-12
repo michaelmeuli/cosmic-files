@@ -59,7 +59,6 @@ fn ncbi_bulk_download(
     query: &str,
     output: &str,
     batch: usize,
-    max_total: Option<usize>,
 ) -> Result<usize, String> {
     let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
     let encoded = ncbi_url_encode(query);
@@ -92,15 +91,12 @@ fn ncbi_bulk_download(
         .unwrap_or("1")
         .to_string();
 
-    let effective_total = max_total.map(|m| m.min(total)).unwrap_or(total);
-    println!("cargo:warning=fetch_myco: NCBI reports {} sequences, fetching up to {}", total, effective_total);
-
     let delay_ms = if api_key.is_some() { 120 } else { 350 };
     let mut fasta = String::new();
     let mut retstart = 0usize;
 
-    while retstart < effective_total {
-        let batch_size = batch.min(effective_total - retstart);
+    while retstart < total {
+        let batch_size = batch.min(total - retstart);
         let fetch_url = format!(
             "{}/efetch.fcgi?db=nucleotide&WebEnv={}&query_key={}\
              &retstart={}&retmax={}&rettype=fasta&retmode=text&email={}{}",
@@ -254,7 +250,7 @@ fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
             "myco_hsp65.fasta",
         ),
         (
-            "Bacteria[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 1200:1650[SLEN] AND type_material[Filter]",
+            "Mycobacteriales[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
             "myco_rrs.fasta",
         ),
         (
@@ -272,7 +268,7 @@ fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
 
         if needs_download {
             println!("cargo:warning=fetch_myco: downloading {}", filename);
-            match ncbi_bulk_download(BASE, EMAIL, api_key.as_deref(), query, path.to_str().unwrap(), BATCH, None) {
+            match ncbi_bulk_download(BASE, EMAIL, api_key.as_deref(), query, path.to_str().unwrap(), BATCH) {
                 Ok(n) => println!("cargo:warning=fetch_myco: wrote {} sequences → {}", n, filename),
                 Err(e) => println!("cargo:warning=fetch_myco: failed for {}: {}", filename, e),
             }
