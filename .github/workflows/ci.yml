@@ -13,6 +13,8 @@ jobs:
   test:
     name: cosmic-files - latest
     runs-on: ubuntu-latest
+    env:
+      NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update; sudo apt-get install libclang-dev libglib2.0-dev libxkbcommon-dev
