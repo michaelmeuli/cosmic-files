@@ -27,6 +27,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build docs
+        env:
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
         run: cargo doc --no-deps --document-private-items
 
       - name: Add redirect index.html
