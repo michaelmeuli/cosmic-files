@@ -13,12 +13,19 @@ jobs:
   test:
     name: cosmic-files - latest
     runs-on: ubuntu-latest
-    env:
-      NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update; sudo apt-get install libclang-dev libglib2.0-dev libxkbcommon-dev
       - run: rustup update stable && rustup default stable
-      - run: cargo test --verbose --no-default-features
-      - run: cargo test --verbose
-      - run: cargo test --verbose --all-features
+      - name: cargo test (no default features)
+        env:
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+        run: cargo test --verbose --no-default-features
+      - name: cargo test (default features)
+        env:
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+        run: cargo test --verbose
+      - name: cargo test (all features)
+        env:
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+        run: cargo test --verbose --all-features
