@@ -7,8 +7,8 @@ use super::{
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
     rpob::identify_sequence_rpob,
-    rrl::{RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl},
-    rrs::{RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs},
+    rrl::{RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare},
+    rrs::{RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare},
     trim_to_min_quality,
 };
 
@@ -166,10 +166,12 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
                     position_2058_2059: hit.rrl_position_2058_2059_opt,
                     snp_calls: hit.rrl_snp_calls.clone(),
                     is_susceptible: is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
+                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
                 },
                 rrs: RrsSusceptibilityCalls {
                     snp_calls: hit.rrs_snp_calls.clone(),
                     is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
                 },
             })
             .unwrap_or_default();
@@ -291,6 +293,122 @@ pub fn write_ab1_csv(
             rrl_sus.as_str(),
             rrs_snps.as_str(),
             rrs_sus.as_str(),
+            file_created.as_str(),
+        ])?;
+    }
+
+    wtr.flush()?;
+    Ok(())
+}
+
+/// Write records that flag a rare resistance mutation (`is_susceptible_rare == Some(false)` for
+/// rrl or rrs) to `out_path`. Same columns as `write_ab1_csv` plus `rrl_susceptible_rare` and
+/// `rrs_susceptible_rare`.
+pub fn write_rare_mutations_csv(
+    records: &[SampleSusceptibilityRecord],
+    out_path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = std::fs::File::create(out_path)?;
+    let mut wtr = csv::Writer::from_writer(file);
+
+    wtr.write_record([
+        "file_name",
+        "sample_id",
+        "gene",
+        "overall_susceptible",
+        "species",
+        "identity_pct",
+        "erm41_position_28",
+        "erm41_lof_snp_calls",
+        "erm41_susceptible",
+        "rrl_position_2058_2059",
+        "rrl_snp_calls",
+        "rrl_susceptible",
+        "rrl_susceptible_rare",
+        "rrs_snp_calls",
+        "rrs_susceptible",
+        "rrs_susceptible_rare",
+        "file_created",
+    ])?;
+
+    for rec in records {
+        if rec.gene.is_none() {
+            continue;
+        }
+        if rec.identity.is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
+            continue;
+        }
+        let rrl_rare = rec.susceptibility_calls.rrl.is_susceptible_rare;
+        let rrs_rare = rec.susceptibility_calls.rrs.is_susceptible_rare;
+        if rrl_rare != Some(false) && rrs_rare != Some(false) {
+            continue;
+        }
+
+        let file_created = rec
+            .file_created
+            .map(system_time_to_iso8601)
+            .unwrap_or_default();
+
+        let erm41_pos = rec
+            .susceptibility_calls
+            .erm41
+            .position_28
+            .map(|p| p.to_string())
+            .unwrap_or_default();
+        let erm41_sus = fmt_susceptible(rec.susceptibility_calls.erm41.is_susceptible);
+        let erm41_lof = snp_calls_str(
+            rec.susceptibility_calls
+                .erm41
+                .lof_snp_calls
+                .iter()
+                .map(|s| (s.ref_pos, s.call_tag())),
+        );
+
+        let rrl_pos = rec
+            .susceptibility_calls
+            .rrl
+            .position_2058_2059
+            .map(|p| p.to_string())
+            .unwrap_or_default();
+        let rrl_sus = fmt_susceptible(rec.susceptibility_calls.rrl.is_susceptible);
+        let rrl_sus_rare = fmt_susceptible(rrl_rare);
+        let rrl_snps = snp_calls_str(
+            rec.susceptibility_calls
+                .rrl
+                .snp_calls
+                .iter()
+                .map(|s| (s.ref_pos, s.call_tag())),
+        );
+
+        let rrs_sus = fmt_susceptible(rec.susceptibility_calls.rrs.is_susceptible);
+        let rrs_sus_rare = fmt_susceptible(rrs_rare);
+        let rrs_snps = snp_calls_str(
+            rec.susceptibility_calls
+                .rrs
+                .snp_calls
+                .iter()
+                .map(|s| (s.ref_pos, s.call_tag())),
+        );
+
+        let overall = fmt_susceptible(rec.is_susceptible);
+
+        wtr.write_record([
+            rec.file_name.as_str(),
+            rec.sample_id.as_str(),
+            rec.gene.as_deref().unwrap_or(""),
+            overall.as_str(),
+            rec.species.as_deref().unwrap_or(""),
+            &rec.identity.map(|i| format!("{:.1}", i)).unwrap_or_default(),
+            erm41_pos.as_str(),
+            erm41_lof.as_str(),
+            erm41_sus.as_str(),
+            rrl_pos.as_str(),
+            rrl_snps.as_str(),
+            rrl_sus.as_str(),
+            rrl_sus_rare.as_str(),
+            rrs_snps.as_str(),
+            rrs_sus.as_str(),
+            rrs_sus_rare.as_str(),
             file_created.as_str(),
         ])?;
     }

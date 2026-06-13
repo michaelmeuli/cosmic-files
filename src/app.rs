@@ -6422,6 +6422,12 @@ impl Application for App {
                         out_path.display()
                     );
                 }
+                let rare_path = out_path.with_file_name("rare_mutations.csv");
+                if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path) {
+                    log::warn!("Rare mutations CSV write failed: {e}");
+                } else {
+                    log::info!("Rare mutations CSV → {}", rare_path.display());
+                }
             }
         }
 

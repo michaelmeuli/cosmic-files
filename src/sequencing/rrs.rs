@@ -112,6 +112,7 @@ impl RrsSnpCall {
 pub struct RrsSusceptibilityCalls {
     pub snp_calls: Vec<RrsSnpCall>,
     pub is_susceptible: Option<bool>,
+    pub is_susceptible_rare: Option<bool>,
 }
 
 /// Returns `Some(false)` if any observed SNP base is a resistance-conferring alt, or `None` if
@@ -125,6 +126,13 @@ pub fn is_susceptible_rrs(snp_calls: &[RrsSnpCall]) -> Option<bool> {
     } else {
         None
     }
+}
+
+/// Returns `Some(false)` if any observed SNP base is a resistance-conferring alt, or `None`
+/// otherwise. Parallel to `is_susceptible_rrl_by_snp_calls_rare`: rrs has no position-based
+/// anchor call, so all SNP resistance here is inherently not explained by a position mutation.
+pub fn is_susceptible_rrs_by_snp_calls_rare(snp_calls: &[RrsSnpCall]) -> Option<bool> {
+    is_susceptible_rrs(snp_calls)
 }
 
 fn call_rrs_snps(

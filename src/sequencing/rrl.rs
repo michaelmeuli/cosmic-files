@@ -100,6 +100,11 @@ pub fn is_susceptible_rrl(pos_opt: Option<&RrlPosition2058_2059>, snp_calls: &[R
     }
 }
 
+/// Returns susceptibility based on position 2058/2059 alone, without considering SNP calls.
+pub fn is_susceptible_rrl_by_position(pos: &RrlPosition2058_2059) -> Option<bool> {
+    pos.is_susceptible()
+}
+
 /// Returns `Some(false)` if any observed SNP base is a resistance-conferring alt, or `None` if
 /// no resistance alt is observed.
 pub fn is_susceptible_rrl_by_snp_calls(snp_calls: &[RrlSnpCall]) -> Option<bool> {
@@ -113,9 +118,14 @@ pub fn is_susceptible_rrl_by_snp_calls(snp_calls: &[RrlSnpCall]) -> Option<bool>
     }
 }
 
-/// Returns susceptibility based on position 2058/2059 alone, without considering SNP calls.
-pub fn is_susceptible_rrl_by_position(pos: &RrlPosition2058_2059) -> Option<bool> {
-    pos.is_susceptible()
+/// Returns `Some(false)` only when position 2058/2059 is wildtype (`Some(true)`) **and** a
+/// resistance-conferring SNP alt is observed elsewhere; otherwise returns `None`.
+/// This captures rare mutations where resistance is not due to 2058/2059.
+pub fn is_susceptible_rrl_by_snp_calls_rare(pos_opt: Option<&RrlPosition2058_2059>, snp_calls: &[RrlSnpCall]) -> Option<bool> {
+    if is_susceptible_rrl_by_position(pos_opt?) != Some(true) {
+        return None;
+    }
+    is_susceptible_rrl_by_snp_calls(snp_calls)
 }
 
 /// All rrl susceptibility evidence for one sample, ready for UI display.
@@ -124,6 +134,7 @@ pub struct RrlSusceptibilityCalls {
     pub position_2058_2059: Option<RrlPosition2058_2059>,
     pub snp_calls: Vec<RrlSnpCall>,
     pub is_susceptible: Option<bool>,
+    pub is_susceptible_rare: Option<bool>,
 }
 
 

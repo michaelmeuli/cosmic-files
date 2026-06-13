@@ -62,8 +62,8 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
-use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl};
-use crate::sequencing::rrs::{RrsSusceptibilityCalls, is_susceptible_rrs};
+use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare};
+use crate::sequencing::rrs::{RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41Position28, Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
@@ -1000,10 +1000,12 @@ pub fn item_from_entry(
                 position_2058_2059: hit.rrl_position_2058_2059_opt,
                 snp_calls: hit.rrl_snp_calls.clone(),
                 is_susceptible: is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
+                is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
             },
             rrs: RrsSusceptibilityCalls {
                 snp_calls: hit.rrs_snp_calls.clone(),
                 is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
+                is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
             },
         })
         .unwrap_or_default();
