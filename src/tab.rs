@@ -977,28 +977,29 @@ pub fn item_from_entry(
 
     let is_susceptible = sequence_opt.as_ref().and_then(|s| {
         let hit = s.seq_id_hits.first()?;
-        if let Some(pos) = hit.erm41_position_28_opt.as_ref() {
-            is_susceptible_erm41(pos, &hit.erm41_snp_calls)
-        } else if let Some(pos) = hit.rrl_position_2058_2059_opt.as_ref() {
-            is_susceptible_rrl(pos, &hit.rrl_snp_calls)
-        } else {
-            None
+        let erm41_result = is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls);
+        if erm41_result.is_some() {
+            return erm41_result;
         }
+        let rrl_result = is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
+        if rrl_result.is_some() {
+            return rrl_result;
+        }
+        is_susceptible_rrs(&hit.rrs_snp_calls)
     });
+    
     let susceptibility_calls = sequence_opt.as_ref()
         .and_then(|s| s.seq_id_hits.first())
         .map(|hit| SusceptibilityCalls {
             erm41: Erm41SusceptibilityCalls {
                 position_28: hit.erm41_position_28_opt,
                 lof_snp_calls: hit.erm41_snp_calls.clone(),
-                is_susceptible: hit.erm41_position_28_opt.as_ref()
-                    .and_then(|pos| is_susceptible_erm41(pos, &hit.erm41_snp_calls)),
+                is_susceptible: is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls),
             },
             rrl: RrlSusceptibilityCalls {
                 position_2058_2059: hit.rrl_position_2058_2059_opt,
                 snp_calls: hit.rrl_snp_calls.clone(),
-                is_susceptible: hit.rrl_position_2058_2059_opt.as_ref()
-                    .and_then(|pos| is_susceptible_rrl(pos, &hit.rrl_snp_calls)),
+                is_susceptible: is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
             },
             rrs: RrsSusceptibilityCalls {
                 snp_calls: hit.rrs_snp_calls.clone(),

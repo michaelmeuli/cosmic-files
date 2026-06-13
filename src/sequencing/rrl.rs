@@ -87,15 +87,16 @@ impl RrlPosition2058_2059 {
 /// mutation, and `None` when the call is undetermined.
 ///
 /// If any `snp_calls` entry shows a resistance-conferring alt base, returns `Some(false)`
-/// regardless of `pos`. Otherwise delegates to the position-based call.
-pub fn is_susceptible_rrl(pos: &RrlPosition2058_2059, snp_calls: &[RrlSnpCall]) -> Option<bool> {
+/// regardless of `pos_opt`. Otherwise delegates to the position-based call.
+/// `pos_opt: None` (anchor not found) still allows SNP calls to return `Some(false)`.
+pub fn is_susceptible_rrl(pos_opt: Option<&RrlPosition2058_2059>, snp_calls: &[RrlSnpCall]) -> Option<bool> {
     let has_resistance = snp_calls
         .iter()
         .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)));
     if has_resistance {
         Some(false)
     } else {
-        pos.is_susceptible()
+        pos_opt.and_then(|p| p.is_susceptible())
     }
 }
 

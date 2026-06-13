@@ -34,15 +34,16 @@ impl std::fmt::Display for Erm41Position28 {
 ///
 /// Returns `Some(true)` if any observed base is a LOF alt — a single LOF mutation is sufficient
 /// to render erm(41) non-functional, making the organism susceptible. Otherwise delegates to
-/// `pos.is_susceptible()`, preserving `None` for ambiguous or undetermined positions.
-pub fn is_susceptible_erm41(pos: &Erm41Position28, snp_calls: &[Erm41LofCall]) -> Option<bool> {
+/// `pos_opt.is_susceptible()`, preserving `None` for ambiguous, undetermined, or absent positions.
+/// `pos_opt: None` (anchor not found) still allows LOF SNPs to return `Some(true)`.
+pub fn is_susceptible_erm41(pos_opt: Option<&Erm41Position28>, snp_calls: &[Erm41LofCall]) -> Option<bool> {
     let has_lof = snp_calls
         .iter()
         .any(|c| c.query_base.is_some_and(|b| c.lof_alts.contains_key(&b)));
     if has_lof {
         Some(true)
     } else {
-        pos.is_susceptible()
+        pos_opt.and_then(|p| p.is_susceptible())
     }
 }
 
