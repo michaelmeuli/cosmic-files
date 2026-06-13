@@ -223,6 +223,10 @@ pub fn write_ab1_csv(
     ])?;
 
     for rec in records {
+        if rec.gene.is_none() {
+            continue;
+        }
+
         let file_created = rec
             .file_created
             .map(system_time_to_iso8601)
