@@ -194,9 +194,9 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
 
 /// Write `records` to a CSV file at `out_path`.
 ///
-/// Columns: `sample_id, gene, file_name, file_created, species, identity_pct,
-/// erm41_position_28, erm41_susceptible, rrl_position_2058_2059, rrl_susceptible,
-/// rrs_susceptible, overall_susceptible`
+/// Columns: `file_name, sample_id, gene, overall_susceptible, species, identity_pct,
+/// erm41_position_28, erm41_lof_snp_calls, erm41_susceptible, rrl_position_2058_2059,
+/// rrl_snp_calls, rrl_susceptible, rrs_snp_calls, rrs_susceptible, file_created`
 pub fn write_ab1_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
@@ -205,21 +205,21 @@ pub fn write_ab1_csv(
     let mut wtr = csv::Writer::from_writer(file);
 
     wtr.write_record([
+        "file_name",
         "sample_id",
         "gene",
-        "file_name",
-        "file_created",
+        "overall_susceptible",
         "species",
         "identity_pct",
         "erm41_position_28",
-        "erm41_susceptible",
         "erm41_lof_snp_calls",
+        "erm41_susceptible",
         "rrl_position_2058_2059",
-        "rrl_susceptible",
         "rrl_snp_calls",
-        "rrs_susceptible",
+        "rrl_susceptible",
         "rrs_snp_calls",
-        "overall_susceptible",
+        "rrs_susceptible",
+        "file_created",
     ])?;
 
     for rec in records {
@@ -270,21 +270,21 @@ pub fn write_ab1_csv(
         let overall = fmt_susceptible(rec.is_susceptible);
 
         wtr.write_record([
+            rec.file_name.as_str(),
             rec.sample_id.as_str(),
             rec.gene.as_deref().unwrap_or(""),
-            rec.file_name.as_str(),
-            file_created.as_str(),
+            overall.as_str(),
             rec.species.as_deref().unwrap_or(""),
             &rec.identity.map(|i| format!("{:.1}", i)).unwrap_or_default(),
             erm41_pos.as_str(),
-            erm41_sus.as_str(),
             erm41_lof.as_str(),
+            erm41_sus.as_str(),
             rrl_pos.as_str(),
-            rrl_sus.as_str(),
             rrl_snps.as_str(),
-            rrs_sus.as_str(),
+            rrl_sus.as_str(),
             rrs_snps.as_str(),
-            overall.as_str(),
+            rrs_sus.as_str(),
+            file_created.as_str(),
         ])?;
     }
 
