@@ -529,6 +529,9 @@ pub enum Message {
     SetTbPair2Suffix(String),
     SetTbAb1ScanPath(String),
     SetTbAb1OutDir(String),
+    SetMatrixHomeserver(String),
+    SetMatrixAccessToken(String),
+    SetMatrixRoomId(String),
     ScanAb1Directory,
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
 }
@@ -2623,6 +2626,24 @@ impl App {
                     widget::settings::item::builder("AB1 output directory").control(
                         widget::text_input("", &self.config.tb_config.ab1_out_dir)
                             .on_input(Message::SetTbAb1OutDir),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Matrix homeserver").control(
+                        widget::text_input("https://matrix.example.org", &self.config.tb_config.matrix_homeserver)
+                            .on_input(Message::SetMatrixHomeserver),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Matrix access token").control(
+                        widget::text_input("(stored in plaintext)", &self.config.tb_config.matrix_access_token)
+                            .on_input(Message::SetMatrixAccessToken),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Matrix room ID").control(
+                        widget::text_input("!roomid:server.org", &self.config.tb_config.matrix_room_id)
+                            .on_input(Message::SetMatrixRoomId),
                     ),
                 )
                 .into(),
@@ -6389,6 +6410,24 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
+            Message::SetMatrixHomeserver(v) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.matrix_homeserver = v;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetMatrixAccessToken(v) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.matrix_access_token = v;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetMatrixRoomId(v) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.matrix_room_id = v;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
             Message::ScanAb1Directory => {
                 let scan_path = self.config.tb_config.ab1_scan_path.clone();
                 if scan_path.is_empty() {
@@ -6427,6 +6466,26 @@ impl Application for App {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
                     log::info!("Rare mutations CSV → {}", rare_path.display());
+                }
+
+                let hs  = self.config.tb_config.matrix_homeserver.clone();
+                let tok = self.config.tb_config.matrix_access_token.clone();
+                let rid = self.config.tb_config.matrix_room_id.clone();
+                if !hs.is_empty() && !tok.is_empty() && !rid.is_empty() {
+                    let p = out_path.clone();
+                    let hs2 = hs.clone(); let tok2 = tok.clone(); let rid2 = rid.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::matrix_notify::send_csv_to_matrix(&hs, &tok, &rid, &p).await {
+                            log::warn!("Matrix notification failed: {e}");
+                        }
+                    });
+                    if rare_path.exists() {
+                        tokio::spawn(async move {
+                            if let Err(e) = crate::matrix_notify::send_csv_to_matrix(&hs2, &tok2, &rid2, &rare_path).await {
+                                log::warn!("Matrix rare-mutations notification failed: {e}");
+                            }
+                        });
+                    }
                 }
             }
         }

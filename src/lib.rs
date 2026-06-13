@@ -26,6 +26,7 @@ pub(crate) mod large_image;
 pub(crate) mod load_image;
 mod localize;
 mod menu;
+mod matrix_notify;
 mod mime_app;
 pub mod mime_icon;
 mod mounter;
