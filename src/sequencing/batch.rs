@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use walkdir::WalkDir;
 
 use super::{
-    SusceptibilityCalls,
+    MIN_SEQ_ID_IDENTITY, SusceptibilityCalls,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
@@ -224,6 +224,9 @@ pub fn write_ab1_csv(
 
     for rec in records {
         if rec.gene.is_none() {
+            continue;
+        }
+        if rec.identity.is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
             continue;
         }
 

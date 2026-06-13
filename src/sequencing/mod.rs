@@ -29,6 +29,8 @@ use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 
+pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
+
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";

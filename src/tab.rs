@@ -2414,7 +2414,7 @@ impl ItemMetadata {
     pub fn is_seq_id(&self) -> bool {
         self.seq_id_hits()
             .first()
-            .is_some_and(|h| h.identity >= 80.0)
+            .is_some_and(|h| h.identity >= crate::sequencing::MIN_SEQ_ID_IDENTITY)
     }
 
     pub fn sequence_length(&self) -> Option<usize> {
@@ -3925,7 +3925,7 @@ impl Item {
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
             || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()  // !self.metadata.seq_id_hits().first().is_some_and(|h| h.identity >= 80.0)
+            || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
