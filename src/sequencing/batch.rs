@@ -308,6 +308,20 @@ pub fn write_rare_mutations_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let rare: Vec<&SampleSusceptibilityRecord> = records
+        .iter()
+        .filter(|rec| {
+            rec.gene.is_some()
+                && rec.identity.is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY)
+                && (rec.susceptibility_calls.rrl.is_susceptible_rare == Some(false)
+                    || rec.susceptibility_calls.rrs.is_susceptible_rare == Some(false))
+        })
+        .collect();
+
+    if rare.is_empty() {
+        return Ok(());
+    }
+
     let file = std::fs::File::create(out_path)?;
     let mut wtr = csv::Writer::from_writer(file);
 
@@ -331,18 +345,9 @@ pub fn write_rare_mutations_csv(
         "file_created",
     ])?;
 
-    for rec in records {
-        if rec.gene.is_none() {
-            continue;
-        }
-        if rec.identity.is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
-            continue;
-        }
+    for rec in &rare {
         let rrl_rare = rec.susceptibility_calls.rrl.is_susceptible_rare;
         let rrs_rare = rec.susceptibility_calls.rrs.is_susceptible_rare;
-        if rrl_rare != Some(false) && rrs_rare != Some(false) {
-            continue;
-        }
 
         let file_created = rec
             .file_created
