@@ -14,7 +14,8 @@
       "Bash(Remove-Item src/russh/russh.rs)",
       "WebFetch(domain:eutils.ncbi.nlm.nih.gov)",
       "Bash(awk '{print $2, $3}')",
-      "Bash(git -C \"c:/Users/micha/rust/cosmic-files\" submodule status)"
+      "Bash(git -C \"c:/Users/micha/rust/cosmic-files\" submodule status)",
+      "Read(//c/Users/micha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/printpdf-0.7.0/**)"
     ]
   }
 }

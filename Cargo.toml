@@ -64,6 +64,7 @@ mime = "0.3.17"
 serde_json = "1.0.149"
 csv = "1.4.0"
 reqwest = "0.13.2"
+printpdf = "0.7"
 
 filetime = "0.2"
 tracing = "0.1.44"

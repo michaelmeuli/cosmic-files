@@ -175,6 +175,7 @@ pub struct TBConfig {
     pub pair2_suffix: String,
     pub ab1_scan_path: String,
     pub ab1_out_dir: String,
+    pub ntfy_topic: String,
 }
 
 
@@ -247,6 +248,7 @@ impl Config {
             pair2_suffix: self.tb_config.pair2_suffix.clone(),
             ab1_scan_path: self.tb_config.ab1_scan_path.clone(),
             ab1_out_dir: self.tb_config.ab1_out_dir.clone(),
+            ntfy_topic: self.tb_config.ntfy_topic.clone(),
         }
     }
 }

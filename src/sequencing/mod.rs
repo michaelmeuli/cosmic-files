@@ -17,6 +17,7 @@ pub mod batch;
 pub mod bed;
 pub mod erm41;
 pub mod hsp65;
+pub mod ntfy_notify;
 pub mod rpob;
 pub mod rrs;
 pub mod rrl;
@@ -766,4 +767,156 @@ pub struct SeqData {
     pub length: usize,
     pub trimmed_length: usize,
     pub trimmed_avg_quality_opt: Option<f32>,
+}
+
+// ── PDF report ───────────────────────────────────────────────────────────────
+
+const PDF_PAGE_W: f32 = 297.0; // A4 landscape mm
+const PDF_PAGE_H: f32 = 210.0;
+const PDF_MARGIN_L: f32 = 10.0;
+const PDF_MARGIN_B: f32 = 12.0;
+const PDF_MARGIN_T: f32 = 8.0;
+const PDF_ROW_H: f32 = 5.5;
+
+// Column x-offsets from PDF_MARGIN_L (mm)
+const PDF_COL_X: [f32; 9] = [0.0, 30.0, 46.0, 106.0, 123.0, 147.0, 171.0, 195.0, 219.0];
+const PDF_COL_HEADERS: [&str; 9] = [
+    "Sample ID", "Gene", "Species", "Identity", "Susceptible",
+    "erm41", "rrl", "rrs", "Date",
+];
+
+/// Build a landscape A4 PDF report from AB1 scan records. Filtered to gene-identified
+/// records with identity ≥ `MIN_SEQ_ID_IDENTITY`, same as the CSV output.
+pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8> {
+    use printpdf::*;
+
+    let filtered: Vec<&batch::SampleSusceptibilityRecord> = records
+        .iter()
+        .filter(|r| r.gene.is_some() && r.identity.is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY))
+        .collect();
+
+    let (doc, page1, layer1) = PdfDocument::new(
+        "AB1 Susceptibility Report",
+        Mm(PDF_PAGE_W),
+        Mm(PDF_PAGE_H),
+        "Layer 1",
+    );
+
+    let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
+    let font_bold = doc.add_builtin_font(BuiltinFont::HelveticaBold).unwrap();
+
+    let mut layer = doc.get_page(page1).get_layer(layer1);
+    let title_y = PDF_PAGE_H - PDF_MARGIN_T - 2.0;
+    let mut y = title_y - PDF_ROW_H * 1.5;
+
+    layer.use_text(
+        format!(
+            "AB1 Susceptibility Report  -  {}  ({} records)",
+            pdf_current_date(),
+            filtered.len()
+        ),
+        10.0_f32,
+        Mm(PDF_MARGIN_L),
+        Mm(title_y),
+        &font_bold,
+    );
+
+    pdf_write_row(&layer, &font_bold, 7.5_f32, y, &PDF_COL_HEADERS);
+    y -= PDF_ROW_H;
+
+    let mut layer_n = 2usize;
+
+    for rec in &filtered {
+        if y < PDF_MARGIN_B {
+            let (new_page, new_layer) =
+                doc.add_page(Mm(PDF_PAGE_W), Mm(PDF_PAGE_H), format!("Layer {layer_n}"));
+            layer_n += 1;
+            layer = doc.get_page(new_page).get_layer(new_layer);
+            y = PDF_PAGE_H - PDF_MARGIN_T - PDF_ROW_H * 1.5;
+            pdf_write_row(&layer, &font_bold, 7.5_f32, y, &PDF_COL_HEADERS);
+            y -= PDF_ROW_H;
+        }
+
+        let species = rec.species.as_deref().unwrap_or("");
+        let species_trunc = pdf_truncate(species, 30);
+        let date = rec.file_created.map(pdf_system_time_to_date).unwrap_or_default();
+        let identity = rec.identity.map(|i| format!("{:.1}%", i)).unwrap_or_default();
+
+        let cells: [&str; 9] = [
+            rec.sample_id.as_str(),
+            rec.gene.as_deref().unwrap_or(""),
+            &species_trunc,
+            &identity,
+            pdf_sus(rec.is_susceptible),
+            pdf_sus(rec.susceptibility_calls.erm41.is_susceptible),
+            pdf_sus(rec.susceptibility_calls.rrl.is_susceptible),
+            pdf_sus(rec.susceptibility_calls.rrs.is_susceptible),
+            &date,
+        ];
+        pdf_write_row(&layer, &font, 7.0_f32, y, &cells);
+        y -= PDF_ROW_H;
+    }
+
+    doc.save_to_bytes().unwrap_or_default()
+}
+
+fn pdf_write_row(
+    layer: &printpdf::PdfLayerReference,
+    font: &printpdf::IndirectFontRef,
+    size: f32,
+    y: f32,
+    cells: &[&str],
+) {
+    use printpdf::Mm;
+    for (i, text) in cells.iter().enumerate() {
+        layer.use_text(*text, size, Mm(PDF_MARGIN_L + PDF_COL_X[i]), Mm(y), font);
+    }
+}
+
+fn pdf_sus(v: Option<bool>) -> &'static str {
+    match v {
+        Some(true) => "S",
+        Some(false) => "R",
+        None => "",
+    }
+}
+
+fn pdf_truncate(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}..", &s[..max_chars])
+    }
+}
+
+fn pdf_current_date() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (y, m, d) = pdf_days_to_ymd((secs / 86400) as u32);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn pdf_system_time_to_date(t: std::time::SystemTime) -> String {
+    let secs = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (y, m, d) = pdf_days_to_ymd((secs / 86400) as u32);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn pdf_days_to_ymd(days: u32) -> (u32, u32, u32) {
+    let jdn = days + 2_440_588;
+    let a = jdn + 32044;
+    let b = (4 * a + 3) / 146097;
+    let c = a - (146097 * b) / 4;
+    let d = (4 * c + 3) / 1461;
+    let e = c - (1461 * d) / 4;
+    let m = (5 * e + 2) / 153;
+    let day = e - (153 * m + 2) / 5 + 1;
+    let month = m + 3 - 12 * (m / 10);
+    let year = 100 * b + d - 4800 + m / 10;
+    (year, month, day)
 }

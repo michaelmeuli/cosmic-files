@@ -529,6 +529,7 @@ pub enum Message {
     SetTbPair2Suffix(String),
     SetTbAb1ScanPath(String),
     SetTbAb1OutDir(String),
+    SetNtfyTopic(String),
     ScanAb1Directory,
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
 }
@@ -2623,6 +2624,15 @@ impl App {
                     widget::settings::item::builder("AB1 output directory").control(
                         widget::text_input("", &self.config.tb_config.ab1_out_dir)
                             .on_input(Message::SetTbAb1OutDir),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("ntfy topic").control(
+                        widget::text_input(
+                            "my-lab-topic or https://ntfy.example.org/topic",
+                            &self.config.tb_config.ntfy_topic,
+                        )
+                        .on_input(Message::SetNtfyTopic),
                     ),
                 )
                 .into(),
@@ -6389,6 +6399,12 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
+            Message::SetNtfyTopic(v) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ntfy_topic = v;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
             Message::ScanAb1Directory => {
                 let scan_path = self.config.tb_config.ab1_scan_path.clone();
                 if scan_path.is_empty() {
@@ -6427,6 +6443,24 @@ impl Application for App {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
                     log::info!("Rare mutations CSV → {}", rare_path.display());
+                }
+
+                let pdf_bytes = crate::sequencing::build_report_pdf(&records);
+                let pdf_path = out_path.with_file_name("ab1_susceptibility_report.pdf");
+                if let Err(e) = std::fs::write(&pdf_path, &pdf_bytes) {
+                    log::warn!("PDF write failed: {e}");
+                } else {
+                    log::info!("PDF report → {}", pdf_path.display());
+                }
+
+                let topic = self.config.tb_config.ntfy_topic.clone();
+                if !topic.is_empty() {
+                    let n = records.len();
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::sequencing::ntfy_notify::send_report_ntfy(&topic, pdf_bytes, n).await {
+                            log::warn!("ntfy notification failed: {e}");
+                        }
+                    });
                 }
             }
         }
