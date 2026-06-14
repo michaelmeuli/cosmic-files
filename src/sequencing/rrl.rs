@@ -74,12 +74,12 @@ impl RrlPosition2058_2059 {
         }
     }
 
-    pub fn from_single_read(read: &[u8]) -> Self {
+    pub fn from_single_read(read: &[u8]) -> Option<Self> {
         if let Some(call) = Self::from_bases(Self::call_position_2058_2059(read)) {
-            return call;
+            return Some(call);
         }
         let rc = reverse_complement(read);
-        Self::from_bases(Self::call_position_2058_2059(&rc)).unwrap_or(Self::Undetermined)
+        Self::from_bases(Self::call_position_2058_2059(&rc))
     }
 }
 
@@ -330,7 +330,7 @@ pub(super) fn find_rrl_ntm_display_window(
 pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, RRL_FWD_START, RRL_FWD_END);
     let rc = reverse_complement(query);
-    let rrl_position_2058_2059 = RrlPosition2058_2059::from_single_read(query);
+    let rrl_position_2058_2059_opt = RrlPosition2058_2059::from_single_read(query);
 
     let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRL)
         .into_iter()
@@ -363,7 +363,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
                 erm41_position_28_opt: None,
-                rrl_position_2058_2059_opt: Some(rrl_position_2058_2059),
+                rrl_position_2058_2059_opt,
                 ref_seq: refseq,
             }
         })

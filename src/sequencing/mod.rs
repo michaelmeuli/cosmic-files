@@ -73,6 +73,41 @@ pub struct SusceptibilityCalls {
     pub rrs: RrsSusceptibilityCalls,
 }
 
+impl std::fmt::Display for SusceptibilityCalls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut parts: Vec<String> = Vec::new();
+
+        let mut erm: Vec<String> = Vec::new();
+        if let Some(pos) = &self.erm41.position_28 {
+            erm.push(pos.to_string());
+        }
+        for c in &self.erm41.lof_snp_calls {
+            erm.push(c.call_tag());
+        }
+        if !erm.is_empty() {
+            parts.push(format!("{}", erm.join(", ")));
+        }
+
+        let mut rrl: Vec<String> = Vec::new();
+        if let Some(pos) = &self.rrl.position_2058_2059 {
+            rrl.push(pos.to_string());
+        }
+        for c in &self.rrl.snp_calls {
+            rrl.push(c.call_tag());
+        }
+        if !rrl.is_empty() {
+            parts.push(format!("{}", rrl.join(", ")));
+        }
+
+        let rrs: Vec<String> = self.rrs.snp_calls.iter().map(|c| c.call_tag()).collect();
+        if !rrs.is_empty() {
+            parts.push(format!("{}", rrs.join(", ")));
+        }
+
+        write!(f, "{}", parts.join(" | "))
+    }
+}
+
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()
         .rev()
@@ -779,10 +814,10 @@ const PDF_MARGIN_T: f32 = 8.0;
 const PDF_ROW_H: f32 = 5.5;
 
 // Column x-offsets from PDF_MARGIN_L (mm)
-const PDF_COL_X: [f32; 9] = [0.0, 30.0, 46.0, 106.0, 123.0, 147.0, 171.0, 195.0, 219.0];
-const PDF_COL_HEADERS: [&str; 9] = [
-    "Sample ID", "Gene", "Species", "Identity", "Susceptible",
-    "erm41", "rrl", "rrs", "Date",
+const PDF_COL_X: [f32; 8] = [0.0, 28.0, 43.0, 103.0, 120.0, 143.0, 208.0, 233.0];
+const PDF_TABLE_W: f32 = 270.0; // right edge of last column relative to PDF_MARGIN_L
+const PDF_COL_HEADERS: [&str; 8] = [
+    "Sample ID", "Gene", "Species", "Identity", "Susceptible", "Calls", "Date", "Filename",
 ];
 
 /// Build a landscape A4 PDF report from AB1 scan records. Filtered to gene-identified
@@ -821,8 +856,10 @@ pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8
         &font_bold,
     );
 
+    pdf_hline(&layer, y + 4.0);
     pdf_write_row(&layer, &font_bold, 7.5_f32, y, &PDF_COL_HEADERS);
     y -= PDF_ROW_H;
+    pdf_hline(&layer, y + 4.0);
 
     let mut layer_n = 2usize;
 
@@ -833,28 +870,33 @@ pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8
             layer_n += 1;
             layer = doc.get_page(new_page).get_layer(new_layer);
             y = PDF_PAGE_H - PDF_MARGIN_T - PDF_ROW_H * 1.5;
+            pdf_hline(&layer, y + 4.0);
             pdf_write_row(&layer, &font_bold, 7.5_f32, y, &PDF_COL_HEADERS);
             y -= PDF_ROW_H;
+            pdf_hline(&layer, y + 4.0);
         }
 
         let species = rec.species.as_deref().unwrap_or("");
-        let species_trunc = pdf_truncate(species, 30);
+        let species_trunc = pdf_truncate(species, 28);
         let date = rec.file_created.map(pdf_system_time_to_date).unwrap_or_default();
         let identity = rec.identity.map(|i| format!("{:.1}%", i)).unwrap_or_default();
+        let calls_str = rec.susceptibility_calls.to_string();
+        let calls_trunc = pdf_truncate(&calls_str, 50);
+        let fname_trunc = pdf_truncate(&rec.file_name, 26);
 
-        let cells: [&str; 9] = [
+        let cells: [&str; 8] = [
             rec.sample_id.as_str(),
             rec.gene.as_deref().unwrap_or(""),
             &species_trunc,
             &identity,
             pdf_sus(rec.is_susceptible),
-            pdf_sus(rec.susceptibility_calls.erm41.is_susceptible),
-            pdf_sus(rec.susceptibility_calls.rrl.is_susceptible),
-            pdf_sus(rec.susceptibility_calls.rrs.is_susceptible),
+            &calls_trunc,
             &date,
+            &fname_trunc,
         ];
         pdf_write_row(&layer, &font, 7.0_f32, y, &cells);
         y -= PDF_ROW_H;
+        pdf_hline(&layer, y + 4.0);
     }
 
     doc.save_to_bytes().unwrap_or_default()
@@ -879,6 +921,16 @@ fn pdf_sus(v: Option<bool>) -> &'static str {
         Some(false) => "R",
         None => "",
     }
+}
+
+fn pdf_hline(layer: &printpdf::PdfLayerReference, y: f32) {
+    use printpdf::{Color, Greyscale, Line, Mm, Point};
+    layer.set_outline_color(Color::Greyscale(Greyscale::new(0.5, None)));
+    layer.set_outline_thickness(0.3_f32);
+    layer.add_line(Line::from_iter(vec![
+        (Point::new(Mm(PDF_MARGIN_L), Mm(y)), false),
+        (Point::new(Mm(PDF_MARGIN_L + PDF_TABLE_W), Mm(y)), false),
+    ]));
 }
 
 fn pdf_truncate(s: &str, max_chars: usize) -> String {

@@ -22,7 +22,7 @@ impl std::fmt::Display for Erm41Position28 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::C28 => write!(f, "C28"),
-            Self::T28 => write!(f, "T28: inducible macrolide resistance"),
+            Self::T28 => write!(f, "T28"),
             Self::G28 => write!(f, "G28"),
             Self::A28 => write!(f, "A28"),
             Self::Undetermined => write!(f, "Undetermined (anchor not found)"),
