@@ -62,11 +62,18 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
-use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare};
-use crate::sequencing::rrs::{RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare};
+use crate::sequencing::rrl::{
+    RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl,
+    is_susceptible_rrl_by_snp_calls_rare,
+};
+use crate::sequencing::rrs::{
+    RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare,
+};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
-    erm41::{Erm41Position28, Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
+    erm41::{
+        Erm41Position28, Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41,
+    },
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
     rpob::identify_sequence_rpob,
@@ -977,30 +984,42 @@ pub fn item_from_entry(
 
     let is_susceptible = sequence_opt.as_ref().and_then(|s| {
         let hit = s.seq_id_hits.first()?;
-        let erm41_result = is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls);
+        let erm41_result =
+            is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls);
         if erm41_result.is_some() {
             return erm41_result;
         }
-        let rrl_result = is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
+        let rrl_result =
+            is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
         if rrl_result.is_some() {
             return rrl_result;
         }
         is_susceptible_rrs(&hit.rrs_snp_calls)
     });
-    
-    let susceptibility_calls = sequence_opt.as_ref()
+
+    let susceptibility_calls = sequence_opt
+        .as_ref()
         .and_then(|s| s.seq_id_hits.first())
         .map(|hit| SusceptibilityCalls {
             erm41: Erm41SusceptibilityCalls {
                 position_28: hit.erm41_position_28_opt,
                 lof_snp_calls: hit.erm41_snp_calls.clone(),
-                is_susceptible: is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls),
+                is_susceptible: is_susceptible_erm41(
+                    hit.erm41_position_28_opt.as_ref(),
+                    &hit.erm41_snp_calls,
+                ),
             },
             rrl: RrlSusceptibilityCalls {
                 position_2058_2059: hit.rrl_position_2058_2059_opt,
                 snp_calls: hit.rrl_snp_calls.clone(),
-                is_susceptible: is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
-                is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
+                is_susceptible: is_susceptible_rrl(
+                    hit.rrl_position_2058_2059_opt.as_ref(),
+                    &hit.rrl_snp_calls,
+                ),
+                is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
+                    hit.rrl_position_2058_2059_opt.as_ref(),
+                    &hit.rrl_snp_calls,
+                ),
             },
             rrs: RrsSusceptibilityCalls {
                 snp_calls: hit.rrs_snp_calls.clone(),
@@ -1249,7 +1268,7 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
         csv: Option<PathBuf>,
         docx: Option<PathBuf>,
     }
-    
+
     let mut samples: HashMap<String, LocalSampleFiles> = HashMap::new();
     for item in &mut items {
         let name = item.name.clone();
@@ -2400,7 +2419,10 @@ impl ItemMetadata {
     }
 
     pub fn is_rrl_position_2058_2059(&self) -> bool {
-        !matches!(self.rrl_position_2058_2059_call(), RrlPosition2058_2059::Undetermined)
+        !matches!(
+            self.rrl_position_2058_2059_call(),
+            RrlPosition2058_2059::Undetermined
+        )
     }
 
     pub fn seq_id_hits(&self) -> &[SeqIdHit] {
@@ -2585,7 +2607,10 @@ impl ItemMetadata {
 
     pub fn susceptibility_calls(&self) -> SusceptibilityCalls {
         match self {
-            Self::Path { susceptibility_calls, .. } => susceptibility_calls.clone(),
+            Self::Path {
+                susceptibility_calls,
+                ..
+            } => susceptibility_calls.clone(),
             _ => SusceptibilityCalls::default(),
         }
     }
@@ -3021,7 +3046,8 @@ impl Item {
 
     pub fn is_rpob(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("rpob") || lower.contains("2573f") || lower.contains("3337r"))
+        !self.is_fasta()
+            && (lower.contains("rpob") || lower.contains("2573f") || lower.contains("3337r"))
     }
 
     pub fn is_16s(&self) -> bool {
@@ -3315,10 +3341,10 @@ impl Item {
                     && self.selected
                     && path_opt.is_some()
                 {
-                    column =
-                        column.push(widget::button::standard(fl!("download")).on_press(
-                            Message::Download(Some((path_opt.unwrap(), uri.clone()))),
-                        ));
+                    column = column.push(
+                        widget::button::standard(fl!("download"))
+                            .on_press(Message::Download(Some((path_opt.unwrap(), uri.clone())))),
+                    );
                 }
             }
             _ => {
@@ -3491,7 +3517,10 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body(
@@ -3550,21 +3579,30 @@ impl Item {
                 details = details.push(widget::text::heading(format!("erm(41) {}", call)));
             }
             details = details.push(widget::text::body(""));
-            if !best.erm41_snp_calls.is_empty() {
+            {
+                let snp_tags: Vec<String> = best
+                    .erm41_snp_calls
+                    .iter()
+                    .map(|s| s.call_tag())
+                    .filter(|t| !t.is_empty())
+                    .collect();
                 details = details.push(widget::text::body("erm(41) loss-of-function SNPs:"));
-                details = details.push(widget::text::body(format!(
-                    "(Using commit: {} of ntm-db repository)",
-                    env!("NTM_DB_COMMIT")
-                )));
-                for snp in &best.erm41_snp_calls {
+                if snp_tags.is_empty() {
+                    details = details.push(widget::text::body("No erm(41) SNPs found."));
+                } else {
                     details = details.push(widget::text::body(format!(
-                        "  pos {}: {}",
-                        snp.ref_pos + 1,
-                        snp.call_tag()
+                        "(Using commit: {} of ntm-db repository)",
+                        env!("NTM_DB_COMMIT")
                     )));
+                    for tag in snp_tags {
+                        details = details.push(widget::text::body(tag));
+                    }
                 }
             }
-            if let Some(chrom) = self.metadata.ab1_chromatogram().filter(|c| c.erm41_view_state_opt.is_some())
+            if let Some(chrom) = self
+                .metadata
+                .ab1_chromatogram()
+                .filter(|c| c.erm41_view_state_opt.is_some())
                 && !self.metadata.is_massiliense_seq_id()
             {
                 let view_state = chrom.erm41_view_state_opt.unwrap();
@@ -3593,10 +3631,18 @@ impl Item {
                 details = details.push(widget::text::body(""));
             } else {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body("erm(41) chromatogram view is not available."));
+                details = details.push(widget::text::body(
+                    "erm(41) chromatogram view is not available.",
+                ));
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.susceptibility_calls().erm41.position_28.and_then(|p| p.is_susceptible()) {
+            match self
+                .metadata
+                .susceptibility_calls()
+                .erm41
+                .position_28
+                .and_then(|p| p.is_susceptible())
+            {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "Predicted to be susceptible to macrolides.",
@@ -3628,7 +3674,10 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body(
@@ -3762,7 +3811,10 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body(
@@ -3834,7 +3886,10 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body(
@@ -3926,7 +3981,10 @@ impl Item {
 
         let hits = self.metadata.seq_id_hits();
         if hits.is_empty()
-            || self.metadata.sequence_length_trimmed().is_some_and(|n| n < 100)
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
             || !self.metadata.is_seq_id()
         {
             details = details.push(widget::text::body(
@@ -4002,7 +4060,11 @@ impl Item {
                     )));
                 }
             }
-            if let Some(chrom) = self.metadata.ab1_chromatogram().filter(|c| c.rrl_ntm_view_state_opt.is_some()) {
+            if let Some(chrom) = self
+                .metadata
+                .ab1_chromatogram()
+                .filter(|c| c.rrl_ntm_view_state_opt.is_some())
+            {
                 let view_state = chrom.rrl_ntm_view_state_opt.unwrap();
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
@@ -4030,10 +4092,18 @@ impl Item {
                 details = details.push(widget::text::body(""));
             } else {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body("rrl chromatogram view is not available."));
+                details = details.push(widget::text::body(
+                    "rrl chromatogram view is not available.",
+                ));
                 details = details.push(widget::text::body(""));
             }
-            match self.metadata.susceptibility_calls().rrl.position_2058_2059.and_then(|p| p.is_susceptible()) {
+            match self
+                .metadata
+                .susceptibility_calls()
+                .rrl
+                .position_2058_2059
+                .and_then(|p| p.is_susceptible())
+            {
                 Some(true) => {
                     details = details.push(widget::text::heading(
                         "E. coli positions A2058 and A2059 are wt (macrolide susceptible).",

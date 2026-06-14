@@ -82,7 +82,10 @@ impl std::fmt::Display for SusceptibilityCalls {
             erm.push(pos.to_string());
         }
         for c in &self.erm41.lof_snp_calls {
-            erm.push(c.call_tag());
+            let tag = c.call_tag();
+            if !tag.is_empty() {
+                erm.push(tag);
+            }
         }
         if !erm.is_empty() {
             parts.push(format!("{}", erm.join(", ")));
