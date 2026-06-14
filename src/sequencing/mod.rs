@@ -817,10 +817,10 @@ const PDF_MARGIN_T: f32 = 8.0;
 const PDF_ROW_H: f32 = 5.5;
 
 // Column x-offsets from PDF_MARGIN_L (mm)
-const PDF_COL_X: [f32; 8] = [0.0, 28.0, 43.0, 103.0, 120.0, 143.0, 208.0, 233.0];
+const PDF_COL_X: [f32; 6] = [0.0, 26.0, 41.0, 90.0, 110.0, 200.0];
 const PDF_TABLE_W: f32 = 270.0; // right edge of last column relative to PDF_MARGIN_L
-const PDF_COL_HEADERS: [&str; 8] = [
-    "Sample ID", "Gene", "Species", "Identity", "Susceptible", "Calls", "Date", "Filename",
+const PDF_COL_HEADERS: [&str; 6] = [
+    "Sample ID", "Gene", "Species", "Susceptible", "Calls", "Filename",
 ];
 
 /// Build a landscape A4 PDF report from AB1 scan records. Filtered to gene-identified
@@ -880,21 +880,17 @@ pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8
         }
 
         let species = rec.species.as_deref().unwrap_or("");
-        let species_trunc = pdf_truncate(species, 28);
-        let date = rec.file_created.map(pdf_system_time_to_date).unwrap_or_default();
-        let identity = rec.identity.map(|i| format!("{:.1}%", i)).unwrap_or_default();
+        let species_trunc = pdf_truncate(species, 40);
         let calls_str = rec.susceptibility_calls.to_string();
         let calls_trunc = pdf_truncate(&calls_str, 50);
-        let fname_trunc = pdf_truncate(&rec.file_name, 26);
+        let fname_trunc = pdf_truncate(&rec.file_name, 50);
 
-        let cells: [&str; 8] = [
+        let cells: [&str; 6] = [
             rec.sample_id.as_str(),
             rec.gene.as_deref().unwrap_or(""),
             &species_trunc,
-            &identity,
             pdf_sus(rec.is_susceptible),
             &calls_trunc,
-            &date,
             &fname_trunc,
         ];
         pdf_write_row(&layer, &font, 7.0_f32, y, &cells);
@@ -946,15 +942,6 @@ fn pdf_truncate(s: &str, max_chars: usize) -> String {
 
 fn pdf_current_date() -> String {
     let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let (y, m, d) = pdf_days_to_ymd((secs / 86400) as u32);
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-fn pdf_system_time_to_date(t: std::time::SystemTime) -> String {
-    let secs = t
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
