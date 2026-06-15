@@ -320,12 +320,12 @@ pub struct Erm41LofCall {
 impl Erm41LofCall {
     pub fn call_tag(&self) -> String {
         match self.query_base {
-            None => "NA".to_string(),
+            None => "".to_string(),
             Some(b) if b == self.wt_base => String::new(),
             Some(b) if self.lof_alts.contains_key(&b) => {
                 format!("{}{}{} ({})", self.wt_base as char, self.ref_pos, b as char, self.lof_alts[&b].0)
             }
-            Some(b) => format!("{} (novel variant)", b as char),
+            Some(b) => format!("{}{}{}", self.wt_base as char, self.ref_pos, b as char),
         }
     }
 }

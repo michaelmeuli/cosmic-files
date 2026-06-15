@@ -38,7 +38,7 @@ rrl M. abscessus macrolides:
 impl RrlSnpCall {
     pub fn call_tag(&self) -> String {
         match self.query_base {
-            None => "NA".to_string(),
+            None => "".to_string(),
             Some(b) if b == self.wt_base => format!("{} (wt)", self.wt_base as char),
             Some(b) if self.resistance_bases.contains_key(&b) => {
                 let drugs = self.resistance_bases[&b].join(", ");

@@ -223,7 +223,7 @@ impl RrlSnpCall {
             .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
 
         match self.query_base {
-            None => "NA".to_string(),
+            None => "".to_string(),
             Some(b) if b == self.wt_base => match ecoli_prefix {
                 Some(p) => format!("{} (wt, E.coli {})", b as char, p),
                 None    => format!("{} (wt)", b as char),
