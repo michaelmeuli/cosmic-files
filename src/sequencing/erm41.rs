@@ -299,7 +299,7 @@ fn parse_erm41_lof_snps(
 
 static ERM41_LOF_SNPS: LazyLock<BTreeMap<&'static str, Erm41LofSnpMap>> = LazyLock::new(|| {
     [(
-        "M. abscessus subsp. abscessus",
+        super::DESC_ABSCESSUS,
         include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"),
         super::REF_ERM41_ABSCESSUS,
     )]
@@ -403,17 +403,17 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         (
             super::REF_ERM41_ABSCESSUS,
             "REF_ERM41_ABSCESSUS",
-            "M. abscessus subsp. abscessus",
+            super::DESC_ABSCESSUS,
         ),
         (
             super::REF_ERM41_BOLLETII,
             "REF_ERM41_BOLLETII",
-            "M. abscessus subsp. bolletii",
+            super::DESC_BOLLETII,
         ),
         (
             super::REF_ERM41_MASSILENSE,
             "REF_ERM41_MASSILENSE",
-            "M. abscessus subsp. massiliense",
+            super::DESC_MASSILIENSE,
         ),
     ];
 
@@ -431,7 +431,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
             // Abscessus LOF SNP positions apply to all three subspecies — bolletii and
             // massiliense are sequence-similar enough, and no separate variants.csv exists for them.
             let erm41_snp_calls = ERM41_LOF_SNPS
-                .get("M. abscessus subsp. abscessus")  //.get(description)
+                .get(super::DESC_ABSCESSUS)  //.get(description)
                 .map(|snps| call_erm41_lof_snps(snps, aligned_query, offset))
                 .unwrap_or_default();
             SeqIdHit {

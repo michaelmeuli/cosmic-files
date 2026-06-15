@@ -32,6 +32,10 @@ use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
+pub const DESC_ABSCESSUS: &str = "M. abscessus subsp. abscessus";
+pub const DESC_BOLLETII: &str = "M. abscessus subsp. bolletii";
+pub const DESC_MASSILIENSE: &str = "M. abscessus subsp. massiliense";
+
 const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";

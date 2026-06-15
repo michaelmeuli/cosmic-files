@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use walkdir::WalkDir;
 
 use super::{
-    MIN_SEQ_ID_IDENTITY, SusceptibilityCalls,
+    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SusceptibilityCalls,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
@@ -143,7 +143,11 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
         };
 
         let is_susceptible = seq_id_hits.first().and_then(|hit| {
-            let erm41_result = is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls);
+            let erm41_result = if hit.description == DESC_MASSILIENSE {
+                Some(true)
+            } else {
+                is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
+            };
             if erm41_result.is_some() {
                 return erm41_result;
             }
@@ -160,7 +164,11 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
                 erm41: Erm41SusceptibilityCalls {
                     position_28: hit.erm41_position_28_opt,
                     lof_snp_calls: hit.erm41_snp_calls.clone(),
-                    is_susceptible: is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls),
+                    is_susceptible: if hit.description == DESC_MASSILIENSE {
+                        Some(true)
+                    } else {
+                        is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
+                    },
                 },
                 rrl: RrlSusceptibilityCalls {
                     position_2058_2059: hit.rrl_position_2058_2059_opt,
