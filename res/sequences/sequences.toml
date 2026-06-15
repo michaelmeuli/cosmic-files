@@ -5,6 +5,30 @@ email   = "michael.meuli@gmail.com"   # required by NCBI
 # [System.Environment]::SetEnvironmentVariable("NCBI_API_KEY", "your_key", "User")
 
 
+# --- rrs (16S rRNA) — per-subspecies M. abscessus ---
+# abscessus: extracted from ntm-db genome (CU458896:1462398-1463901) — no fetch needed.
+
+[[genome]]
+# Mycobacteroides abscessus subsp. bolletii CIP 108541 — fill in rrs contig + locus_tag,
+# then run `cargo build` to fetch rrs/rrs_bolletii_CIP_108541.fasta.
+# accession = "<bolletii rrs contig>"
+# locus_tag = "<rrs locus_tag>"
+# output    = "rrs/rrs_bolletii_CIP_108541.fasta"
+accession = "NZ_JRMF01000040.1"   # PLACEHOLDER — replace with rrs-containing contig
+locus_tag = "TODO_rrs"             # PLACEHOLDER — replace with rrs locus tag
+output    = "rrs/rrs_bolletii_CIP_108541.fasta"
+
+[[genome]]
+# Mycobacteroides abscessus subsp. massiliense CCUG 48898 — fill in rrs contig + locus_tag,
+# then run `cargo build` to fetch rrs/rrs_massiliense_CCUG_48898.fasta.
+# accession = "<massiliense rrs contig>"
+# locus_tag = "<rrs locus_tag>"
+# output    = "rrs/rrs_massiliense_CCUG_48898.fasta"
+accession = "NZ_MVHY01000001.1"    # PLACEHOLDER — replace with rrs-containing contig
+locus_tag = "TODO_rrs"             # PLACEHOLDER — replace with rrs locus tag
+output    = "rrs/rrs_massiliense_CCUG_48898.fasta"
+
+
 # --- erm(41) ---
 
 [[genome]]

@@ -53,6 +53,13 @@ const REF_ERM41_BOLLETII: &str =
 const REF_ERM41_MASSILENSE: &str =
     include_str!("../../res/sequences/erm41/erm41_massiliense_CCUG_48898.fasta");
 
+const REF_RRS_ABSCESSUS: &str =
+    include_str!("../../res/sequences/rrs/rrs_abscessus_ATCC_19977.fasta");
+const REF_RRS_BOLLETII: &str =
+    include_str!("../../res/sequences/rrs/rrs_bolletii_CIP_108541.fasta");
+const REF_RRS_MASSILENSE: &str =
+    include_str!("../../res/sequences/rrs/rrs_massiliense_CCUG_48898.fasta");
+
 const ACC_GASTRI: &str = "AF547836";
 const ACC_KANSASII: &str = "AF547849";
 const ACC_MARINUM: &str = "AY299134";
