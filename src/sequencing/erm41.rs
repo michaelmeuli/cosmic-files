@@ -25,7 +25,7 @@ impl std::fmt::Display for Erm41Position28 {
             Self::T28 => write!(f, "T28"),
             Self::G28 => write!(f, "G28"),
             Self::A28 => write!(f, "A28"),
-            Self::Undetermined => write!(f, "Undetermined (anchor not found)"),
+            Self::Undetermined => write!(f, "Position 28 not found"),
         }
     }
 }
