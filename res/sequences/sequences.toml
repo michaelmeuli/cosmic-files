@@ -1,7 +1,7 @@
 # NCBI E-utilities configuration
 # Docs: https://www.ncbi.nlm.nih.gov/books/NBK25497/
 email   = "michael.meuli@gmail.com"   # required by NCBI
-# optional: raises rate limit to 10 req/s:
+# recommended: raises rate limit from 3 to 10 req/s (without it, fetches are slower but still work):
 # [System.Environment]::SetEnvironmentVariable("NCBI_API_KEY", "your_key", "User")
 
 
@@ -9,14 +9,15 @@ email   = "michael.meuli@gmail.com"   # required by NCBI
 
 [[genome]]
 accession = "NC_010397.1"       # Mycobacteroides abscessus ATCC 19977 complete genome
-locus_tag = "MAB_2297"          # erm(41) CDS
+seq_start = 2345955             # erm(41) CDS — locus_tag MAB_2297 (renamed in RefSeq reannotation)
+seq_stop  = 2346476
 output    = "erm41/erm41_abscessus_ATCC_19977.fasta"
 
 [[genome]]
 # Mycobacteroides abscessus subsp. bolletii CIP 108541 — WGS contig
-# Coordinates taken from NCBI FASTA header: NZ_JRMF01000040.1:92072-92593
 accession = "NZ_JRMF01000040.1"
-locus_tag = "QP40_RS10855"          # erm(41) CDS
+seq_start = 92072                   # erm(41) CDS — locus_tag QP40_RS10855
+seq_stop  = 92593
 output    = "erm41/erm41_bolletii_CIP_108541.fasta"
 
 # Mycobacteroides abscessus subsp. massiliense CCUG 48898 — WGS contig
