@@ -62,6 +62,10 @@ const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
 
 /// 16S rRNA (rrs) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
+/// Minimum reference length for rrs alignment. References shorter than this are shorter than a
+/// typical AB1 read (~600–900 bp) and would inflate identity scores via the matches/shorter.len()
+/// formula.
+pub(super) const MIN_RRS_REF_LEN: usize = 1200;
 /// hsp65 / groEL2 reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 /// rpoB reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.

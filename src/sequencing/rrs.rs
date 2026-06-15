@@ -158,10 +158,29 @@ fn call_rrs_snps(
         .collect()
 }
 
+/// Align `query` against every Mycobacteriaceae 16S rRNA reference in [`REF_MYCO_RRS`] and
+/// return all hits sorted by identity (highest first).
+///
+/// # Algorithm
+///
+/// For each reference sequence (filtered to ≥ [`MIN_RRS_REF_LEN`] bp to avoid inflated scores
+/// from truncated entries):
+///
+/// 1. **Strand**: both forward and reverse-complement alignments are scored via [`best_alignment`];
+///    the strand with the higher identity wins.
+/// 2. **Identity**: gapless (shift-only) alignment — the shorter sequence is slid along the longer
+///    and the best-matching offset is chosen. Identity = matching bases / shorter length.
+/// 3. **SNP calls**: for species that have an entry in [`RRS_RESISTANCE_SNPS`] (accession
+///    contains `':'`), aminoglycoside-resistance SNPs are mapped from reference coordinates to
+///    query coordinates using the alignment offset.
+///
+/// The returned [`SeqIdHit`] list is sorted descending by identity; callers typically take the
+/// top hit or apply a [`MIN_SEQ_ID_IDENTITY`] threshold.
 pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRS)
         .into_iter()
+        .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRS_REF_LEN)
         .map(|(accession, description, refseq)| {
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
