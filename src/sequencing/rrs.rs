@@ -1,8 +1,4 @@
-use super::{
-    DESC_ABSCESSUS, DESC_BOLLETII, DESC_MASSILIENSE,
-    REF_MYCO_RRS, REF_RRS_ABSCESSUS, REF_RRS_BOLLETII, REF_RRS_MASSILENSE,
-    SeqIdHit, best_alignment, parse_fasta_seq, parse_multi_fasta, reverse_complement,
-};
+use super::{REF_MYCO_RRS, SeqIdHit, best_alignment, parse_multi_fasta, reverse_complement};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -200,49 +196,6 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
             }
         })
         .collect();
-
-    // Per-subspecies M. abscessus hits — gives proper subspecies descriptions that the generic
-    // myco_rrs.fasta cannot provide (parse_multi_fasta strips "subsp." from headers).
-    // Reuses the abscessus RRS_RESISTANCE_SNPS for all three subspecies.
-    let abscessus_snps = RRS_RESISTANCE_SNPS.get("Mycobacterium abscessus");
-    let subspecies_refs: &[(&[u8], &str)] = &[
-        (REF_RRS_ABSCESSUS.as_bytes(), DESC_ABSCESSUS),
-        (REF_RRS_BOLLETII.as_bytes(), DESC_BOLLETII),
-        (REF_RRS_MASSILENSE.as_bytes(), DESC_MASSILIENSE),
-    ];
-    for &(fasta_bytes, description) in subspecies_refs {
-        let refseq = parse_fasta_seq(std::str::from_utf8(fasta_bytes).unwrap_or(""));
-        if refseq.is_empty() {
-            continue;
-        }
-        let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-        let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-        let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
-            (rev_id, true, rc.clone(), rev_off)
-        } else {
-            (fwd_id, false, query.to_vec(), fwd_off)
-        };
-        let rrs_snp_calls = abscessus_snps
-            .map(|snps| call_rrs_snps(snps, &aligned_query, alignment_offset))
-            .unwrap_or_default();
-        hits.push(SeqIdHit {
-            accession: description.to_string(),
-            description: description.to_string(),
-            identity,
-            is_reverse,
-            aligned_query,
-            alignment_offset,
-            ref_seq: refseq,
-            kansasii_gastri_snp_calls: vec![],
-            marinum_ulcerans_snp_calls: vec![],
-            rrl_snp_calls: vec![],
-            rrs_snp_calls,
-            erm41_snp_calls: vec![],
-            erm41_position_28_opt: None,
-            rrl_position_2058_2059_opt: None,
-        });
-    }
-
     hits.sort_by(|a, b| {
         b.identity
             .partial_cmp(&a.identity)
