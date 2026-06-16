@@ -250,11 +250,11 @@ fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
             "myco_hsp65.fasta",
         ),
         (
-            "Mycobacteriales[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
+            "Mycobacteriales[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 1200:3500[SLEN] AND type_material[Filter]",
             "myco_rrs.fasta",
         ),
         (
-            "Mycobacteriales[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
+            "Mycobacteriales[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND 1200:3500[SLEN] AND type_material[Filter]",
             "myco_rrl.fasta",
         ),
     ];

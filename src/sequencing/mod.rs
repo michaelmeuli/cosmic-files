@@ -32,6 +32,9 @@ use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
+const MIN_RRS_REF_LEN: usize = 1200;
+const MIN_RRL_REF_LEN: usize = 1200;
+
 pub const DESC_ABSCESSUS: &str = "M. abscessus subsp. abscessus";
 pub const DESC_BOLLETII: &str = "M. abscessus subsp. bolletii";
 pub const DESC_MASSILIENSE: &str = "M. abscessus subsp. massiliense";
@@ -62,16 +65,13 @@ const MARINUM_ULCERANS_ACCS: &[&str] = &[ACC_MARINUM, ACC_ULCERANS];
 
 /// 16S rRNA (rrs) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRS: &str = include_str!("../../res/sequences/myco_rrs.fasta");
-/// Minimum reference length for rrs alignment. References shorter than this are shorter than a
-/// typical AB1 read (~600–900 bp) and would inflate identity scores via the matches/shorter.len()
-/// formula.
-pub(super) const MIN_RRS_REF_LEN: usize = 1200;
 /// hsp65 / groEL2 reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta");
 /// rpoB reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
 /// 23S rRNA (rrl) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
+
 
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
 #[derive(Debug, Clone, Default)]
