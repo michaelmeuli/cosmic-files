@@ -24,7 +24,17 @@
       "Bash(awk -F',' '$1==\"pncA\"{print $2}' mutations.csv)",
       "Bash(awk -F',' '$1==\"pncA\"' mutations.csv)",
       "Bash(awk -F',' '$1==\"pncA\" && $2 ~ /^c\\\\.-/{print $2}' mutations.csv)",
-      "Bash(awk -F',' '$1==\"pncA\" && $2 ~ /^c\\\\.[0-9]/{print $2}' mutations.csv)"
+      "Bash(awk -F',' '$1==\"pncA\" && $2 ~ /^c\\\\.[0-9]/{print $2}' mutations.csv)",
+      "WebSearch",
+      "WebFetch(domain:www.ncbi.nlm.nih.gov)",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_015758.1&rettype=ft&retmode=text\" -o /tmp/africanum_ft.txt)",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_002945.4&rettype=ft&retmode=text\" -o /tmp/bovis_ft.txt)",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_008769.1&rettype=ft&retmode=text\" -o /tmp/bcg_ft.txt)",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_015848.1&rettype=ft&retmode=text\" -o /tmp/canettii_ft.txt)",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=CP063804.1&rettype=ft&retmode=text\" -o /tmp/orygis_ft.txt)",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=nuccore&term=Mycobacterium+mungi%5BOrganism%5D+AND+pncA%5BGene%5D&retmode=json\")",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=protein&term=Mycobacterium+mungi%5BOrganism%5D+AND+pncA&retmode=json\")",
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id=1032813423&retmode=json\")"
     ]
   }
 }

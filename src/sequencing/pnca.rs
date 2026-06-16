@@ -331,53 +331,63 @@ fn call_pnca_aa_snps(map: &PncaAaSnpMap, query: &[u8], alignment_offset: isize) 
         .collect()
 }
 
-/// Database is `pnca/pnca_h37rv.fasta`: the pncA CDS (locus_tag `Rv2043c`) plus a 50bp
-/// upstream promoter flank, fetched from *M. tuberculosis* H37Rv (`NC_000962.3`) at build time
-/// (via `fetch_sequences_from_toml()` in build.rs, configured in `res/sequences/sequences.toml`).
+/// Database is `REF_PNCA`: the pncA CDS plus a 50bp upstream promoter flank for each
+/// *M. tuberculosis* complex member with a distinct sequence (H37Rv `Rv2043c`, bovis AF2122/97,
+/// canettii — see `res/sequences/sequences.toml` for the rest, including the bovis BCG
+/// Pasteur/africanum/mungi/orygis references that were tried and dropped as exact duplicates
+/// of one of these three), fetched from NCBI at build time (via `fetch_sequences_from_toml()`
+/// in build.rs).
 ///
-/// Unlike the NTM-focused targets (rrs/rrl/hsp65/rpoB), pncA has a single reference — pyrazinamide
-/// resistance calling is *M. tuberculosis*-specific — so this always returns at most one hit.
+/// Like [`super::rrl::identify_sequence_rrl_ntm`], this aligns the query against every reference
+/// in the database (forward and reverse-complement) and returns one [`SeqIdHit`] per reference,
+/// sorted by identity descending, so the caller can compare how well the read matches each
+/// member of the complex rather than assuming it's H37Rv.
 pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
-    let Some((accession, description, refseq)) =
-        parse_multi_fasta(REF_PNCA).into_iter().next()
-    else {
-        return vec![];
-    };
-    if refseq.len() < super::MIN_PNCA_REF_LEN {
-        return vec![];
-    }
-
     let rc = reverse_complement(query);
-    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-    let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
-        (rev_id, true, rc, rev_off)
-    } else {
-        (fwd_id, false, query.to_vec(), fwd_off)
-    };
-
     let (nt_map, aa_map) = &*PNCA_RESISTANCE_SNPS;
-    let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &aligned_query, alignment_offset);
-    pnca_snp_calls.extend(call_pnca_aa_snps(aa_map, &aligned_query, alignment_offset));
-    pnca_snp_calls.sort_by_key(|c| c.ref_pos);
 
-    vec![SeqIdHit {
-        accession,
-        description,
-        identity,
-        is_reverse,
-        aligned_query,
-        alignment_offset,
-        ref_seq: refseq,
-        kansasii_gastri_snp_calls: vec![],
-        marinum_ulcerans_snp_calls: vec![],
-        rrl_snp_calls: vec![],
-        rrs_snp_calls: vec![],
-        erm41_snp_calls: vec![],
-        pnca_snp_calls,
-        erm41_position_28_opt: None,
-        rrl_position_2058_2059_opt: None,
-    }]
+    let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_PNCA)
+        .into_iter()
+        .filter(|(_, _, refseq)| refseq.len() >= super::MIN_PNCA_REF_LEN)
+        .map(|(accession, description, refseq)| {
+            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
+                (rev_id, true, rc.clone(), rev_off)
+            } else {
+                (fwd_id, false, query.to_vec(), fwd_off)
+            };
+
+            let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &aligned_query, alignment_offset);
+            pnca_snp_calls.extend(call_pnca_aa_snps(aa_map, &aligned_query, alignment_offset));
+            pnca_snp_calls.sort_by_key(|c| c.ref_pos);
+
+            SeqIdHit {
+                accession,
+                description,
+                identity,
+                is_reverse,
+                aligned_query,
+                alignment_offset,
+                ref_seq: refseq,
+                kansasii_gastri_snp_calls: vec![],
+                marinum_ulcerans_snp_calls: vec![],
+                rrl_snp_calls: vec![],
+                rrs_snp_calls: vec![],
+                erm41_snp_calls: vec![],
+                pnca_snp_calls,
+                erm41_position_28_opt: None,
+                rrl_position_2058_2059_opt: None,
+            }
+        })
+        .collect();
+
+    hits.sort_by(|a, b| {
+        b.identity
+            .partial_cmp(&a.identity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits
 }
 
 #[cfg(test)]
@@ -513,11 +523,12 @@ mod tests {
 
     #[test]
     fn test_identify_sequence_pnca_perfect_match() {
-        // Aligning the reference against itself should give 100% identity and translate the
-        // start/stop codons correctly.
-        let refseq = super::super::parse_fasta_seq(REF_PNCA);
+        // Aligning the H37Rv reference against the whole database should return one hit per
+        // reference (H37Rv, bovis AF2122/97, canettii), with H37Rv itself sorted first at 100%
+        // identity and the start/stop codons translated correctly.
+        let (_, _, refseq) = parse_multi_fasta(REF_PNCA).into_iter().next().unwrap();
         let hits = identify_sequence_pnca(&refseq);
-        assert_eq!(hits.len(), 1);
+        assert_eq!(hits.len(), 3);
         let hit = &hits[0];
         assert!(hit.identity > 99.0);
         assert!(!hit.is_reverse);

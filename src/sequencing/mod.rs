@@ -75,9 +75,15 @@ const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta"
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
 /// 23S rRNA (rrl) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
-/// pncA CDS + 50bp upstream promoter flank — M. tuberculosis H37Rv (Rv2043c), fetched from NCBI
-/// at build time (see `pnca` module docs).
-const REF_PNCA: &str = include_str!("../../res/sequences/pnca/pnca_h37rv.fasta");
+/// pncA CDS + 50bp upstream promoter flank for each M. tuberculosis complex member with a
+/// distinct reference sequence, fetched from NCBI at build time (see `pnca` module docs).
+/// Concatenated into one multi-FASTA so `identify_sequence_pnca()` can search all of them via
+/// [`parse_multi_fasta`], the same way `identify_sequence_rrl_ntm()` searches `REF_MYCO_RRL`.
+const REF_PNCA: &str = concat!(
+    include_str!("../../res/sequences/pnca/pnca_h37rv.fasta"),
+    include_str!("../../res/sequences/pnca/pnca_bovis_AF2122_97.fasta"),
+    include_str!("../../res/sequences/pnca/pnca_canettii_CIPT_140010059.fasta"),
+);
 
 
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
@@ -228,6 +234,20 @@ fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
             let genus = words.next().unwrap_or("");
             let species = words.next().unwrap_or("");
             cur_desc = format!("{} {}", genus, species).trim().to_string();
+            // NCBI deflines for M. tuberculosis complex subspecies and other infrasubspecific
+            // taxa spell the subspecies out as "variant bovis"/"subsp. bolletii" right after
+            // the binomial (e.g. "Mycobacterium tuberculosis variant bovis AF2122/97 ...",
+            // "Mycobacterium avium subsp. paratuberculosis ..."). Without this, every such
+            // entry collapses to the same genus+species description as its parent species —
+            // e.g. the bovis pncA reference showing up indistinguishably as "Mycobacterium
+            // tuberculosis", same as H37Rv — so fold the qualifier + its epithet in too.
+            let mut qualifier_words = words.next().unwrap_or("").split_whitespace();
+            if let Some(qualifier @ ("variant" | "subsp." | "subspecies")) =
+                qualifier_words.next()
+                && let Some(epithet) = qualifier_words.next()
+            {
+                cur_desc = format!("{cur_desc} {qualifier} {epithet}");
+            }
         } else {
             cur_seq.extend(line.bytes().filter(|b| b.is_ascii_alphabetic()));
         }
@@ -990,4 +1010,41 @@ fn pdf_days_to_ymd(days: u32) -> (u32, u32, u32) {
     let month = m + 3 - 12 * (m / 10);
     let year = 100 * b + d - 4800 + m / 10;
     (year, month, day)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_multi_fasta;
+
+    #[test]
+    fn test_parse_multi_fasta_distinguishes_infrasubspecific_descriptions() {
+        // The bovis and H37Rv pncA references share a binomial name, differing only in the
+        // "variant bovis" qualifier NCBI tucks into the defline after the species — without
+        // surfacing it, both entries describe themselves identically as "Mycobacterium
+        // tuberculosis" in the UI (see res/sequences/pnca/pnca_bovis_AF2122_97.fasta).
+        let fasta = "\
+>NC_000962.3:c2289291-2288681 Mycobacterium tuberculosis H37Rv, complete genome
+ACGT
+>NC_002945.4:c2277615-2277005 Mycobacterium tuberculosis variant bovis AF2122/97 chromosome, complete sequence
+ACGT
+>HM007606.1 Mycobacterium avium subsp. paratuberculosis strain DSM 44133 23S ribosomal RNA gene, partial sequence
+ACGT
+>NC_xxx:1-4 Mycobacterium abscessus rrl
+ACGT
+";
+        let entries = parse_multi_fasta(fasta);
+        let descs: Vec<&str> = entries.iter().map(|(_, d, _)| d.as_str()).collect();
+        assert_eq!(
+            descs,
+            vec![
+                "Mycobacterium tuberculosis",
+                "Mycobacterium tuberculosis variant bovis",
+                "Mycobacterium avium subsp. paratuberculosis",
+                // ntm-db colon-accession entries keep their plain genus+species description —
+                // the word after species here is the gene tag ("rrl"), not a qualifier, so the
+                // RRL/RRS_RESISTANCE_SNPS lookups keyed on it (see rrl.rs, rrs.rs) still match.
+                "Mycobacterium abscessus",
+            ]
+        );
+    }
 }

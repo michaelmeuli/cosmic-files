@@ -33,6 +33,29 @@ locus_tag       = "Rv2043c"          # pncA CDS — strand resolved automaticall
 upstream_flank  = 50                 # covers WHO catalogue promoter SNPs down to c.-39
 output          = "pnca/pnca_h37rv.fasta"
 
+[[genome]]
+accession       = "NC_002945.4"      # Mycobacterium bovis AF2122/97 complete genome
+locus_tag       = "BQ2027_RS10545"   # pncA CDS
+upstream_flank  = 50
+output          = "pnca/pnca_bovis_AF2122_97.fasta"
+
+[[genome]]
+accession       = "NC_015848.1"      # Mycobacterium canettii CIPT 140010059 complete genome
+locus_tag       = "MCAN_RS10790"     # pncA CDS
+upstream_flank  = 50
+output          = "pnca/pnca_canettii_CIPT_140010059.fasta"
+
+# M. bovis BCG str. Pasteur 1173P2 (NC_008769.1, locus_tag BCG_RS10620) was tried but
+# deliberately omitted: its pncA+upstream sequence is byte-identical to M. bovis AF2122/97
+# above (BCG is a live-attenuated derivative of AF2122/97-like bovis strains, so pncA itself
+# wasn't altered by attenuation), so it brought no new sequence diversity to the database.
+#
+# M. africanum GM041182 (NC_015758.1, locus_tag MAF_RS10650), M. mungi BM22813
+# (NZ_LXTB01000081.1, locus_tag A7J32_RS15610), and M. orygis 51145 (CP063804.1,
+# locus_tag RJtmp_002115) were tried but deliberately omitted for the same reason: their
+# pncA+upstream sequences are byte-identical to each other (and distinct from H37Rv/bovis/
+# canettii above), so adding all three brought no new sequence diversity to the database.
+
 
 
 # Direct accession (no locus_tag / coordinates) — fetches the accession as-is:
