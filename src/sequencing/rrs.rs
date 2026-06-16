@@ -173,9 +173,6 @@ fn call_rrs_snps(
 /// 3. **SNP calls**: for species that have an entry in [`RRS_RESISTANCE_SNPS`] (accession
 ///    contains `':'`), aminoglycoside-resistance SNPs are mapped from reference coordinates to
 ///    query coordinates using the alignment offset.
-///
-/// The returned [`SeqIdHit`] list is sorted descending by identity; callers typically take the
-/// top hit or apply a [`MIN_SEQ_ID_IDENTITY`] threshold.
 pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRS)

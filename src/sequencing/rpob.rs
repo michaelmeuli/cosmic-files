@@ -4,6 +4,7 @@ pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RPOB)
         .into_iter()
+        .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RPOB_REF_LEN)
         .map(|(accession, description, refseq)| {
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);

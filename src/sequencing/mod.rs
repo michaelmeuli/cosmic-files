@@ -34,6 +34,7 @@ pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
 const MIN_RRS_REF_LEN: usize = 1200;
 const MIN_RRL_REF_LEN: usize = 1200;
+const MIN_RPOB_REF_LEN: usize = 400;
 
 pub const DESC_ABSCESSUS: &str = "M. abscessus subsp. abscessus";
 pub const DESC_BOLLETII: &str = "M. abscessus subsp. bolletii";
