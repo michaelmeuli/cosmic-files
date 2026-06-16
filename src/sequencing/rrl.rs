@@ -361,6 +361,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 rrl_snp_calls,
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
+                pnca_snp_calls: vec![],
                 aligned_query: aligned_query.to_vec(),
                 alignment_offset: offset,
                 erm41_position_28_opt: None,

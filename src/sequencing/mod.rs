@@ -18,6 +18,7 @@ pub mod bed;
 pub mod erm41;
 pub mod hsp65;
 pub mod ntfy_notify;
+pub mod pnca;
 pub mod rpob;
 pub mod rrs;
 pub mod rrl;
@@ -27,6 +28,7 @@ pub use batch::SampleSusceptibilityRecord;
 
 use erm41::{Erm41LofCall, Erm41Position28, Erm41SusceptibilityCalls};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
+use pnca::{PncaSnpCall, PncaSusceptibilityCalls};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 
@@ -35,6 +37,7 @@ pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 const MIN_RRS_REF_LEN: usize = 1200;
 const MIN_RRL_REF_LEN: usize = 1200;
 const MIN_RPOB_REF_LEN: usize = 400;
+const MIN_PNCA_REF_LEN: usize = 500;
 
 pub const DESC_ABSCESSUS: &str = "M. abscessus subsp. abscessus";
 pub const DESC_BOLLETII: &str = "M. abscessus subsp. bolletii";
@@ -72,6 +75,9 @@ const REF_MYCO_HSP65: &str = include_str!("../../res/sequences/myco_hsp65.fasta"
 const REF_MYCO_RPOB: &str = include_str!("../../res/sequences/myco_rpob.fasta");
 /// 23S rRNA (rrl) reference sequences — Mycobacteriaceae type strains, fetched from NCBI at build time.
 const REF_MYCO_RRL: &str = include_str!("../../res/sequences/myco_rrl.fasta");
+/// pncA CDS + 50bp upstream promoter flank — M. tuberculosis H37Rv (Rv2043c), fetched from NCBI
+/// at build time (see `pnca` module docs).
+const REF_PNCA: &str = include_str!("../../res/sequences/pnca/pnca_h37rv.fasta");
 
 
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
@@ -80,6 +86,7 @@ pub struct SusceptibilityCalls {
     pub erm41: Erm41SusceptibilityCalls,
     pub rrl: RrlSusceptibilityCalls,
     pub rrs: RrsSusceptibilityCalls,
+    pub pnca: PncaSusceptibilityCalls,
 }
 
 impl std::fmt::Display for SusceptibilityCalls {
@@ -114,6 +121,17 @@ impl std::fmt::Display for SusceptibilityCalls {
         let rrs: Vec<String> = self.rrs.snp_calls.iter().map(|c| c.call_tag()).collect();
         if !rrs.is_empty() {
             parts.push(format!("{}", rrs.join(", ")));
+        }
+
+        let pnca: Vec<String> = self
+            .pnca
+            .snp_calls
+            .iter()
+            .filter(|c| !c.call_tag().is_empty())
+            .map(|c| format!("{}: {}", c.site_label(), c.call_tag()))
+            .collect();
+        if !pnca.is_empty() {
+            parts.push(format!("{}", pnca.join(", ")));
         }
 
         write!(f, "{}", parts.join(" | "))
@@ -726,6 +744,8 @@ pub struct SeqIdHit {
     pub rrs_snp_calls: Vec<RrsSnpCall>,
     /// Calls at each erm(41) loss-of-function variant position.
     pub erm41_snp_calls: Vec<Erm41LofCall>,
+    /// Calls at each pncA pyrazinamide-resistance nucleotide/codon position.
+    pub pnca_snp_calls: Vec<PncaSnpCall>,
     /// The aligned query (forward or reverse-complement, whichever scored best).
     pub aligned_query: Vec<u8>,
     /// Signed offset such that `query_index = ref_index - alignment_offset`.

@@ -20,7 +20,11 @@
       "Read(//tmp/**)",
       "Bash(sort -k2,3 -k1,1n)",
       "Bash(awk '$1<600')",
-      "Bash(awk '$1<700')"
+      "Bash(awk '$1<700')",
+      "Bash(awk -F',' '$1==\"pncA\"{print $2}' mutations.csv)",
+      "Bash(awk -F',' '$1==\"pncA\"' mutations.csv)",
+      "Bash(awk -F',' '$1==\"pncA\" && $2 ~ /^c\\\\.-/{print $2}' mutations.csv)",
+      "Bash(awk -F',' '$1==\"pncA\" && $2 ~ /^c\\\\.[0-9]/{print $2}' mutations.csv)"
     ]
   }
 }

@@ -76,6 +76,7 @@ use crate::sequencing::{
     },
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
+    pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
     rpob::identify_sequence_rpob,
     rrl::identify_sequence_rrl_ntm,
     rrs::identify_sequence_16s,
@@ -899,6 +900,7 @@ pub fn item_from_entry(
     let is_rpob = !is_fasta && (lower_name.contains("rpob") || lower_name.contains("rpo"));
     let is_16s = !is_fasta && lower_name.contains("mbak14");
     let is_23s_ntm = !is_fasta && (lower_name.contains("rrl") || lower_name.contains("mclr"));
+    let is_pnca = !is_fasta && lower_name.contains("pnca");
     let sequence_opt = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
@@ -957,6 +959,8 @@ pub fn item_from_entry(
                         identify_sequence_rrl_ntm(trimmed)
                     } else if is_16s {
                         identify_sequence_16s(trimmed)
+                    } else if is_pnca {
+                        identify_sequence_pnca(trimmed)
                     } else {
                         Vec::new()
                     };
@@ -994,7 +998,11 @@ pub fn item_from_entry(
         if rrl_result.is_some() {
             return rrl_result;
         }
-        is_susceptible_rrs(&hit.rrs_snp_calls)
+        let rrs_result = is_susceptible_rrs(&hit.rrs_snp_calls);
+        if rrs_result.is_some() {
+            return rrs_result;
+        }
+        is_susceptible_pnca(&hit.pnca_snp_calls)
     });
 
     let susceptibility_calls = sequence_opt
@@ -1025,6 +1033,10 @@ pub fn item_from_entry(
                 snp_calls: hit.rrs_snp_calls.clone(),
                 is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
                 is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
+            },
+            pnca: PncaSusceptibilityCalls {
+                snp_calls: hit.pnca_snp_calls.clone(),
+                is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
             },
         })
         .unwrap_or_default();
@@ -3060,6 +3072,11 @@ impl Item {
         !self.is_fasta() && (lower.contains("mclr") || lower.contains("rrl"))
     }
 
+    pub fn is_pnca(&self) -> bool {
+        let lower = self.name.to_ascii_lowercase();
+        !self.is_fasta() && lower.contains("pnca")
+    }
+
     pub fn can_gallery(&self) -> bool {
         self.mime.type_() == mime::IMAGE || self.mime.type_() == mime::TEXT
     }
@@ -4112,6 +4129,110 @@ impl Item {
                 Some(false) => {
                     details = details.push(widget::text::heading(
                         "Mutation in E. coli A2058 and/or A2059. Predicted macrolide resistance.",
+                    ))
+                }
+                None => {}
+            }
+        }
+
+        column = column.push(details);
+        column.into()
+    }
+
+    pub fn preview_pnca(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        let hits = self.metadata.seq_id_hits();
+        if hits.is_empty()
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
+            || !self.metadata.is_seq_id()
+        {
+            details = details.push(widget::text::body(
+                "Could not align sequence to the pncA reference.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+        } else {
+            let best = &hits[0];
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+            details = details.push(
+                widget::button::link(format!("View alignment ({:.1}%)", best.identity))
+                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone())))
+                    .padding(0),
+            );
+
+            let pnca = &self.metadata.susceptibility_calls().pnca;
+            let called: Vec<_> = pnca
+                .snp_calls
+                .iter()
+                .filter(|c| !c.call_tag().is_empty())
+                .collect();
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::heading(
+                "Pyrazinamide resistance calls (pncA, WHO mutation catalogue):",
+            ));
+            if called.is_empty() {
+                details = details.push(widget::text::body("No catalogued sites covered."));
+            } else {
+                for snp in &called {
+                    details = details.push(widget::text::body(format!(
+                        "  {}: {}",
+                        snp.site_label(),
+                        snp.call_tag()
+                    )));
+                }
+            }
+            match pnca.is_susceptible {
+                Some(true) => {
+                    details = details.push(widget::text::heading(
+                        "No pncA mutation at or above WHO-catalogue resistance confidence. Predicted pyrazinamide susceptible.",
+                    ))
+                }
+                Some(false) => {
+                    details = details.push(widget::text::heading(
+                        "pncA mutation meets WHO-catalogue resistance confidence. Predicted pyrazinamide resistance.",
                     ))
                 }
                 None => {}

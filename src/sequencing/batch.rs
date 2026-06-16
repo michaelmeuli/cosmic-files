@@ -6,6 +6,7 @@ use super::{
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
+    pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
     rpob::identify_sequence_rpob,
     rrl::{RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare},
     rrs::{RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare},
@@ -68,6 +69,8 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
         Some("16s".to_string())
     } else if lower_name.contains("rrl") || lower_name.contains("mclr") {
         Some("rrl".to_string())
+    } else if lower_name.contains("pnca") {
+        Some("pncA".to_string())
     } else {
         None
     };
@@ -116,6 +119,7 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
         let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
         let is_16s = lower_name.contains("mbak14");
         let is_23s_ntm = lower_name.contains("rrl") || lower_name.contains("mclr");
+        let is_pnca = lower_name.contains("pnca");
 
         let ab1_seq = parse_ab1_sequence(&bytes);
         let ab1_qual = parse_ab1_quality(&bytes);
@@ -135,6 +139,8 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
                 identify_sequence_rrl_ntm(trimmed)
             } else if is_16s {
                 identify_sequence_16s(trimmed)
+            } else if is_pnca {
+                identify_sequence_pnca(trimmed)
             } else {
                 Vec::new()
             }
@@ -155,7 +161,11 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
             if rrl_result.is_some() {
                 return rrl_result;
             }
-            is_susceptible_rrs(&hit.rrs_snp_calls)
+            let rrs_result = is_susceptible_rrs(&hit.rrs_snp_calls);
+            if rrs_result.is_some() {
+                return rrs_result;
+            }
+            is_susceptible_pnca(&hit.pnca_snp_calls)
         });
 
         let susceptibility_calls = seq_id_hits
@@ -180,6 +190,10 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
                     snp_calls: hit.rrs_snp_calls.clone(),
                     is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
                     is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
+                },
+                pnca: PncaSusceptibilityCalls {
+                    snp_calls: hit.pnca_snp_calls.clone(),
+                    is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
                 },
             })
             .unwrap_or_default();
@@ -229,6 +243,8 @@ pub fn write_ab1_csv(
         "rrl_susceptible",
         "rrs_snp_calls",
         "rrs_susceptible",
+        "pnca_snp_calls",
+        "pnca_susceptible",
         "file_created",
     ])?;
 
@@ -284,6 +300,9 @@ pub fn write_ab1_csv(
                 .map(|s| (s.ref_pos, s.call_tag())),
         );
 
+        let pnca_sus = fmt_susceptible(rec.susceptibility_calls.pnca.is_susceptible);
+        let pnca_snps = pnca_snp_calls_str(&rec.susceptibility_calls.pnca.snp_calls);
+
         let overall = fmt_susceptible(rec.is_susceptible);
 
         wtr.write_record([
@@ -301,6 +320,8 @@ pub fn write_ab1_csv(
             rrl_sus.as_str(),
             rrs_snps.as_str(),
             rrs_sus.as_str(),
+            pnca_snps.as_str(),
+            pnca_sus.as_str(),
             file_created.as_str(),
         ])?;
     }
@@ -441,6 +462,15 @@ fn fmt_susceptible(v: Option<bool>) -> String {
 fn snp_calls_str(calls: impl Iterator<Item = (usize, String)>) -> String {
     calls
         .map(|(pos, tag)| format!("pos {}: {}", pos + 1, tag))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn pnca_snp_calls_str(calls: &[super::pnca::PncaSnpCall]) -> String {
+    calls
+        .iter()
+        .filter(|c| !c.call_tag().is_empty())
+        .map(|c| format!("{}: {}", c.site_label(), c.call_tag()))
         .collect::<Vec<_>>()
         .join("; ")
 }

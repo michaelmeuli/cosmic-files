@@ -1,0 +1,468 @@
+use super::tb_data::confidence_rank;
+use super::{REF_PNCA, SeqIdHit, best_alignment, parse_multi_fasta, reverse_complement};
+use regex::Regex;
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
+/// Extra bases fetched upstream of the start codon when building `pnca/pnca_h37rv.fasta`
+/// (must match `upstream_flank` in `res/sequences/sequences.toml`'s pncA `[[genome]]` entry).
+/// HGVS `c.-N` positions are resolved against this flank.
+const UPSTREAM_FLANK: isize = 50;
+
+/// Maps a signed HGVS coding-sequence position (negative = promoter, e.g. `c.-11`) to
+/// `(wt_base, alts)` where `alts` maps each resistance alt to `(drugs, WHO confidence label)`.
+type PncaNtSnpMap = BTreeMap<isize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
+
+/// Maps a 1-based codon number to `(wt_aa, alts)` where `alts` maps each resistance alt amino
+/// acid (3-letter code, or `"*"` for nonsense) to `(drugs, WHO confidence label)`.
+type PncaAaSnpMap = BTreeMap<usize, (String, BTreeMap<String, (Vec<String>, String)>)>;
+
+/// Standard 3-letter amino acid codes used by the WHO catalogue `p.` notation.
+const AA3: [&str; 20] = [
+    "Ala", "Arg", "Asn", "Asp", "Cys", "Gln", "Glu", "Gly", "His", "Ile", "Leu", "Lys", "Met",
+    "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val",
+];
+
+#[derive(Debug, Deserialize, Clone)]
+struct MutationRow {
+    #[serde(rename = "Gene")]
+    gene: String,
+    #[serde(rename = "Mutation")]
+    mutation: String,
+    #[serde(rename = "drug")]
+    drug: String,
+    #[serde(rename = "confidence")]
+    confidence: String,
+}
+
+/// Translate a single codon to its 3-letter amino acid code (`"*"` for a stop codon).
+/// Returns `None` for incomplete codons or non-ACGT bytes.
+fn translate_codon(codon: &[u8]) -> Option<&'static str> {
+    let c = [
+        codon.first()?.to_ascii_uppercase(),
+        codon.get(1)?.to_ascii_uppercase(),
+        codon.get(2)?.to_ascii_uppercase(),
+    ];
+    Some(match &c {
+        b"TTT" | b"TTC" => "Phe",
+        b"TTA" | b"TTG" | b"CTT" | b"CTC" | b"CTA" | b"CTG" => "Leu",
+        b"ATT" | b"ATC" | b"ATA" => "Ile",
+        b"ATG" => "Met",
+        b"GTT" | b"GTC" | b"GTA" | b"GTG" => "Val",
+        b"TCT" | b"TCC" | b"TCA" | b"TCG" | b"AGT" | b"AGC" => "Ser",
+        b"CCT" | b"CCC" | b"CCA" | b"CCG" => "Pro",
+        b"ACT" | b"ACC" | b"ACA" | b"ACG" => "Thr",
+        b"GCT" | b"GCC" | b"GCA" | b"GCG" => "Ala",
+        b"TAT" | b"TAC" => "Tyr",
+        b"TAA" | b"TAG" | b"TGA" => "*",
+        b"CAT" | b"CAC" => "His",
+        b"CAA" | b"CAG" => "Gln",
+        b"AAT" | b"AAC" => "Asn",
+        b"AAA" | b"AAG" => "Lys",
+        b"GAT" | b"GAC" => "Asp",
+        b"GAA" | b"GAG" => "Glu",
+        b"TGT" | b"TGC" => "Cys",
+        b"TGG" => "Trp",
+        b"CGT" | b"CGC" | b"CGA" | b"CGG" | b"AGA" | b"AGG" => "Arg",
+        b"GGT" | b"GGC" | b"GGA" | b"GGG" => "Gly",
+        _ => return None,
+    })
+}
+
+/// 0-based index into `REF_PNCA` of a signed HGVS coding-sequence position. There is no
+/// `c.0` — `c.-1` sits immediately before `c.1` (the `A` of the start codon).
+fn nt_pos_to_ref_idx(c_pos: isize) -> usize {
+    let offset = if c_pos > 0 { c_pos - 1 } else { c_pos };
+    (UPSTREAM_FLANK + offset).max(0) as usize
+}
+
+/// 0-based index into `REF_PNCA` of the first base of a 1-based codon number.
+fn codon_to_ref_idx(codon: usize) -> usize {
+    nt_pos_to_ref_idx(((codon - 1) * 3 + 1) as isize)
+}
+
+/// Parses `tbprofiler/mutations.csv`, keeping only `pncA` rows whose mutation is a simple
+/// nucleotide substitution (`c.POS[wt]>[alt]`, promoter or coding) or a single-codon amino
+/// acid substitution / nonsense call (`p.WtNNNAlt` / `p.WtNNN*`).
+///
+/// Frameshifts, in-frame indels, delins, and stop-codon extensions (`fs`, `del`, `dup`,
+/// `delins`, `ext`) are not positioned by this simple gapless-alignment model and are skipped —
+/// same limitation as the rest of this codebase, which only calls substitutions, not indels.
+fn parse_pnca_resistance_snps(csv: &str) -> (PncaNtSnpMap, PncaAaSnpMap) {
+    static NT_SNP_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^c\.(-?\d+)([ACGT])>([ACGT])$").unwrap());
+    static CODON_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^p\.([A-Za-z]{3})(\d+)([A-Za-z]{3}|\*)$").unwrap());
+
+    let mut rdr = csv::Reader::from_reader(csv.as_bytes());
+    let mut nt_map: PncaNtSnpMap = BTreeMap::new();
+    let mut aa_map: PncaAaSnpMap = BTreeMap::new();
+
+    for row in rdr.deserialize::<MutationRow>() {
+        let Ok(row) = row else { continue };
+        if row.gene.trim() != "pncA" {
+            continue;
+        }
+        let confidence = row.confidence.trim().to_string();
+        if confidence.is_empty() {
+            continue;
+        }
+        let drug = row.drug.trim().to_string();
+        let m = row.mutation.trim();
+
+        // Keep the strongest (lowest-rank) confidence seen for a given alt, since the same
+        // mutation can appear once under "who_confidence" and once under "drug_resistance".
+        if let Some(caps) = NT_SNP_RE.captures(m) {
+            let Ok(c_pos) = caps[1].parse::<isize>() else { continue };
+            let wt = caps[2].as_bytes()[0];
+            let alt = caps[3].as_bytes()[0];
+            let entry = nt_map.entry(c_pos).or_insert_with(|| (wt, BTreeMap::new()));
+            let variant = entry.1.entry(alt).or_insert_with(|| (Vec::new(), confidence.clone()));
+            if !variant.0.contains(&drug) {
+                variant.0.push(drug);
+            }
+            if confidence_rank(&confidence) < confidence_rank(&variant.1) {
+                variant.1 = confidence.clone();
+            }
+        } else if let Some(caps) = CODON_RE.captures(m) {
+            let wt_aa = caps[1].to_string();
+            let alt_aa = caps[3].to_string();
+            if !AA3.contains(&wt_aa.as_str()) || (alt_aa != "*" && !AA3.contains(&alt_aa.as_str()))
+            {
+                continue;
+            }
+            let Ok(codon) = caps[2].parse::<usize>() else { continue };
+            let entry = aa_map.entry(codon).or_insert_with(|| (wt_aa.clone(), BTreeMap::new()));
+            let variant = entry.1.entry(alt_aa).or_insert_with(|| (Vec::new(), confidence.clone()));
+            if !variant.0.contains(&drug) {
+                variant.0.push(drug);
+            }
+            if confidence_rank(&confidence) < confidence_rank(&variant.1) {
+                variant.1 = confidence.clone();
+            }
+        }
+    }
+    (nt_map, aa_map)
+}
+
+static PNCA_RESISTANCE_SNPS: LazyLock<(PncaNtSnpMap, PncaAaSnpMap)> =
+    LazyLock::new(|| parse_pnca_resistance_snps(include_str!("../../tbprofiler/mutations.csv")));
+
+/// One diagnostic pncA site: either a single nucleotide (promoter or coding) or a single codon.
+#[derive(Clone, Debug)]
+pub enum PncaCallKind {
+    Nucleotide {
+        wt_base: u8,
+        query_base: Option<u8>,
+    },
+    Codon {
+        codon: usize,
+        wt_aa: String,
+        query_aa: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct PncaSnpCall {
+    /// 0-based position in the pncA reference sequence: the substituted base for nucleotide
+    /// calls, or the first base of the codon for codon calls.
+    pub ref_pos: usize,
+    pub kind: PncaCallKind,
+    /// Maps each resistance-conferring alt (a 1-character base string, or an amino acid
+    /// 3-letter code / `"*"`) to `(drugs, WHO confidence label)`.
+    pub resistance_alts: BTreeMap<String, (Vec<String>, String)>,
+}
+
+impl PncaSnpCall {
+    /// HGVS-style label for this site, e.g. `"c.-11"` or `"p.Ala102"`.
+    pub fn site_label(&self) -> String {
+        match &self.kind {
+            PncaCallKind::Nucleotide { .. } => {
+                // Recover the signed c. position from ref_pos for display.
+                let offset = self.ref_pos as isize - UPSTREAM_FLANK;
+                if offset >= 0 {
+                    format!("c.{}", offset + 1)
+                } else {
+                    format!("c.{}", offset)
+                }
+            }
+            PncaCallKind::Codon { codon, wt_aa, .. } => format!("p.{wt_aa}{codon}"),
+        }
+    }
+
+    pub fn call_tag(&self) -> String {
+        match &self.kind {
+            PncaCallKind::Nucleotide { wt_base, query_base } => match query_base {
+                None => String::new(),
+                Some(b) if b == wt_base => format!("{} (wt)", *b as char),
+                Some(b) => {
+                    let key = (*b as char).to_string();
+                    match self.resistance_alts.get(&key) {
+                        Some((drugs, confidence)) => {
+                            format!("{} ({}, {})", *b as char, drugs.join(", "), confidence)
+                        }
+                        None => format!("{} (mutation, untested)", *b as char),
+                    }
+                }
+            },
+            PncaCallKind::Codon { wt_aa, query_aa, .. } => match query_aa {
+                None => String::new(),
+                Some(aa) if aa == wt_aa => format!("{aa} (wt)"),
+                Some(aa) => match self.resistance_alts.get(aa) {
+                    Some((drugs, confidence)) => {
+                        format!("{} ({}, {})", aa, drugs.join(", "), confidence)
+                    }
+                    None => format!("{aa} (mutation, untested)"),
+                },
+            },
+        }
+    }
+
+    /// WHO confidence label of the resistance entry matching the currently observed allele,
+    /// or `None` when the observed allele is wildtype, uncovered, or not in the catalogue.
+    fn observed_confidence(&self) -> Option<&str> {
+        let key = match &self.kind {
+            PncaCallKind::Nucleotide { wt_base, query_base: Some(b) } if b != wt_base => {
+                (*b as char).to_string()
+            }
+            PncaCallKind::Codon { wt_aa, query_aa: Some(aa), .. } if aa != wt_aa => aa.clone(),
+            _ => return None,
+        };
+        self.resistance_alts.get(&key).map(|(_, conf)| conf.as_str())
+    }
+}
+
+/// All pncA susceptibility evidence for one sample, ready for UI display.
+#[derive(Debug, Clone, Default)]
+pub struct PncaSusceptibilityCalls {
+    pub snp_calls: Vec<PncaSnpCall>,
+    pub is_susceptible: Option<bool>,
+}
+
+/// Returns `Some(false)` when the strongest WHO-catalogue confidence among observed
+/// resistance-conferring alleles ranks as resistant via [`confidence_rank`] (rank `< 2`, e.g.
+/// "Assoc w R"), `Some(true)` when the strongest observed call is weaker than that (e.g.
+/// "Uncertain significance" or "Not assoc w R"), and `None` when no catalogued allele was
+/// observed at all (wildtype throughout, or positions not covered by the read).
+pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
+    let min_rank = snp_calls
+        .iter()
+        .filter_map(PncaSnpCall::observed_confidence)
+        .map(confidence_rank)
+        .min()?;
+    Some(min_rank >= 2)
+}
+
+fn call_pnca_nt_snps(map: &PncaNtSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
+    map.iter()
+        .map(|(&c_pos, (wt_base, alts))| {
+            let ref_pos = nt_pos_to_ref_idx(c_pos);
+            let query_pos = ref_pos as isize - alignment_offset;
+            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
+                Some(query[query_pos as usize].to_ascii_uppercase())
+            } else {
+                None
+            };
+            let resistance_alts = alts
+                .iter()
+                .map(|(&b, v)| ((b as char).to_string(), v.clone()))
+                .collect();
+            PncaSnpCall {
+                ref_pos,
+                kind: PncaCallKind::Nucleotide { wt_base: *wt_base, query_base },
+                resistance_alts,
+            }
+        })
+        .collect()
+}
+
+fn call_pnca_aa_snps(map: &PncaAaSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
+    map.iter()
+        .map(|(&codon, (wt_aa, alts))| {
+            let ref_pos = codon_to_ref_idx(codon);
+            let query_start = ref_pos as isize - alignment_offset;
+            let query_aa = if query_start >= 0 && (query_start as usize) + 3 <= query.len() {
+                translate_codon(&query[query_start as usize..query_start as usize + 3])
+                    .map(str::to_string)
+            } else {
+                None
+            };
+            PncaSnpCall {
+                ref_pos,
+                kind: PncaCallKind::Codon { codon, wt_aa: wt_aa.clone(), query_aa },
+                resistance_alts: alts.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Database is `pnca/pnca_h37rv.fasta`: the pncA CDS (locus_tag `Rv2043c`) plus a 50bp
+/// upstream promoter flank, fetched from *M. tuberculosis* H37Rv (`NC_000962.3`) at build time
+/// (via `fetch_sequences_from_toml()` in build.rs, configured in `res/sequences/sequences.toml`).
+///
+/// Unlike the NTM-focused targets (rrs/rrl/hsp65/rpoB), pncA has a single reference — pyrazinamide
+/// resistance calling is *M. tuberculosis*-specific — so this always returns at most one hit.
+pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
+    let Some((accession, description, refseq)) =
+        parse_multi_fasta(REF_PNCA).into_iter().next()
+    else {
+        return vec![];
+    };
+    if refseq.len() < super::MIN_PNCA_REF_LEN {
+        return vec![];
+    }
+
+    let rc = reverse_complement(query);
+    let (fwd_id, fwd_off) = best_alignment(query, &refseq);
+    let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+    let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
+        (rev_id, true, rc, rev_off)
+    } else {
+        (fwd_id, false, query.to_vec(), fwd_off)
+    };
+
+    let (nt_map, aa_map) = &*PNCA_RESISTANCE_SNPS;
+    let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &aligned_query, alignment_offset);
+    pnca_snp_calls.extend(call_pnca_aa_snps(aa_map, &aligned_query, alignment_offset));
+    pnca_snp_calls.sort_by_key(|c| c.ref_pos);
+
+    vec![SeqIdHit {
+        accession,
+        description,
+        identity,
+        is_reverse,
+        aligned_query,
+        alignment_offset,
+        ref_seq: refseq,
+        kansasii_gastri_snp_calls: vec![],
+        marinum_ulcerans_snp_calls: vec![],
+        rrl_snp_calls: vec![],
+        rrs_snp_calls: vec![],
+        erm41_snp_calls: vec![],
+        pnca_snp_calls,
+        erm41_position_28_opt: None,
+        rrl_position_2058_2059_opt: None,
+    }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_translate_codon() {
+        assert_eq!(translate_codon(b"ATG"), Some("Met"));
+        assert_eq!(translate_codon(b"atg"), Some("Met")); // case-insensitive
+        assert_eq!(translate_codon(b"TGA"), Some("*"));
+        assert_eq!(translate_codon(b"GCC"), Some("Ala"));
+        assert_eq!(translate_codon(b"NNN"), None);
+        assert_eq!(translate_codon(b"AT"), None); // incomplete
+    }
+
+    #[test]
+    fn test_nt_pos_to_ref_idx_and_site_label_roundtrip() {
+        // c.1 (the A of ATG) sits right after the upstream flank.
+        assert_eq!(nt_pos_to_ref_idx(1), UPSTREAM_FLANK as usize);
+        // c.-1 sits immediately before it; there is no c.0.
+        assert_eq!(nt_pos_to_ref_idx(-1), UPSTREAM_FLANK as usize - 1);
+        assert_eq!(nt_pos_to_ref_idx(103), UPSTREAM_FLANK as usize + 102);
+
+        let nt_call = PncaSnpCall {
+            ref_pos: nt_pos_to_ref_idx(-11),
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: None },
+            resistance_alts: BTreeMap::new(),
+        };
+        assert_eq!(nt_call.site_label(), "c.-11");
+
+        let nt_call = PncaSnpCall {
+            ref_pos: nt_pos_to_ref_idx(103),
+            kind: PncaCallKind::Nucleotide { wt_base: b'C', query_base: None },
+            resistance_alts: BTreeMap::new(),
+        };
+        assert_eq!(nt_call.site_label(), "c.103");
+    }
+
+    #[test]
+    fn test_codon_to_ref_idx() {
+        // Codon 1 is the start codon, sitting right after the flank.
+        assert_eq!(codon_to_ref_idx(1), UPSTREAM_FLANK as usize);
+        // Codon 2 starts 3 bases later.
+        assert_eq!(codon_to_ref_idx(2), UPSTREAM_FLANK as usize + 3);
+    }
+
+    #[test]
+    fn test_parse_pnca_resistance_snps() {
+        let csv = "Gene,Mutation,type,drug,original_mutation,confidence,source,comment\n\
+                    pncA,c.-11A>C,drug_resistance,pyrazinamide,c.-11A>C,Assoc w R,WHO catalogue v2,\n\
+                    pncA,p.Ala102Pro,drug_resistance,pyrazinamide,p.Ala102Pro,Assoc w R,WHO catalogue v2,\n\
+                    pncA,p.Ala102fs,drug_resistance,pyrazinamide,p.Ala102fs,Assoc w R,WHO catalogue v2,\n\
+                    pncA,c.-744_492del,drug_resistance,pyrazinamide,c.-744_492del,,tbdb,\n\
+                    rrs,n.1473T>C,drug_resistance,amikacin,n.1473T>C,Assoc w R,WHO catalogue v2,\n";
+        let (nt_map, aa_map) = parse_pnca_resistance_snps(csv);
+
+        // c.-11A>C parsed as a nucleotide SNP.
+        assert_eq!(nt_map.len(), 1);
+        let (wt, alts) = &nt_map[&-11];
+        assert_eq!(*wt, b'A');
+        assert!(alts.contains_key(&b'C'));
+
+        // p.Ala102Pro parsed as a codon call; the unpositioned frameshift and large deletion,
+        // and the non-pncA row, are all skipped.
+        assert_eq!(aa_map.len(), 1);
+        let (wt_aa, alts) = &aa_map[&102];
+        assert_eq!(wt_aa, "Ala");
+        assert!(alts.contains_key("Pro"));
+    }
+
+    #[test]
+    fn test_is_susceptible_pnca() {
+        // No calls observed at all → unknown.
+        assert_eq!(is_susceptible_pnca(&[]), None);
+
+        // Wildtype only → unknown (no catalogued allele observed).
+        let wt_call = PncaSnpCall {
+            ref_pos: 0,
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'A') },
+            resistance_alts: BTreeMap::from([(
+                "C".to_string(),
+                (vec!["pyrazinamide".to_string()], "Assoc w R".to_string()),
+            )]),
+        };
+        assert_eq!(is_susceptible_pnca(&[wt_call.clone()]), None);
+
+        // Strong resistance evidence observed → resistant.
+        let resistant_call = PncaSnpCall {
+            ref_pos: 0,
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'C') },
+            resistance_alts: BTreeMap::from([(
+                "C".to_string(),
+                (vec!["pyrazinamide".to_string()], "Assoc w R".to_string()),
+            )]),
+        };
+        assert_eq!(is_susceptible_pnca(&[resistant_call]), Some(false));
+
+        // Only weak/uncertain evidence observed → susceptible.
+        let uncertain_call = PncaSnpCall {
+            ref_pos: 0,
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'G') },
+            resistance_alts: BTreeMap::from([(
+                "G".to_string(),
+                (vec!["pyrazinamide".to_string()], "Uncertain significance".to_string()),
+            )]),
+        };
+        assert_eq!(is_susceptible_pnca(&[uncertain_call]), Some(true));
+    }
+
+    #[test]
+    fn test_identify_sequence_pnca_perfect_match() {
+        // Aligning the reference against itself should give 100% identity and translate the
+        // start/stop codons correctly.
+        let refseq = super::super::parse_fasta_seq(REF_PNCA);
+        let hits = identify_sequence_pnca(&refseq);
+        assert_eq!(hits.len(), 1);
+        let hit = &hits[0];
+        assert!(hit.identity > 99.0);
+        assert!(!hit.is_reverse);
+    }
+}

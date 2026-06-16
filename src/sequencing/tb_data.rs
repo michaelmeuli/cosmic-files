@@ -2,7 +2,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-fn confidence_rank(conf: &str) -> u8 {
+/// Ranks a WHO-catalogue confidence label from strongest resistance evidence (0) to weakest /
+/// unknown (5). Shared across modules so every gene's susceptibility call uses the same scale.
+pub(crate) fn confidence_rank(conf: &str) -> u8 {
     match conf {
         "Assoc w R" => 0,
         "Assoc w R - Interim" => 1,

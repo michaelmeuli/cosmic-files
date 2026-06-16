@@ -22,6 +22,13 @@ struct GenomeEntry {
     locus_tag: Option<String>,
     seq_start: Option<u64>,
     seq_stop: Option<u64>,
+    // Extra bases fetched on the 5'/3' side of the gene (only meaningful with `locus_tag`,
+    // since the strand needed to know which genomic direction is "upstream" comes from the
+    // feature table lookup). E.g. upstream_flank captures promoter region before the start codon.
+    #[serde(default)]
+    upstream_flank: u64,
+    #[serde(default)]
+    downstream_flank: u64,
 }
 
 #[derive(serde::Deserialize)]
@@ -32,6 +39,10 @@ struct AppendEntry {
     locus_tag: Option<String>,
     seq_start: Option<u64>,
     seq_stop: Option<u64>,
+    #[serde(default)]
+    upstream_flank: u64,
+    #[serde(default)]
+    downstream_flank: u64,
 }
 
 fn ncbi_url_encode(s: &str) -> String {
@@ -184,6 +195,7 @@ fn parse_feature_table(ft: &str, locus_tag: &str) -> Result<(u64, u64, u8), Stri
     Err(format!("locus_tag {:?} not found in feature table", locus_tag))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ncbi_fetch_genome_gene(
     base: &str,
     email: &str,
@@ -192,6 +204,8 @@ fn ncbi_fetch_genome_gene(
     locus_tag: Option<&str>,
     seq_start: Option<u64>,
     seq_stop: Option<u64>,
+    upstream_flank: u64,
+    downstream_flank: u64,
 ) -> Result<String, String> {
     let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
     let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
@@ -213,6 +227,16 @@ fn ncbi_fetch_genome_gene(
             (Some(s), Some(e)) => (s, e, 1u8),
             _ => return Err("must specify locus_tag or both seq_start and seq_stop".into()),
         }
+    };
+
+    // `start`/`stop` are sorted ascending regardless of strand; for a forward-strand gene the
+    // 5' end sits at `start`, so upstream extends below it. For a reverse-strand gene (strand 2,
+    // i.e. the feature table listed coordinates descending) the 5' end sits at `stop`, so
+    // upstream extends above it.
+    let (start, stop) = if strand == 2 {
+        (start.saturating_sub(downstream_flank), stop + upstream_flank)
+    } else {
+        (start.saturating_sub(upstream_flank), stop + downstream_flank)
     };
 
     let url = format!(
@@ -307,6 +331,7 @@ fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
             ncbi_fetch_genome_gene(
                 BASE, EMAIL, api_key.as_deref(), &entry.accession,
                 entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+                entry.upstream_flank, entry.downstream_flank,
             )
         } else {
             ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
@@ -337,6 +362,7 @@ fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
             ncbi_fetch_genome_gene(
                 BASE, EMAIL, api_key.as_deref(), &entry.accession,
                 entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
+                entry.upstream_flank, entry.downstream_flank,
             )
         } else {
             ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)

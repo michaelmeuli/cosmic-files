@@ -207,6 +207,7 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
                 rrl_snp_calls: vec![],
                 rrs_snp_calls,
                 erm41_snp_calls: vec![],
+                pnca_snp_calls: vec![],
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt: None,
             }

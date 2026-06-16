@@ -2475,6 +2475,8 @@ impl App {
                                         Some(item.preview_16s())
                                     } else if item.is_rrl_ntm() {
                                         Some(item.preview_rrl_ntm())
+                                    } else if item.is_pnca() {
+                                        Some(item.preview_pnca())
                                     } else if item.metadata.is_tbprofiler_json() {
                                         Some(item.preview_tbprofiler_json())
                                     } else {
