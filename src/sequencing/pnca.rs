@@ -219,18 +219,36 @@ impl PncaSnpCall {
         }
     }
 
-    /// WHO confidence label of the resistance entry matching the currently observed allele,
-    /// or `None` when the observed allele is wildtype, uncovered, or not in the catalogue.
-    fn observed_confidence(&self) -> Option<&str> {
-        let key = match &self.kind {
-            PncaCallKind::Nucleotide { wt_base, query_base: Some(b) } if b != wt_base => {
-                (*b as char).to_string()
+    /// Classifies the allele observed at this site, or `None` when the read doesn't cover it
+    /// at all (as opposed to covering it and finding wildtype — those are not the same thing).
+    fn evidence(&self) -> Option<PncaEvidence> {
+        let (observed, wt) = match &self.kind {
+            PncaCallKind::Nucleotide { wt_base, query_base: Some(b) } => {
+                ((*b as char).to_string(), *b == *wt_base)
             }
-            PncaCallKind::Codon { wt_aa, query_aa: Some(aa), .. } if aa != wt_aa => aa.clone(),
+            PncaCallKind::Codon { wt_aa, query_aa: Some(aa), .. } => (aa.clone(), aa == wt_aa),
             _ => return None,
         };
-        self.resistance_alts.get(&key).map(|(_, conf)| conf.as_str())
+        if wt {
+            return Some(PncaEvidence::Wildtype);
+        }
+        Some(match self.resistance_alts.get(&observed) {
+            Some((_, conf)) => PncaEvidence::Catalogued(confidence_rank(conf)),
+            None => PncaEvidence::Uncatalogued,
+        })
     }
+}
+
+/// What the read showed at one diagnostic pncA site, for [`is_susceptible_pnca`].
+enum PncaEvidence {
+    /// Matches the wildtype allele — positive evidence of susceptibility at this site.
+    Wildtype,
+    /// Differs from wildtype but isn't in the WHO catalogue — neither confirms nor rules out
+    /// resistance, but does confirm the site was covered.
+    Uncatalogued,
+    /// Matches a catalogued resistance-conferring alt, at this confidence rank
+    /// (see [`confidence_rank`]; lower = stronger resistance evidence).
+    Catalogued(u8),
 }
 
 /// All pncA susceptibility evidence for one sample, ready for UI display.
@@ -240,18 +258,34 @@ pub struct PncaSusceptibilityCalls {
     pub is_susceptible: Option<bool>,
 }
 
-/// Returns `Some(false)` when the strongest WHO-catalogue confidence among observed
-/// resistance-conferring alleles ranks as resistant via [`confidence_rank`] (rank `< 2`, e.g.
-/// "Assoc w R"), `Some(true)` when the strongest observed call is weaker than that (e.g.
-/// "Uncertain significance" or "Not assoc w R"), and `None` when no catalogued allele was
-/// observed at all (wildtype throughout, or positions not covered by the read).
+/// Returns `Some(false)` when any covered site's allele matches a catalogued resistance-
+/// conferring alt at confidence rank `< 2` (e.g. "Assoc w R"). Otherwise `Some(true)` as long as
+/// *some* site was actually covered by the read — including a fully wildtype read, which is
+/// real evidence of susceptibility, not an absence of information. Only returns `None` when no
+/// diagnostic site (nucleotide or codon, promoter or coding) was covered at all, e.g. the read
+/// didn't align over any catalogued position.
 pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
-    let min_rank = snp_calls
-        .iter()
-        .filter_map(PncaSnpCall::observed_confidence)
-        .map(confidence_rank)
-        .min()?;
-    Some(min_rank >= 2)
+    let mut covered = false;
+    let mut min_resistant_rank: Option<u8> = None;
+
+    for call in snp_calls {
+        match call.evidence() {
+            None => {}
+            Some(PncaEvidence::Wildtype | PncaEvidence::Uncatalogued) => covered = true,
+            Some(PncaEvidence::Catalogued(rank)) => {
+                covered = true;
+                min_resistant_rank = Some(min_resistant_rank.map_or(rank, |r| r.min(rank)));
+            }
+        }
+    }
+
+    if min_resistant_rank.is_some_and(|rank| rank < 2) {
+        Some(false)
+    } else if covered {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 fn call_pnca_nt_snps(map: &PncaNtSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
@@ -417,30 +451,44 @@ mod tests {
 
     #[test]
     fn test_is_susceptible_pnca() {
-        // No calls observed at all → unknown.
+        // No calls at all → unknown (nothing was covered).
         assert_eq!(is_susceptible_pnca(&[]), None);
 
-        // Wildtype only → unknown (no catalogued allele observed).
+        let resistance_alts = || {
+            BTreeMap::from([(
+                "C".to_string(),
+                (vec!["pyrazinamide".to_string()], "Assoc w R".to_string()),
+            )])
+        };
+
+        // A site that the read simply didn't cover → unknown, same as no calls at all.
+        let uncovered_call = PncaSnpCall {
+            ref_pos: 0,
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: None },
+            resistance_alts: resistance_alts(),
+        };
+        assert_eq!(is_susceptible_pnca(&[uncovered_call]), None);
+
+        // Wildtype observed → susceptible. A fully wildtype pncA read is real evidence of
+        // susceptibility, not an absence of information.
         let wt_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'A') },
-            resistance_alts: BTreeMap::from([(
-                "C".to_string(),
-                (vec!["pyrazinamide".to_string()], "Assoc w R".to_string()),
-            )]),
+            resistance_alts: resistance_alts(),
         };
-        assert_eq!(is_susceptible_pnca(&[wt_call.clone()]), None);
+        assert_eq!(is_susceptible_pnca(&[wt_call.clone()]), Some(true));
 
-        // Strong resistance evidence observed → resistant.
+        // Strong resistance evidence observed → resistant, even alongside wildtype calls
+        // elsewhere (the strongest evidence wins).
         let resistant_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'C') },
-            resistance_alts: BTreeMap::from([(
-                "C".to_string(),
-                (vec!["pyrazinamide".to_string()], "Assoc w R".to_string()),
-            )]),
+            resistance_alts: resistance_alts(),
         };
-        assert_eq!(is_susceptible_pnca(&[resistant_call]), Some(false));
+        assert_eq!(
+            is_susceptible_pnca(&[wt_call.clone(), resistant_call]),
+            Some(false)
+        );
 
         // Only weak/uncertain evidence observed → susceptible.
         let uncertain_call = PncaSnpCall {
@@ -452,6 +500,15 @@ mod tests {
             )]),
         };
         assert_eq!(is_susceptible_pnca(&[uncertain_call]), Some(true));
+
+        // A non-wildtype allele with no catalogue entry at all → covered but uncatalogued;
+        // doesn't confirm resistance, so still susceptible.
+        let uncatalogued_call = PncaSnpCall {
+            ref_pos: 0,
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'T') },
+            resistance_alts: resistance_alts(),
+        };
+        assert_eq!(is_susceptible_pnca(&[uncatalogued_call]), Some(true));
     }
 
     #[test]
