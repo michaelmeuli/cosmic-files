@@ -866,7 +866,7 @@ const PDF_MARGIN_T: f32 = 8.0;
 const PDF_ROW_H: f32 = 5.5;
 
 // Column x-offsets from PDF_MARGIN_L (mm)
-const PDF_COL_X: [f32; 6] = [0.0, 26.0, 41.0, 90.0, 110.0, 200.0];
+const PDF_COL_X: [f32; 6] = [0.0, 24.0, 39.0, 110.0, 130.0, 200.0];
 const PDF_TABLE_W: f32 = 270.0; // right edge of last column relative to PDF_MARGIN_L
 const PDF_COL_HEADERS: [&str; 6] = [
     "Sample ID", "Gene", "Species", "Susceptible", "Calls", "Filename",
@@ -929,7 +929,7 @@ pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8
         }
 
         let species = rec.species.as_deref().unwrap_or("");
-        let species_trunc = pdf_truncate(species, 40);
+        let species_trunc = pdf_truncate(species, 50);
         let calls_str = rec.susceptibility_calls.to_string();
         let calls_trunc = pdf_truncate(&calls_str, 50);
         let fname_trunc = pdf_truncate(&rec.file_name, 50);
