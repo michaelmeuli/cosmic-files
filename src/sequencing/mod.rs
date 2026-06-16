@@ -873,11 +873,15 @@ const PDF_COL_HEADERS: [&str; 6] = [
 ];
 
 /// Build a landscape A4 PDF report from AB1 scan records. Filtered to gene-identified
-/// records with identity ≥ `MIN_SEQ_ID_IDENTITY`, same as the CSV output.
-pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8> {
+/// records with identity ≥ `MIN_SEQ_ID_IDENTITY`, same as the CSV output, and to
+/// samples no older than `report_max_age_days` (see `TBConfig::report_max_age_days`).
+pub fn build_report_pdf(
+    records: &[batch::SampleSusceptibilityRecord],
+    report_max_age_days: u32,
+) -> Vec<u8> {
     use printpdf::*;
 
-    const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 24 * 60 * 60);
+    let max_age = std::time::Duration::from_secs(u64::from(report_max_age_days) * 24 * 60 * 60);
     let now = std::time::SystemTime::now();
 
     let filtered: Vec<&batch::SampleSusceptibilityRecord> = records
@@ -885,7 +889,7 @@ pub fn build_report_pdf(records: &[batch::SampleSusceptibilityRecord]) -> Vec<u8
         .filter(|r| r.gene.is_some() && r.identity.is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY))
         .filter(|r| {
             r.file_created
-                .is_none_or(|created| now.duration_since(created).is_ok_and(|age| age <= MAX_AGE))
+                .is_none_or(|created| now.duration_since(created).is_ok_and(|age| age <= max_age))
         })
         .collect();
 

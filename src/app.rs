@@ -530,6 +530,7 @@ pub enum Message {
     SetTbAb1ScanPath(String),
     SetTbAb1OutDir(String),
     SetNtfyTopic(String),
+    SetTbReportMaxAgeDays(String),
     ScanAb1Directory,
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
 }
@@ -2635,6 +2636,15 @@ impl App {
                             &self.config.tb_config.ntfy_topic,
                         )
                         .on_input(Message::SetNtfyTopic),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("Report max sample age (days)").control(
+                        widget::text_input(
+                            "60",
+                            self.config.tb_config.report_max_age_days.to_string(),
+                        )
+                        .on_input(Message::SetTbReportMaxAgeDays),
                     ),
                 )
                 .into(),
@@ -6407,6 +6417,14 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
+            Message::SetTbReportMaxAgeDays(v) => {
+                if let Ok(days) = v.parse::<u32>() {
+                    let mut tb_config = self.config.tb_config.clone();
+                    tb_config.report_max_age_days = days;
+                    config_set!(tb_config, tb_config);
+                    return self.update_config();
+                }
+            }
             Message::ScanAb1Directory => {
                 let scan_path = self.config.tb_config.ab1_scan_path.clone();
                 if scan_path.is_empty() {
@@ -6447,7 +6465,10 @@ impl Application for App {
                     log::info!("Rare mutations CSV → {}", rare_path.display());
                 }
 
-                let pdf_bytes = crate::sequencing::build_report_pdf(&records);
+                let pdf_bytes = crate::sequencing::build_report_pdf(
+                    &records,
+                    self.config.tb_config.report_max_age_days,
+                );
                 let pdf_path = out_path.with_file_name("ab1_susceptibility_report.pdf");
                 if let Err(e) = std::fs::write(&pdf_path, &pdf_bytes) {
                     log::warn!("PDF write failed: {e}");

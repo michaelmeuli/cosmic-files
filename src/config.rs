@@ -166,7 +166,6 @@ impl State {
 
 #[derive(Clone, Debug, Eq, PartialEq, CosmicConfigEntry, Deserialize, Serialize)]
 #[serde(default)]
-#[derive(Default)]
 pub struct TBConfig {
     pub script_path: String,
     pub out_dir: String,
@@ -176,6 +175,27 @@ pub struct TBConfig {
     pub ab1_scan_path: String,
     pub ab1_out_dir: String,
     pub ntfy_topic: String,
+    pub report_max_age_days: u32,
+}
+
+/// Default cutoff for [`TBConfig::report_max_age_days`]: samples older than this
+/// are excluded from the generated PDF report.
+const DEFAULT_REPORT_MAX_AGE_DAYS: u32 = 60;
+
+impl Default for TBConfig {
+    fn default() -> Self {
+        Self {
+            script_path: String::new(),
+            out_dir: String::new(),
+            docx_template_path: String::new(),
+            pair1_suffix: String::new(),
+            pair2_suffix: String::new(),
+            ab1_scan_path: String::new(),
+            ab1_out_dir: String::new(),
+            ntfy_topic: String::new(),
+            report_max_age_days: DEFAULT_REPORT_MAX_AGE_DAYS,
+        }
+    }
 }
 
 
@@ -240,16 +260,7 @@ impl Config {
 
         /// Construct tab config for dialog
     pub fn tb_config(&self) -> TBConfig {
-        TBConfig {
-            script_path: self.tb_config.script_path.clone(),
-            out_dir: self.tb_config.out_dir.clone(),
-            docx_template_path: self.tb_config.docx_template_path.clone(),
-            pair1_suffix: self.tb_config.pair1_suffix.clone(),
-            pair2_suffix: self.tb_config.pair2_suffix.clone(),
-            ab1_scan_path: self.tb_config.ab1_scan_path.clone(),
-            ab1_out_dir: self.tb_config.ab1_out_dir.clone(),
-            ntfy_topic: self.tb_config.ntfy_topic.clone(),
-        }
+        self.tb_config.clone()
     }
 }
 
