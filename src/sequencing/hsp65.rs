@@ -126,20 +126,30 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 .unwrap_or(raw_acc);
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
+                if off < 0 {
+                    let start = (-off) as usize;
+                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
+                } else {
+                    (seq.to_vec(), off)
+                }
+            };
             let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-                (rev_id, true, rc.as_slice(), rev_off)
+                let (aq, off) = clip(&rc, rev_off);
+                (rev_id, true, aq, off)
             } else {
-                (fwd_id, false, query, fwd_off)
+                let (aq, off) = clip(query, fwd_off);
+                (fwd_id, false, aq, off)
             };
             let kansasii_gastri_snp_calls =
                 if KANSASII_GASTRI_ACCS.contains(&accession.as_str()) {
-                    call_kansasii_gastri_snps(aligned_query, offset)
+                    call_kansasii_gastri_snps(&aligned_query, offset)
                 } else {
                     vec![]
                 };
             let marinum_ulcerans_snp_calls =
                 if MARINUM_ULCERANS_ACCS.contains(&accession.as_str()) {
-                    call_marinum_ulcerans_snps(aligned_query, offset)
+                    call_marinum_ulcerans_snps(&aligned_query, offset)
                 } else {
                     vec![]
                 };
@@ -154,7 +164,7 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
-                aligned_query: aligned_query.to_vec(),
+                aligned_query,
                 alignment_offset: offset,
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt: None,

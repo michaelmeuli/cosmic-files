@@ -423,16 +423,26 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
             let refseq = parse_fasta_seq(fasta);
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
+                if off < 0 {
+                    let start = (-off) as usize;
+                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
+                } else {
+                    (seq.to_vec(), off)
+                }
+            };
             let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-                (rev_id, true, rc.as_slice(), rev_off)
+                let (aq, off) = clip(&rc, rev_off);
+                (rev_id, true, aq, off)
             } else {
-                (fwd_id, false, query, fwd_off)
+                let (aq, off) = clip(query, fwd_off);
+                (fwd_id, false, aq, off)
             };
             // Abscessus LOF SNP positions apply to all three subspecies — bolletii and
             // massiliense are sequence-similar enough, and no separate variants.csv exists for them.
             let erm41_snp_calls = ERM41_LOF_SNPS
                 .get(super::DESC_ABSCESSUS)  //.get(description)
-                .map(|snps| call_erm41_lof_snps(snps, aligned_query, offset))
+                .map(|snps| call_erm41_lof_snps(snps, &aligned_query, offset))
                 .unwrap_or_default();
             SeqIdHit {
                 accession: accession.to_string(),
@@ -445,7 +455,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls,
                 pnca_snp_calls: vec![],
-                aligned_query: aligned_query.to_vec(),
+                aligned_query,
                 alignment_offset: offset,
                 erm41_position_28_opt: Some(erm41_position_28),
                 rrl_position_2058_2059_opt: None,

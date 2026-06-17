@@ -360,10 +360,24 @@ pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
         .map(|(accession, description, refseq)| {
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            // When the query is longer than the reference, best_alignment returns a negative
+            // offset (reference sits inside the query). Clip to just the aligned window so
+            // that the pairwise display is clean and SNP index arithmetic stays simple
+            // (alignment_offset == 0 means ref_pos == query_pos directly).
+            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
+                if off < 0 {
+                    let start = (-off) as usize;
+                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
+                } else {
+                    (seq.to_vec(), off)
+                }
+            };
             let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
-                (rev_id, true, rc.clone(), rev_off)
+                let (aq, off) = clip(&rc, rev_off);
+                (rev_id, true, aq, off)
             } else {
-                (fwd_id, false, query.to_vec(), fwd_off)
+                let (aq, off) = clip(query, fwd_off);
+                (fwd_id, false, aq, off)
             };
 
             let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &aligned_query, alignment_offset);

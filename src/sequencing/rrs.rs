@@ -181,10 +181,20 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
         .map(|(accession, description, refseq)| {
             let (fwd_id, fwd_off) = best_alignment(query, &refseq);
             let (rev_id, rev_off) = best_alignment(&rc, &refseq);
+            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
+                if off < 0 {
+                    let start = (-off) as usize;
+                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
+                } else {
+                    (seq.to_vec(), off)
+                }
+            };
             let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
-                (rev_id, true, rc.clone(), rev_off)
+                let (aq, off) = clip(&rc, rev_off);
+                (rev_id, true, aq, off)
             } else {
-                (fwd_id, false, query.to_vec(), fwd_off)
+                let (aq, off) = clip(query, fwd_off);
+                (fwd_id, false, aq, off)
             };
             let rrs_snp_calls = if accession.contains(':') {
                 RRS_RESISTANCE_SNPS
