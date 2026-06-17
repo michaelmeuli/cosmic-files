@@ -267,14 +267,20 @@ pub struct PncaSusceptibilityCalls {
 /// didn't align over any catalogued position.
 pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
     let mut covered = false;
+    let mut all_wildtype = true;
     let mut min_resistant_rank: Option<u8> = None;
 
     for call in snp_calls {
         match call.evidence() {
             None => {}
-            Some(PncaEvidence::Wildtype | PncaEvidence::Uncatalogued) => covered = true,
+            Some(PncaEvidence::Wildtype) => covered = true,
+            Some(PncaEvidence::Uncatalogued) => {
+                covered = true;
+                all_wildtype = false;
+            }
             Some(PncaEvidence::Catalogued(rank)) => {
                 covered = true;
+                all_wildtype = false;
                 min_resistant_rank = Some(min_resistant_rank.map_or(rank, |r| r.min(rank)));
             }
         }
@@ -282,7 +288,7 @@ pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
 
     if min_resistant_rank.is_some_and(|rank| rank < 2) {
         Some(false)
-    } else if covered {
+    } else if covered && all_wildtype {
         Some(true)
     } else {
         None
