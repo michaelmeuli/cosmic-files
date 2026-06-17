@@ -28,17 +28,17 @@ pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
                 description,
                 identity,
                 is_reverse,
-                aligned_query,
-                alignment_offset,
-                ref_seq: refseq,
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
+                aligned_query,
+                alignment_offset,
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt: None,
+                ref_seq: refseq,
             }
         })
         .collect();
