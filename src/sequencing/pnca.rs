@@ -72,13 +72,14 @@ fn translate_codon(codon: &[u8]) -> Option<&'static str> {
 
 /// 0-based index into `REF_PNCA` of a signed HGVS coding-sequence position. There is no
 /// `c.0` — `c.-1` sits immediately before `c.1` (the `A` of the start codon).
-fn nt_pos_to_ref_idx(c_pos: isize) -> usize {
+fn nt_pos_to_ref_idx(c_pos: isize) -> Option<usize> {
     let offset = if c_pos > 0 { c_pos - 1 } else { c_pos };
-    (UPSTREAM_FLANK + offset).max(0) as usize
+    let idx = UPSTREAM_FLANK + offset;
+    if idx < 0 { None } else { Some(idx as usize) }
 }
 
 /// 0-based index into `REF_PNCA` of the first base of a 1-based codon number.
-fn codon_to_ref_idx(codon: usize) -> usize {
+fn codon_to_ref_idx(codon: usize) -> Option<usize> {
     nt_pos_to_ref_idx(((codon - 1) * 3 + 1) as isize)
 }
 
@@ -290,8 +291,8 @@ pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
 
 fn call_pnca_nt_snps(map: &PncaNtSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
     map.iter()
-        .map(|(&c_pos, (wt_base, alts))| {
-            let ref_pos = nt_pos_to_ref_idx(c_pos);
+        .filter_map(|(&c_pos, (wt_base, alts))| {
+            let ref_pos = nt_pos_to_ref_idx(c_pos)?;
             let query_pos = ref_pos as isize - alignment_offset;
             let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
                 Some(query[query_pos as usize].to_ascii_uppercase())
@@ -302,19 +303,19 @@ fn call_pnca_nt_snps(map: &PncaNtSnpMap, query: &[u8], alignment_offset: isize) 
                 .iter()
                 .map(|(&b, v)| ((b as char).to_string(), v.clone()))
                 .collect();
-            PncaSnpCall {
+            Some(PncaSnpCall {
                 ref_pos,
                 kind: PncaCallKind::Nucleotide { wt_base: *wt_base, query_base },
                 resistance_alts,
-            }
+            })
         })
         .collect()
 }
 
 fn call_pnca_aa_snps(map: &PncaAaSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
     map.iter()
-        .map(|(&codon, (wt_aa, alts))| {
-            let ref_pos = codon_to_ref_idx(codon);
+        .filter_map(|(&codon, (wt_aa, alts))| {
+            let ref_pos = codon_to_ref_idx(codon)?;
             let query_start = ref_pos as isize - alignment_offset;
             let query_aa = if query_start >= 0 && (query_start as usize) + 3 <= query.len() {
                 translate_codon(&query[query_start as usize..query_start as usize + 3])
@@ -322,11 +323,11 @@ fn call_pnca_aa_snps(map: &PncaAaSnpMap, query: &[u8], alignment_offset: isize) 
             } else {
                 None
             };
-            PncaSnpCall {
+            Some(PncaSnpCall {
                 ref_pos,
                 kind: PncaCallKind::Codon { codon, wt_aa: wt_aa.clone(), query_aa },
                 resistance_alts: alts.clone(),
-            }
+            })
         })
         .collect()
 }
@@ -407,20 +408,20 @@ mod tests {
     #[test]
     fn test_nt_pos_to_ref_idx_and_site_label_roundtrip() {
         // c.1 (the A of ATG) sits right after the upstream flank.
-        assert_eq!(nt_pos_to_ref_idx(1), UPSTREAM_FLANK as usize);
+        assert_eq!(nt_pos_to_ref_idx(1), Some(UPSTREAM_FLANK as usize));
         // c.-1 sits immediately before it; there is no c.0.
-        assert_eq!(nt_pos_to_ref_idx(-1), UPSTREAM_FLANK as usize - 1);
-        assert_eq!(nt_pos_to_ref_idx(103), UPSTREAM_FLANK as usize + 102);
+        assert_eq!(nt_pos_to_ref_idx(-1), Some(UPSTREAM_FLANK as usize - 1));
+        assert_eq!(nt_pos_to_ref_idx(103), Some(UPSTREAM_FLANK as usize + 102));
 
         let nt_call = PncaSnpCall {
-            ref_pos: nt_pos_to_ref_idx(-11),
+            ref_pos: nt_pos_to_ref_idx(-11).unwrap(),
             kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: None },
             resistance_alts: BTreeMap::new(),
         };
         assert_eq!(nt_call.site_label(), "c.-11");
 
         let nt_call = PncaSnpCall {
-            ref_pos: nt_pos_to_ref_idx(103),
+            ref_pos: nt_pos_to_ref_idx(103).unwrap(),
             kind: PncaCallKind::Nucleotide { wt_base: b'C', query_base: None },
             resistance_alts: BTreeMap::new(),
         };
@@ -430,9 +431,9 @@ mod tests {
     #[test]
     fn test_codon_to_ref_idx() {
         // Codon 1 is the start codon, sitting right after the flank.
-        assert_eq!(codon_to_ref_idx(1), UPSTREAM_FLANK as usize);
+        assert_eq!(codon_to_ref_idx(1), Some(UPSTREAM_FLANK as usize));
         // Codon 2 starts 3 bases later.
-        assert_eq!(codon_to_ref_idx(2), UPSTREAM_FLANK as usize + 3);
+        assert_eq!(codon_to_ref_idx(2), Some(UPSTREAM_FLANK as usize + 3));
     }
 
     #[test]
