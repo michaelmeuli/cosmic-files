@@ -48,8 +48,6 @@ const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
 const ERM41_ANCHOR_R: &[u8] = b"GGGGCTGGTATCCGCTCACT";
 
-const RRL_FWD_START: &[u8] = b"ctaagttcttaagggcgcat";
-const RRL_FWD_END: &[u8] = b"ctaagttcttaagggcgcat";
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
 
@@ -160,6 +158,14 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Trim a basecall sequence to the amplicon region defined by a primer pair.
+///
+/// Searches `seq` for `fwd_start` (forward primer) and `fwd_end` (reverse primer) using
+/// case-insensitive matching. Both orientations are tried: if the read is reverse-complemented,
+/// `rc(fwd_end)` anchors the left boundary and `rc(fwd_start)` anchors the right. The returned
+/// slice starts at the earliest primer match and ends just after the latest, so both primers are
+/// included. If a boundary primer is not found, the corresponding end of `seq` is used as a
+/// fallback, leaving that side untrimmed.
 pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'a [u8] {
     let rc_start: Vec<u8> = reverse_complement(fwd_end);
     let rc_end: Vec<u8> = reverse_complement(fwd_start);
