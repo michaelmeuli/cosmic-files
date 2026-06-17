@@ -343,6 +343,7 @@ fn call_pnca_aa_snps(map: &PncaAaSnpMap, query: &[u8], alignment_offset: isize) 
 /// sorted by identity descending, so the caller can compare how well the read matches each
 /// member of the complex rather than assuming it's H37Rv.
 pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
+    let query = super::trim_start_end(query, super::PNCA_FWD_START, super::PNCA_FWD_END);
     let rc = reverse_complement(query);
     let (nt_map, aa_map) = &*PNCA_RESISTANCE_SNPS;
 

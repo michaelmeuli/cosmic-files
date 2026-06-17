@@ -53,6 +53,9 @@ const RRL_FWD_END: &[u8] = b"ctaagttcttaagggcgcat";
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
 
+const PNCA_FWD_START: &[u8] = b"GCGTCGGTAGGCAAACTGCC";
+const PNCA_FWD_END: &[u8] = b"AGTTGGTTTGCAGCTCCTGA";
+
 const REF_ERM41_ABSCESSUS: &str =
     include_str!("../../res/sequences/erm41/erm41_abscessus_ATCC_19977.fasta");
 const REF_ERM41_BOLLETII: &str =
