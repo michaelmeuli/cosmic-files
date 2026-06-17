@@ -196,7 +196,7 @@ impl PncaSnpCall {
         match &self.kind {
             PncaCallKind::Nucleotide { wt_base, query_base } => match query_base {
                 None => String::new(),
-                Some(b) if b == wt_base => format!("{} (wt)", *b as char),
+                Some(b) if b == wt_base => format!(""),
                 Some(b) => {
                     let key = (*b as char).to_string();
                     match self.resistance_alts.get(&key) {
