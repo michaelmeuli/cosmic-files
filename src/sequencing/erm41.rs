@@ -1,6 +1,6 @@
 use super::reverse_complement;
 use super::{ERM41_ANCHOR_L, ERM41_ANCHOR_R, ERM41_FWD_END, ERM41_FWD_START};
-use super::{SeqIdHit, best_alignment, parse_fasta_seq};
+use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_fasta_seq};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -337,17 +337,12 @@ impl Erm41LofCall {
 /// loss-of-function alternate base to a `(mutation_label, drug)` pair.
 fn call_erm41_lof_snps(
     snps: &Erm41LofSnpMap,
-    query: &[u8],
-    alignment_offset: isize,
+    ga: &GappedAlignment,
 ) -> Vec<Erm41LofCall> {
     snps.iter()
         .map(|(&ref_pos, (wt_base, lof_alts))| {
-            let query_pos = ref_pos as isize - alignment_offset;
-            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
-                Some(query[query_pos as usize].to_ascii_uppercase())
-            } else {
-                None
-            };
+            let query_base =
+                base_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos);
             Erm41LofCall {
                 ref_pos,
                 query_base,
@@ -421,33 +416,23 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
         .iter()
         .map(|(fasta, accession, description)| {
             let refseq = parse_fasta_seq(fasta);
-            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
-                if off < 0 {
-                    let start = (-off) as usize;
-                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
-                } else {
-                    (seq.to_vec(), off)
-                }
-            };
-            let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-                let (aq, off) = clip(&rc, rev_off);
-                (rev_id, true, aq, off)
+            let fwd = align_to_ref(query, &refseq);
+            let rev = align_to_ref(&rc, &refseq);
+            let (ga, is_reverse) = if rev.identity > fwd.identity {
+                (rev, true)
             } else {
-                let (aq, off) = clip(query, fwd_off);
-                (fwd_id, false, aq, off)
+                (fwd, false)
             };
             // Abscessus LOF SNP positions apply to all three subspecies — bolletii and
             // massiliense are sequence-similar enough, and no separate variants.csv exists for them.
             let erm41_snp_calls = ERM41_LOF_SNPS
-                .get(super::DESC_ABSCESSUS)  //.get(description)
-                .map(|snps| call_erm41_lof_snps(snps, &aligned_query, offset))
+                .get(super::DESC_ABSCESSUS)
+                .map(|snps| call_erm41_lof_snps(snps, &ga))
                 .unwrap_or_default();
             SeqIdHit {
                 accession: accession.to_string(),
                 description: description.to_string(),
-                identity,
+                identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
@@ -455,11 +440,11 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls,
                 pnca_snp_calls: vec![],
-                aligned_query,
-                alignment_offset: offset,
+                aligned_query: ga.gapped_query,
+                aligned_ref: ga.gapped_ref,
+                ref_start: ga.ref_start,
                 erm41_position_28_opt: Some(erm41_position_28),
                 rrl_position_2058_2059_opt: None,
-                ref_seq: refseq,
             }
         })
         .collect();

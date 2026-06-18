@@ -272,43 +272,13 @@ fn format_pairwise_alignment(
     description: &str,
     identity: f32,
     is_reverse: bool,
-    query: &[u8],
-    refseq: &[u8],
-    offset: isize,
+    gapped_query: &[u8],
+    gapped_ref: &[u8],
+    ref_start: usize,
 ) -> String {
-    let (ref_padded, query_padded): (Vec<u8>, Vec<u8>) = if query.len() <= refseq.len() {
-        let start = offset as usize;
-        let end = start + query.len();
-        let ref_p = refseq.to_vec();
-        let query_p: Vec<u8> = (0..refseq.len())
-            .map(|i| {
-                if i >= start && i < end {
-                    query[i - start]
-                } else {
-                    b'-'
-                }
-            })
-            .collect();
-        (ref_p, query_p)
-    } else {
-        let start = (-offset) as usize;
-        let end = start + refseq.len();
-        let query_p = query.to_vec();
-        let ref_p: Vec<u8> = (0..query.len())
-            .map(|i| {
-                if i >= start && i < end {
-                    refseq[i - start]
-                } else {
-                    b'-'
-                }
-            })
-            .collect();
-        (ref_p, query_p)
-    };
-
-    let match_line: Vec<u8> = ref_padded
+    let match_line: Vec<u8> = gapped_ref
         .iter()
-        .zip(query_padded.iter())
+        .zip(gapped_query.iter())
         .map(|(&r, &q)| {
             if r == b'-' || q == b'-' {
                 b' '
@@ -332,14 +302,14 @@ fn format_pairwise_alignment(
     out.push_str(&format!("Orientation: {orient}\n\n"));
 
     let line_width = 60usize;
-    let len = ref_padded.len();
-    let mut ref_pos = 1usize;
+    let len = gapped_ref.len();
+    let mut ref_pos = ref_start + 1;
     let mut query_pos = 1usize;
     for chunk_start in (0..len).step_by(line_width) {
         let chunk_end = (chunk_start + line_width).min(len);
-        let ref_chunk = std::str::from_utf8(&ref_padded[chunk_start..chunk_end]).unwrap_or("");
+        let ref_chunk = std::str::from_utf8(&gapped_ref[chunk_start..chunk_end]).unwrap_or("");
         let match_chunk = std::str::from_utf8(&match_line[chunk_start..chunk_end]).unwrap_or("");
-        let query_chunk = std::str::from_utf8(&query_padded[chunk_start..chunk_end]).unwrap_or("");
+        let query_chunk = std::str::from_utf8(&gapped_query[chunk_start..chunk_end]).unwrap_or("");
 
         out.push_str(&format!("Ref   {:5}: {}\n", ref_pos, ref_chunk));
         out.push_str(&format!("             {match_chunk}\n"));
@@ -351,127 +321,114 @@ fn format_pairwise_alignment(
     out
 }
 
-/// FNV-1a hash of a k-mer, case-insensitive.
-fn kmer_hash(kmer: &[u8]) -> u64 {
-    let mut h: u64 = 14695981039346656037;
-    for &b in kmer {
-        h ^= b.to_ascii_uppercase() as u64;
-        h = h.wrapping_mul(1099511628211);
-    }
-    h
+/// Alignment result from [`align_to_ref`]: gapped strings plus reference start position.
+#[derive(Debug, Clone)]
+pub struct GappedAlignment {
+    /// Percent identity: matches / reference span × 100.
+    pub identity: f32,
+    /// Query sequence with `'-'` inserted at each deletion relative to the reference.
+    pub gapped_query: Vec<u8>,
+    /// Reference slice (aligned region only) with `'-'` inserted at each query insertion.
+    /// Always the same length as `gapped_query`.
+    pub gapped_ref: Vec<u8>,
+    /// 0-based index into the full reference where this alignment starts.
+    pub ref_start: usize,
 }
 
-/// Find the best **gapless** alignment between `query` and `reference` and return
-/// `(percent_identity, offset)`.
+/// Align `query` (Sanger read) against `reference` (gene sequence) using semiglobal
+/// Smith-Waterman (free reference end-gaps, full query placed within reference).
 ///
-/// # What it computes
-///
-/// The function considers only *diagonal* (shift-only, no-indel) alignments.
-/// It picks the starting offset of the shorter sequence inside the longer one
-/// that maximises the number of case-insensitive matching bases, then expresses
-/// that as a percentage of the shorter sequence's length.
-///
-/// The signed `offset` tells you how the two sequences are positioned relative
-/// to each other:
-/// - `offset > 0`: `query` is the shorter sequence and its best match starts
-///   `offset` bases into `reference` (reference extends to the left of query).
-/// - `offset < 0`: `reference` is the shorter sequence and its best match
-///   starts `|offset|` bases into `query` (query extends to the left of
-///   reference).
-/// - `offset == 0`: both sequences start at the same position, or one is
-///   empty.
-///
-/// # Algorithm (two phases)
-///
-/// **Phase 1 – Seed.**  A k-mer index (word size 11) is built over the shorter
-/// sequence.  The longer sequence is then scanned with a sliding window of the
-/// same size.  Every exact k-mer match (verified byte-by-byte to rule out hash
-/// collisions) pins a *diagonal*, i.e. a candidate offset.  This drastically
-/// reduces the number of offsets that need full scoring and makes the function
-/// sub-linear in the common case of high-identity pairs.
-///
-/// **Phase 2 – Extend.**  Each candidate diagonal is scored by counting all
-/// matching positions across the full length of the shorter sequence (not just
-/// the seed window).  If Phase 1 produced no seeds — because the sequences are
-/// shorter than the word size or share no 11-mer — the fallback is to score
-/// every possible offset exhaustively.  The offset with the highest match count
-/// wins.
-fn best_alignment(query: &[u8], reference: &[u8]) -> (f32, isize) {
-    const WORD_SIZE: usize = 11;
+/// Returns a [`GappedAlignment`] with gapped strings for display and SNP calling.
+/// Identity is computed as `matches / reference_span × 100`, which naturally penalises
+/// deletions in the query.
+pub fn align_to_ref(query: &[u8], reference: &[u8]) -> GappedAlignment {
+    use bio::alignment::AlignmentOperation::{Del, Ins, Match, Subst, Xclip, Yclip};
+    use bio::alignment::pairwise::Aligner;
 
     if query.is_empty() || reference.is_empty() {
-        return (0.0, 0);
+        return GappedAlignment {
+            identity: 0.0,
+            gapped_query: vec![],
+            gapped_ref: vec![],
+            ref_start: 0,
+        };
     }
 
-    // Orient so `shorter` fits inside `longer`.
-    let (shorter, longer, swapped) = if query.len() <= reference.len() {
-        (query, reference, false)
-    } else {
-        (reference, query, true)
+    let score_fn = |a: u8, b: u8| -> i32 {
+        if a.to_ascii_uppercase() == b.to_ascii_uppercase() { 1 } else { -1 }
     };
+    let mut aligner = Aligner::new(-5, -1, &score_fn);
+    let alignment = aligner.semiglobal(query, reference);
 
-    let max_offset = longer.len() - shorter.len();
+    let mut gapped_query = Vec::new();
+    let mut gapped_ref = Vec::new();
+    let mut qi = alignment.xstart;
+    let mut ri = alignment.ystart;
 
-    // ── Phase 1: seed ────────────────────────────────────────────────────────
-    // Build a k-mer index over the shorter sequence, then scan the longer
-    // sequence for matching k-mers.  Each match fixes a diagonal (offset).
-    let mut candidates: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
-
-    if shorter.len() >= WORD_SIZE {
-        let mut kmer_index: std::collections::HashMap<u64, Vec<usize>> =
-            std::collections::HashMap::new();
-        for (i, w) in shorter.windows(WORD_SIZE).enumerate() {
-            kmer_index.entry(kmer_hash(w)).or_default().push(i);
-        }
-        for (j, w) in longer.windows(WORD_SIZE).enumerate() {
-            if let Some(positions) = kmer_index.get(&kmer_hash(w)) {
-                for &i in positions {
-                    if j >= i {
-                        let d = j - i;
-                        if d <= max_offset
-                            // Verify to guard against hash collisions.
-                            && shorter[i..i + WORD_SIZE]
-                                .iter()
-                                .zip(&longer[j..j + WORD_SIZE])
-                                .all(|(a, b)| a.eq_ignore_ascii_case(b))
-                        {
-                            candidates.insert(d);
-                        }
-                    }
-                }
+    for op in &alignment.operations {
+        match op {
+            Match | Subst => {
+                gapped_query.push(query[qi]);
+                gapped_ref.push(reference[ri]);
+                qi += 1;
+                ri += 1;
             }
+            Del => {
+                gapped_query.push(b'-');
+                gapped_ref.push(reference[ri]);
+                ri += 1;
+            }
+            Ins => {
+                gapped_query.push(query[qi]);
+                gapped_ref.push(b'-');
+                qi += 1;
+            }
+            Xclip(k) => { qi += k; }
+            Yclip(k) => { ri += k; }
         }
     }
 
-    // ── Phase 2: extend ──────────────────────────────────────────────────────
-    // Score each candidate diagonal; fall back to all diagonals when no seeds
-    // were found (short sequences or no k-mer overlap).
-    let score_offset = |off: usize| -> (usize, usize) {
-        let count = shorter
-            .iter()
-            .zip(&longer[off..off + shorter.len()])
-            .filter(|(a, b)| a.eq_ignore_ascii_case(b))
-            .count();
-        (count, off)
+    let ref_span = gapped_ref.iter().filter(|&&b| b != b'-').count();
+    let matches = gapped_query
+        .iter()
+        .zip(gapped_ref.iter())
+        .filter(|&(&q, &r)| q != b'-' && r != b'-' && q.eq_ignore_ascii_case(&r))
+        .count();
+    let identity = if ref_span > 0 {
+        matches as f32 / ref_span as f32 * 100.0
+    } else {
+        0.0
     };
 
-    let (best_count, best_off) = if candidates.is_empty() {
-        (0..=max_offset).map(score_offset).max_by_key(|&(c, _)| c)
-    } else {
-        candidates
-            .into_iter()
-            .map(score_offset)
-            .max_by_key(|&(c, _)| c)
+    GappedAlignment {
+        identity,
+        gapped_query,
+        gapped_ref,
+        ref_start: alignment.ystart,
     }
-    .unwrap_or((0, 0));
+}
 
-    let identity = best_count as f32 / shorter.len() as f32 * 100.0;
-    let offset = if swapped {
-        -(best_off as isize)
-    } else {
-        best_off as isize
-    };
-    (identity, offset)
+/// Return the query base at a given reference position, or `None` if the position is outside
+/// the aligned region or the query has a deletion (`'-'`) there.
+pub fn base_at_ref_pos(
+    gapped_query: &[u8],
+    gapped_ref: &[u8],
+    ref_start: usize,
+    ref_pos: usize,
+) -> Option<u8> {
+    if ref_pos < ref_start {
+        return None;
+    }
+    let mut current = ref_start;
+    for (&q, &r) in gapped_query.iter().zip(gapped_ref.iter()) {
+        if r != b'-' {
+            if current == ref_pos {
+                return if q == b'-' { None } else { Some(q.to_ascii_uppercase()) };
+            }
+            current += 1;
+        }
+    }
+    None
 }
 
 fn scan_window(
@@ -775,16 +732,16 @@ pub struct SeqIdHit {
     pub erm41_snp_calls: Vec<Erm41LofCall>,
     /// Calls at each pncA pyrazinamide-resistance nucleotide/codon position.
     pub pnca_snp_calls: Vec<PncaSnpCall>,
-    /// The aligned query (forward or reverse-complement, whichever scored best).
+    /// Gapped query sequence (forward or RC, whichever scored best). `'-'` marks deletions.
     pub aligned_query: Vec<u8>,
-    /// Signed offset such that `query_index = ref_index - alignment_offset`.
-    pub alignment_offset: isize,
+    /// Gapped reference sequence for the aligned span. Same length as `aligned_query`.
+    pub aligned_ref: Vec<u8>,
+    /// 0-based position in the full reference where the alignment starts.
+    pub ref_start: usize,
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41_position_28_opt: Option<Erm41Position28>,
     /// rrl position 2058 2059 call; `None` for non-rrl targets.
     pub rrl_position_2058_2059_opt: Option<RrlPosition2058_2059>,
-    /// Full reference sequence for this hit (used for pairwise display).
-    pub ref_seq: Vec<u8>,
 }
 
 impl SeqIdHit {
@@ -796,8 +753,8 @@ impl SeqIdHit {
             self.identity,
             self.is_reverse,
             &self.aligned_query,
-            &self.ref_seq,
-            self.alignment_offset,
+            &self.aligned_ref,
+            self.ref_start,
         )
     }
 

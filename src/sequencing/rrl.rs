@@ -1,6 +1,6 @@
 use super::reverse_complement;
 use super::{RRL_ANCHOR_L, RRL_ANCHOR_R, REF_MYCO_RRL};
-use super::{SeqIdHit, best_alignment, parse_multi_fasta};
+use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -234,19 +234,11 @@ impl RrlSnpCall {
     }
 }
 
-fn call_rrl_snps(
-    snps: &RrlSnpMap,
-    query: &[u8],
-    alignment_offset: isize,
-) -> Vec<RrlSnpCall> {
+fn call_rrl_snps(snps: &RrlSnpMap, ga: &GappedAlignment) -> Vec<RrlSnpCall> {
     snps.iter()
         .map(|(&ref_pos, (wt_base, alt_to_drugs))| {
-            let query_pos = ref_pos as isize - alignment_offset;
-            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
-                Some(query[query_pos as usize].to_ascii_uppercase())
-            } else {
-                None
-            };
+            let query_base =
+                base_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos);
             RrlSnpCall {
                 ref_pos,
                 query_base,
@@ -329,27 +321,17 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
         .into_iter()
         .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRL_REF_LEN)
         .map(|(accession, description, refseq)| {
-            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
-                if off < 0 {
-                    let start = (-off) as usize;
-                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
-                } else {
-                    (seq.to_vec(), off)
-                }
-            };
-            let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-                let (aq, off) = clip(&rc, rev_off);
-                (rev_id, true, aq, off)
+            let fwd = align_to_ref(query, &refseq);
+            let rev = align_to_ref(&rc, &refseq);
+            let (ga, is_reverse) = if rev.identity > fwd.identity {
+                (rev, true)
             } else {
-                let (aq, off) = clip(query, fwd_off);
-                (fwd_id, false, aq, off)
+                (fwd, false)
             };
             let rrl_snp_calls = if accession.contains(':') {
                 RRL_RESISTANCE_SNPS
                     .get(description.as_str())
-                    .map(|snps| call_rrl_snps(snps, &aligned_query, offset))
+                    .map(|snps| call_rrl_snps(snps, &ga))
                     .unwrap_or_default()
             } else {
                 vec![]
@@ -357,7 +339,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
             SeqIdHit {
                 accession,
                 description,
-                identity,
+                identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
@@ -365,11 +347,11 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
-                aligned_query,
-                alignment_offset: offset,
+                aligned_query: ga.gapped_query,
+                aligned_ref: ga.gapped_ref,
+                ref_start: ga.ref_start,
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt,
-                ref_seq: refseq,
             }
         })
         .collect();

@@ -1,4 +1,4 @@
-use super::{REF_MYCO_RPOB, SeqIdHit, best_alignment, parse_multi_fasta, reverse_complement};
+use super::{REF_MYCO_RPOB, SeqIdHit, align_to_ref, parse_multi_fasta, reverse_complement};
 
 pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
@@ -6,27 +6,17 @@ pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
         .into_iter()
         .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RPOB_REF_LEN)
         .map(|(accession, description, refseq)| {
-            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
-                if off < 0 {
-                    let start = (-off) as usize;
-                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
-                } else {
-                    (seq.to_vec(), off)
-                }
-            };
-            let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
-                let (aq, off) = clip(&rc, rev_off);
-                (rev_id, true, aq, off)
+            let fwd = align_to_ref(query, &refseq);
+            let rev = align_to_ref(&rc, &refseq);
+            let (ga, is_reverse) = if rev.identity > fwd.identity {
+                (rev, true)
             } else {
-                let (aq, off) = clip(query, fwd_off);
-                (fwd_id, false, aq, off)
+                (fwd, false)
             };
             SeqIdHit {
                 accession,
                 description,
-                identity,
+                identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
@@ -34,11 +24,11 @@ pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
-                aligned_query,
-                alignment_offset,
+                aligned_query: ga.gapped_query,
+                aligned_ref: ga.gapped_ref,
+                ref_start: ga.ref_start,
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt: None,
-                ref_seq: refseq,
             }
         })
         .collect();

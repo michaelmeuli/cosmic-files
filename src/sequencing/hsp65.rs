@@ -1,5 +1,5 @@
 use super::reverse_complement;
-use super::{best_alignment, SeqIdHit};
+use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos};
 use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
 
 const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
@@ -24,46 +24,34 @@ const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
 ];
 
 
-fn call_kansasii_gastri_snps(query: &[u8], alignment_offset: isize) -> Vec<KansasiiGastriSnpCall> {
+fn call_kansasii_gastri_snps(ga: &GappedAlignment) -> Vec<KansasiiGastriSnpCall> {
     KANSASII_GASTRI_SNPS
         .iter()
         .filter_map(|&(ref_pos, gastri_base, kansasii_base)| {
-            let query_pos = ref_pos as isize - alignment_offset;
-            if query_pos >= 0 && (query_pos as usize) < query.len() {
-                let query_base = query[query_pos as usize].to_ascii_uppercase();
-                Some(KansasiiGastriSnpCall {
-                    ref_pos,
-                    query_base,
-                    gastri_base,
-                    kansasii_base,
-                })
-            } else {
-                None
-            }
+            let query_base =
+                base_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos)?;
+            Some(KansasiiGastriSnpCall {
+                ref_pos,
+                query_base,
+                gastri_base,
+                kansasii_base,
+            })
         })
         .collect()
 }
 
-/// Call diagnostic SNPs that distinguish *M. marinum* from *M. ulcerans* at known hsp65 positions.
-fn call_marinum_ulcerans_snps(
-    query: &[u8],
-    alignment_offset: isize,
-) -> Vec<MarinumUlceransSnpCall> {
+fn call_marinum_ulcerans_snps(ga: &GappedAlignment) -> Vec<MarinumUlceransSnpCall> {
     MARINUM_ULCERANS_SNPS
         .iter()
         .filter_map(|&(ref_pos, marinum_base, ulcerans_base)| {
-            let query_pos = ref_pos as isize - alignment_offset;
-            if query_pos >= 0 && (query_pos as usize) < query.len() {
-                let query_base = query[query_pos as usize].to_ascii_uppercase();
-                Some(MarinumUlceransSnpCall {
-                    ref_pos,
-                    query_base,
-                    marinum_base,
-                    ulcerans_base,
-                })
-            } else {
-                None
-            }
+            let query_base =
+                base_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos)?;
+            Some(MarinumUlceransSnpCall {
+                ref_pos,
+                query_base,
+                marinum_base,
+                ulcerans_base,
+            })
         })
         .collect()
 }
@@ -124,39 +112,29 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 .rsplit_once('.')
                 .map(|(base, _)| base.to_string())
                 .unwrap_or(raw_acc);
-            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
-                if off < 0 {
-                    let start = (-off) as usize;
-                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
-                } else {
-                    (seq.to_vec(), off)
-                }
-            };
-            let (identity, is_reverse, aligned_query, offset) = if rev_id > fwd_id {
-                let (aq, off) = clip(&rc, rev_off);
-                (rev_id, true, aq, off)
+            let fwd = align_to_ref(query, &refseq);
+            let rev = align_to_ref(&rc, &refseq);
+            let (ga, is_reverse) = if rev.identity > fwd.identity {
+                (rev, true)
             } else {
-                let (aq, off) = clip(query, fwd_off);
-                (fwd_id, false, aq, off)
+                (fwd, false)
             };
             let kansasii_gastri_snp_calls =
                 if KANSASII_GASTRI_ACCS.contains(&accession.as_str()) {
-                    call_kansasii_gastri_snps(&aligned_query, offset)
+                    call_kansasii_gastri_snps(&ga)
                 } else {
                     vec![]
                 };
             let marinum_ulcerans_snp_calls =
                 if MARINUM_ULCERANS_ACCS.contains(&accession.as_str()) {
-                    call_marinum_ulcerans_snps(&aligned_query, offset)
+                    call_marinum_ulcerans_snps(&ga)
                 } else {
                     vec![]
                 };
             SeqIdHit {
                 accession,
                 description,
-                identity,
+                identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls,
                 marinum_ulcerans_snp_calls,
@@ -164,11 +142,11 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
-                aligned_query,
-                alignment_offset: offset,
+                aligned_query: ga.gapped_query,
+                aligned_ref: ga.gapped_ref,
+                ref_start: ga.ref_start,
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt: None,
-                ref_seq: refseq,
             }
         })
         .collect();

@@ -1,5 +1,8 @@
 use super::tb_data::confidence_rank;
-use super::{REF_PNCA, SeqIdHit, best_alignment, parse_multi_fasta, reverse_complement};
+use super::{
+    GappedAlignment, REF_PNCA, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta,
+    reverse_complement,
+};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -295,16 +298,49 @@ pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
     }
 }
 
-fn call_pnca_nt_snps(map: &PncaNtSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
+/// Collect 3 consecutive non-deleted query bases at reference positions `ref_pos..ref_pos+3`.
+/// Returns `None` if the position is outside the aligned region or any of the 3 ref positions
+/// has a deletion in the query (consistent with the existing policy of skipping frameshifts).
+fn codon_at_ref_pos(
+    gapped_query: &[u8],
+    gapped_ref: &[u8],
+    ref_start: usize,
+    ref_pos: usize,
+) -> Option<[u8; 3]> {
+    if ref_pos < ref_start {
+        return None;
+    }
+    let mut current = ref_start;
+    let mut codon = [0u8; 3];
+    let mut idx = 0usize;
+    let mut collecting = false;
+    for (&q, &r) in gapped_query.iter().zip(gapped_ref.iter()) {
+        if r != b'-' {
+            if current == ref_pos {
+                collecting = true;
+            }
+            if collecting {
+                if q == b'-' {
+                    return None;
+                }
+                codon[idx] = q.to_ascii_uppercase();
+                idx += 1;
+                if idx == 3 {
+                    return Some(codon);
+                }
+            }
+            current += 1;
+        }
+    }
+    None
+}
+
+fn call_pnca_nt_snps(map: &PncaNtSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCall> {
     map.iter()
         .filter_map(|(&c_pos, (wt_base, alts))| {
             let ref_pos = nt_pos_to_ref_idx(c_pos)?;
-            let query_pos = ref_pos as isize - alignment_offset;
-            let query_base = if query_pos >= 0 && (query_pos as usize) < query.len() {
-                Some(query[query_pos as usize].to_ascii_uppercase())
-            } else {
-                None
-            };
+            let query_base =
+                base_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos);
             let resistance_alts = alts
                 .iter()
                 .map(|(&b, v)| ((b as char).to_string(), v.clone()))
@@ -318,17 +354,13 @@ fn call_pnca_nt_snps(map: &PncaNtSnpMap, query: &[u8], alignment_offset: isize) 
         .collect()
 }
 
-fn call_pnca_aa_snps(map: &PncaAaSnpMap, query: &[u8], alignment_offset: isize) -> Vec<PncaSnpCall> {
+fn call_pnca_aa_snps(map: &PncaAaSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCall> {
     map.iter()
         .filter_map(|(&codon, (wt_aa, alts))| {
             let ref_pos = codon_to_ref_idx(codon)?;
-            let query_start = ref_pos as isize - alignment_offset;
-            let query_aa = if query_start >= 0 && (query_start as usize) + 3 <= query.len() {
-                translate_codon(&query[query_start as usize..query_start as usize + 3])
-                    .map(str::to_string)
-            } else {
-                None
-            };
+            let query_aa =
+                codon_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos)
+                    .and_then(|bases| translate_codon(&bases).map(str::to_string));
             Some(PncaSnpCall {
                 ref_pos,
                 kind: PncaCallKind::Codon { codon, wt_aa: wt_aa.clone(), query_aa },
@@ -358,36 +390,22 @@ pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
         .into_iter()
         .filter(|(_, _, refseq)| refseq.len() >= super::MIN_PNCA_REF_LEN)
         .map(|(accession, description, refseq)| {
-            let (fwd_id, fwd_off) = best_alignment(query, &refseq);
-            let (rev_id, rev_off) = best_alignment(&rc, &refseq);
-            // When the query is longer than the reference, best_alignment returns a negative
-            // offset (reference sits inside the query). Clip to just the aligned window so
-            // that the pairwise display is clean and SNP index arithmetic stays simple
-            // (alignment_offset == 0 means ref_pos == query_pos directly).
-            let clip = |seq: &[u8], off: isize| -> (Vec<u8>, isize) {
-                if off < 0 {
-                    let start = (-off) as usize;
-                    (seq[start..(start + refseq.len()).min(seq.len())].to_vec(), 0)
-                } else {
-                    (seq.to_vec(), off)
-                }
-            };
-            let (identity, is_reverse, aligned_query, alignment_offset) = if rev_id > fwd_id {
-                let (aq, off) = clip(&rc, rev_off);
-                (rev_id, true, aq, off)
+            let fwd = align_to_ref(query, &refseq);
+            let rev = align_to_ref(&rc, &refseq);
+            let (ga, is_reverse) = if rev.identity > fwd.identity {
+                (rev, true)
             } else {
-                let (aq, off) = clip(query, fwd_off);
-                (fwd_id, false, aq, off)
+                (fwd, false)
             };
 
-            let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &aligned_query, alignment_offset);
-            pnca_snp_calls.extend(call_pnca_aa_snps(aa_map, &aligned_query, alignment_offset));
+            let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &ga);
+            pnca_snp_calls.extend(call_pnca_aa_snps(aa_map, &ga));
             pnca_snp_calls.sort_by_key(|c| c.ref_pos);
 
             SeqIdHit {
                 accession,
                 description,
-                identity,
+                identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
                 marinum_ulcerans_snp_calls: vec![],
@@ -395,11 +413,11 @@ pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls,
-                aligned_query,
-                alignment_offset,
+                aligned_query: ga.gapped_query,
+                aligned_ref: ga.gapped_ref,
+                ref_start: ga.ref_start,
                 erm41_position_28_opt: None,
                 rrl_position_2058_2059_opt: None,
-                ref_seq: refseq,
             }
         })
         .collect();
