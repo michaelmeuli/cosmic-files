@@ -212,7 +212,7 @@ impl PncaSnpCall {
             },
             PncaCallKind::Codon { wt_aa, query_aa, .. } => match query_aa {
                 None => String::new(),
-                Some(aa) if aa == wt_aa => format!("{aa} (wt)"),
+                Some(aa) if aa == wt_aa => format!(""),
                 Some(aa) => match self.resistance_alts.get(aa) {
                     Some((drugs, confidence)) => {
                         format!("{} ({}, {})", aa, drugs.join(", "), confidence)
