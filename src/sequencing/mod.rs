@@ -22,9 +22,12 @@ pub mod pnca;
 pub mod rpob;
 pub mod rrs;
 pub mod rrl;
+pub mod serde_helpers;
 pub mod tb_data;
 
 pub use batch::SampleSusceptibilityRecord;
+
+use serde::{Deserialize, Serialize};
 
 use erm41::{Erm41LofCall, Erm41Position28, Erm41SusceptibilityCalls};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
@@ -88,7 +91,7 @@ const REF_PNCA: &str = concat!(
 
 
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SusceptibilityCalls {
     pub erm41: Erm41SusceptibilityCalls,
     pub rrl: RrlSusceptibilityCalls,
@@ -710,7 +713,7 @@ impl Ab1Channels {
 }
 
 /// Best-hit result from aligning an AB1 read against the reference sequences.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SeqIdHit {
     /// Accession of the best-matching reference (e.g. "AF547836").
     pub accession: String,

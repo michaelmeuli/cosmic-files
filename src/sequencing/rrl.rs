@@ -1,7 +1,7 @@
 use super::reverse_complement;
 use super::{RRL_ANCHOR_L, RRL_ANCHOR_R, REF_MYCO_RRL};
 use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 type RrlSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RrlPosition2058_2059 {
     SusceptibleWildtype, // A2058 and A2059
     ResistanceConferringMutation, // Any mutation at 2058 or 2059 that is not wildtype.
@@ -123,13 +123,14 @@ pub fn is_susceptible_rrl_by_snp_calls_rare(pos_opt: Option<&RrlPosition2058_205
 }
 
 /// All rrl susceptibility evidence for one sample, ready for UI display.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RrlSusceptibilityCalls {
     pub position_2058_2059: Option<RrlPosition2058_2059>,
     pub snp_calls: Vec<RrlSnpCall>,
     pub is_susceptible: Option<bool>,
     pub is_susceptible_rare: Option<bool>,
 }
+
 
 
 #[derive(Debug, Deserialize, Clone)]
@@ -197,7 +198,7 @@ static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrlSnpMap>> = LazyLo
 });
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrlSnpCall {
     /// 0-based position in the rrl reference sequence.
     pub ref_pos: usize,
@@ -206,6 +207,7 @@ pub struct RrlSnpCall {
     /// Wild-type base at this position.
     pub wt_base: u8,
     /// Maps each resistance-conferring alt base to `(drugs, E.coli nomenclature)`.
+    #[serde(with = "super::serde_helpers::u8_btree_map")]
     pub resistance_bases: BTreeMap<u8, (Vec<String>, String)>,
 }
 

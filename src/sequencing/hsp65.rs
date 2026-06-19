@@ -1,6 +1,7 @@
 use super::reverse_complement;
 use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos};
 use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
+use serde::{Deserialize, Serialize};
 
 const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
     // (0-based ref pos, gastri_base, kansasii_base)
@@ -161,7 +162,7 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
 
 
 /// A single diagnostic SNP position in the kansasii/gastri comparison.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KansasiiGastriSnpCall {
     /// 0-based position in the reference sequence.
     pub ref_pos: usize,
@@ -193,7 +194,7 @@ impl KansasiiGastriSnpCall {
 }
 
 /// A single diagnostic SNP position in the marinum/ulcerans comparison.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MarinumUlceransSnpCall {
     /// 0-based position in the reference sequence.
     pub ref_pos: usize,

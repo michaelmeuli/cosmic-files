@@ -2,7 +2,7 @@ use super::{
     GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta,
     reverse_complement,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -74,7 +74,7 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
     .collect()
 });
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall {
     /// 0-based position in the rrs reference sequence.
     pub ref_pos: usize,
@@ -83,6 +83,7 @@ pub struct RrsSnpCall {
     /// Wild-type base at this position.
     pub wt_base: u8,
     /// Maps each resistance-conferring alt base to `(drugs, E.coli nomenclature)`.
+    #[serde(with = "super::serde_helpers::u8_btree_map")]
     pub resistance_bases: BTreeMap<u8, (Vec<String>, String)>,
 }
 
@@ -111,7 +112,7 @@ impl RrsSnpCall {
 }
 
 /// All rrs susceptibility evidence for one sample, ready for UI display.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RrsSusceptibilityCalls {
     pub snp_calls: Vec<RrsSnpCall>,
     pub is_susceptible: Option<bool>,

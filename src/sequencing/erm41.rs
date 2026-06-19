@@ -1,7 +1,7 @@
 use super::reverse_complement;
 use super::{ERM41_ANCHOR_L, ERM41_ANCHOR_R, ERM41_FWD_END, ERM41_FWD_START};
 use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_fasta_seq};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 /// `(mutation_label, drug)`.
 type Erm41LofSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Erm41Position28 {
     C28,          // Cytosine — reference allele in some strains
     T28,          // Thymine  — inducible macrolide resistance (ATCC 19977 type)
@@ -66,7 +66,7 @@ pub fn is_susceptible_erm41_by_position28(pos: &Erm41Position28) -> Option<bool>
 }
 
 /// All erm(41) susceptibility evidence for one sample, ready for UI display.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Erm41SusceptibilityCalls {
     pub position_28: Option<Erm41Position28>,
     pub lof_snp_calls: Vec<Erm41LofCall>,
@@ -308,12 +308,13 @@ static ERM41_LOF_SNPS: LazyLock<BTreeMap<&'static str, Erm41LofSnpMap>> = LazyLo
     .collect()
 });
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Erm41LofCall {
     pub ref_pos: usize,
     pub query_base: Option<u8>,
     pub wt_base: u8,
     /// Maps each loss-of-function alt base to `(mutation_label, drug)`.
+    #[serde(with = "super::serde_helpers::u8_btree_map")]
     pub lof_alts: BTreeMap<u8, (String, Option<String>)>,
 }
 

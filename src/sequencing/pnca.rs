@@ -4,7 +4,7 @@ use super::{
     reverse_complement,
 };
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -154,7 +154,7 @@ static PNCA_RESISTANCE_SNPS: LazyLock<(PncaNtSnpMap, PncaAaSnpMap)> =
     LazyLock::new(|| parse_pnca_resistance_snps(include_str!("../../tbprofiler/mutations.csv")));
 
 /// One diagnostic pncA site: either a single nucleotide (promoter or coding) or a single codon.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PncaCallKind {
     Nucleotide {
         wt_base: u8,
@@ -167,7 +167,7 @@ pub enum PncaCallKind {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PncaSnpCall {
     /// 0-based position in the pncA reference sequence: the substituted base for nucleotide
     /// calls, or the first base of the codon for codon calls.
@@ -256,7 +256,7 @@ enum PncaEvidence {
 }
 
 /// All pncA susceptibility evidence for one sample, ready for UI display.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PncaSusceptibilityCalls {
     pub snp_calls: Vec<PncaSnpCall>,
     pub is_susceptible: Option<bool>,

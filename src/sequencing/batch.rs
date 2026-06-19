@@ -1,8 +1,12 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{LazyLock, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
+use serde::{Deserialize, Serialize};
 
 use super::{
-    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SusceptibilityCalls,
+    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
@@ -13,18 +17,28 @@ use super::{
     trim_to_min_quality,
 };
 
+/// In-memory cache: maps each AB1 file path to the seq_id_hits computed by the last background
+/// scan. `item_from_entry()` reads from this cache instead of running alignment on the UI thread.
+pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::default()));
+
 /// Per-sample susceptibility result produced by the batch AB1 directory scan.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SampleSusceptibilityRecord {
     pub sample_id: String,
     pub gene: Option<String>,
     pub file_name: String,
     pub file_path: PathBuf,
-    pub file_created: Option<std::time::SystemTime>,
+    #[serde(with = "super::serde_helpers::option_systemtime_secs")]
+    pub file_created: Option<SystemTime>,
     pub susceptibility_calls: SusceptibilityCalls,
     pub species: Option<String>,
     pub identity: Option<f32>,
     pub is_susceptible: Option<bool>,
+    /// Top alignment hits — stored in disk cache (alignment strings stripped) so the preview
+    /// panel can be populated from disk cache without re-running alignment.
+    #[serde(default)]
+    pub seq_id_hits: Vec<SeqIdHit>,
 }
 
 /// Find the first run of exactly 10 consecutive ASCII digits starting with "20"
@@ -81,8 +95,32 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
 /// Walk `scan_path` recursively, analyse every `.ab1` file, and return a
 /// `SampleSusceptibilityRecord` per file sorted reverse-alphabetically by
 /// `sample_id` (highest first).
-pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord> {
+///
+/// `cache_path` — path to the JSON disk cache file; `None` disables disk caching.
+/// `max_age_days` — files whose creation time is older than this many days are skipped
+/// (mirrors the PDF report window). Pass `0` to disable age filtering.
+pub fn scan_ab1_directory(
+    scan_path: PathBuf,
+    cache_path: Option<PathBuf>,
+    max_age_days: u32,
+) -> Vec<SampleSusceptibilityRecord> {
+    log::debug!("ab1_scan: starting scan of {} (max_age_days={}, cache_path={:?})", scan_path.display(), max_age_days, cache_path);
+
+    // Load disk cache: HashMap<path_string, (mtime_secs, record)>
+    type DiskCache = HashMap<String, (u64, SampleSusceptibilityRecord)>;
+    let mut disk_cache: DiskCache = cache_path
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    log::debug!("ab1_scan: loaded {} disk cache entries", disk_cache.len());
+
+    let now = SystemTime::now();
+    let max_age = (max_age_days > 0)
+        .then(|| Duration::from_secs(u64::from(max_age_days) * 86_400));
+
     let mut records = Vec::new();
+    let mut cache_dirty = false;
 
     for entry in WalkDir::new(&scan_path).into_iter().filter_map(Result::ok) {
         let path = entry.path();
@@ -97,6 +135,46 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
             continue;
         }
 
+        let meta = std::fs::metadata(path).ok();
+        let file_created: Option<SystemTime> = meta.as_ref().and_then(|m| m.created().ok());
+
+        // Skip files outside the reporting window (same filter as the PDF report).
+        if let (Some(max_age), Some(created)) = (&max_age, file_created) {
+            if now.duration_since(created).is_ok_and(|age| age > *max_age) {
+                log::debug!("ab1_scan: skipping old file: {}", path.display());
+                continue;
+            }
+        }
+
+        let mtime_secs: u64 = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let path_key = path.to_string_lossy().into_owned();
+
+        // Canonicalize so the key matches the \\?\ -prefixed paths the file manager uses.
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        // Disk cache hit: mtime unchanged and seq_id_hits stored → reuse previous result.
+        if let Some((cached_mtime, cached_record)) = disk_cache.get(&path_key) {
+            if *cached_mtime == mtime_secs && !cached_record.seq_id_hits.is_empty() {
+                log::debug!("ab1_scan: disk cache hit for {} ({} hits, canonical={})", path.display(), cached_record.seq_id_hits.len(), canonical_path.display());
+                if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
+                    guard.entry(canonical_path).or_insert_with(|| cached_record.seq_id_hits.clone());
+                }
+                records.push(cached_record.clone());
+                continue;
+            } else {
+                log::debug!("ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={})", path.display(), *cached_mtime == mtime_secs, cached_record.seq_id_hits.len());
+            }
+        } else {
+            log::debug!("ab1_scan: no disk cache entry for {}", path.display());
+        }
+
+        // Cache miss — run full alignment pipeline.
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -104,7 +182,6 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
             .to_string();
         let lower_name = file_name.to_ascii_lowercase();
         let (sample_id, gene) = parse_ab1_filename(&file_name);
-        let file_created = std::fs::metadata(path).ok().and_then(|m| m.created().ok());
 
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
@@ -147,6 +224,12 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
         } else {
             Vec::new()
         };
+
+        // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
+        log::debug!("ab1_scan: alignment done for {} → {} hits (top: {:?}, canonical={})", path.display(), seq_id_hits.len(), seq_id_hits.first().map(|h| (&h.description, h.identity)), canonical_path.display());
+        if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
+            guard.insert(canonical_path, seq_id_hits.clone());
+        }
 
         let is_susceptible = seq_id_hits.first().and_then(|hit| {
             let erm41_result = if hit.description == DESC_MASSILIENSE {
@@ -198,7 +281,7 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
             })
             .unwrap_or_default();
 
-        records.push(SampleSusceptibilityRecord {
+        let record = SampleSusceptibilityRecord {
             sample_id,
             gene,
             file_name,
@@ -208,8 +291,30 @@ pub fn scan_ab1_directory(scan_path: PathBuf) -> Vec<SampleSusceptibilityRecord>
             species: seq_id_hits.first().map(|h| h.description.clone()),
             identity: seq_id_hits.first().map(|h| h.identity),
             is_susceptible,
-        });
+            seq_id_hits: seq_id_hits.iter().take(5).cloned().collect(),
+        };
+
+        disk_cache.insert(path_key, (mtime_secs, record.clone()));
+        cache_dirty = true;
+        records.push(record);
     }
+
+    // Persist the updated disk cache.
+    if cache_dirty {
+        if let Some(cp) = &cache_path {
+            match serde_json::to_string(&disk_cache) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(cp, json) {
+                        log::warn!("ab1 scan: failed to write disk cache {}: {e}", cp.display());
+                    }
+                }
+                Err(e) => log::warn!("ab1 scan: failed to serialise disk cache: {e}"),
+            }
+        }
+    }
+
+    let mem_cache_size = AB1_SEQ_CACHE.read().map(|g| g.len()).unwrap_or(0);
+    log::debug!("ab1_scan: finished: {} records, AB1_SEQ_CACHE has {} entries", records.len(), mem_cache_size);
 
     // Reverse-alphabetical by sample_id (highest first)
     records.sort_by(|a, b| b.sample_id.cmp(&a.sample_id));

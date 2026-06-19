@@ -71,15 +71,9 @@ use crate::sequencing::rrs::{
 };
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
-    erm41::{
-        Erm41Position28, Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41,
-    },
-    hsp65::identify_sequence_hsp65,
+    erm41::{Erm41Position28, Erm41SusceptibilityCalls, is_susceptible_erm41},
     parse_ab1_quality, parse_ab1_sequence,
-    pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
-    rpob::identify_sequence_rpob,
-    rrl::identify_sequence_rrl_ntm,
-    rrs::identify_sequence_16s,
+    pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
     tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
     trim_to_min_quality,
 };
@@ -893,19 +887,11 @@ pub fn item_from_entry(
         .extension()
         .map(|e| e.eq_ignore_ascii_case("ab1"))
         .unwrap_or(false);
-    let lower_name = name.to_ascii_lowercase();
-    let is_fasta = lower_name.ends_with(".fasta") || lower_name.ends_with(".fa");
-    let is_erm41 = !is_fasta && (lower_name.contains("erm41") || lower_name.contains("erm"));
-    let is_hsp65 = !is_fasta && (lower_name.contains("hsp65") || lower_name.contains("65kda"));
-    let is_rpob = !is_fasta && (lower_name.contains("rpob") || lower_name.contains("rpo"));
-    let is_16s = !is_fasta && lower_name.contains("mbak14");
-    let is_23s_ntm = !is_fasta && (lower_name.contains("rrl") || lower_name.contains("mclr"));
-    let is_pnca = !is_fasta && lower_name.contains("pnca");
     let sequence_opt = if is_ab1 && !remote {
         fs::read(&path).ok().map(|bytes| {
             let ab1_seq = parse_ab1_sequence(&bytes);
             let ab1_qual = parse_ab1_quality(&bytes);
-            let (seq_id_hits, length, trimmed_length, trimmed_avg_quality_opt) =
+            let (length, trimmed_length, trimmed_avg_quality_opt) =
                 if let Some(seq) = ab1_seq.as_ref() {
                     let length = seq.len();
                     let trimmed: &[u8] = match &ab1_qual {
@@ -949,30 +935,17 @@ pub fn item_from_entry(
                                 .sum();
                             sum as f32 / trimmed_length as f32
                         });
-                    let seq_id_hits = if is_erm41 {
-                        identify_sequence_erm41(trimmed)
-                    } else if is_hsp65 {
-                        identify_sequence_hsp65(trimmed)
-                    } else if is_rpob {
-                        identify_sequence_rpob(trimmed)
-                    } else if is_23s_ntm {
-                        identify_sequence_rrl_ntm(trimmed)
-                    } else if is_16s {
-                        identify_sequence_16s(trimmed)
-                    } else if is_pnca {
-                        identify_sequence_pnca(trimmed)
-                    } else {
-                        Vec::new()
-                    };
-                    (
-                        seq_id_hits,
-                        length,
-                        trimmed_length,
-                        trimmed_avg_quality_opt,
-                    )
+                    (length, trimmed_length, trimmed_avg_quality_opt)
                 } else {
-                    (Vec::new(), 0, 0, None)
+                    (0, 0, None)
                 };
+            // Look up pre-computed alignment results from the background scan cache.
+            // This avoids running Smith-Waterman on the UI thread.
+            let seq_id_hits = crate::sequencing::batch::AB1_SEQ_CACHE
+                .read()
+                .ok()
+                .and_then(|guard| guard.get(&path).cloned())
+                .unwrap_or_default();
             let chromatogram_opt = Ab1Channels::from_bytes(&bytes);
             SeqData {
                 chromatogram_opt,
@@ -3041,6 +3014,28 @@ impl Item {
         self.location_opt.as_ref()?.path_opt()
     }
 
+    /// Returns seq_id_hits for preview, falling back to `AB1_SEQ_CACHE` when the item was
+    /// created before the background scan ran (empty stored hits).
+    pub fn seq_id_hits_cached(&self) -> Vec<SeqIdHit> {
+        let stored = self.metadata.seq_id_hits();
+        if !stored.is_empty() {
+            log::debug!("seq_id_hits_cached({}): {} stored hits", self.name, stored.len());
+            return stored.to_vec();
+        }
+        let path = self.path_opt();
+        let cache_size = crate::sequencing::batch::AB1_SEQ_CACHE.read().map(|g| g.len()).unwrap_or(0);
+        let result = path
+            .and_then(|p| {
+                crate::sequencing::batch::AB1_SEQ_CACHE
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.get(p).cloned())
+            })
+            .unwrap_or_default();
+        log::debug!("seq_id_hits_cached({}): path={:?}, cache_size={}, found {} hits", self.name, path, cache_size, result.len());
+        result
+    }
+
     fn is_fasta(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
         lower.ends_with(".fasta") || lower.ends_with(".fa")
@@ -3532,13 +3527,13 @@ impl Item {
         let mut details = widget::column::with_capacity(18).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.seq_id_hits();
+        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3689,13 +3684,13 @@ impl Item {
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.seq_id_hits();
+        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3826,13 +3821,13 @@ impl Item {
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.seq_id_hits();
+        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3901,13 +3896,13 @@ impl Item {
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.seq_id_hits();
+        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3996,13 +3991,13 @@ impl Item {
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.seq_id_hits();
+        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -4150,13 +4145,13 @@ impl Item {
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
         details = details.push(widget::text::heading(self.name.clone()));
 
-        let hits = self.metadata.seq_id_hits();
+        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || !self.metadata.is_seq_id()
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to the pncA reference.",

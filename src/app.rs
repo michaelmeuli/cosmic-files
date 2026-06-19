@@ -6430,10 +6430,21 @@ impl Application for App {
                 if scan_path.is_empty() {
                     return Task::none();
                 }
+                let ab1_out_dir = self.config.tb_config.ab1_out_dir.clone();
+                let max_age_days = self.config.tb_config.report_max_age_days;
                 return Task::future(async move {
                     let records = tokio::task::spawn_blocking(move || {
+                        let cache_base = if !ab1_out_dir.is_empty() {
+                            ab1_out_dir.clone()
+                        } else {
+                            scan_path.clone()
+                        };
+                        let cache_path =
+                            Some(std::path::PathBuf::from(cache_base).join("ab1_scan_cache.json"));
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
+                            cache_path,
+                            max_age_days,
                         )
                     })
                     .await
