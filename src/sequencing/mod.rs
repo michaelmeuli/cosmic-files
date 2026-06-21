@@ -138,7 +138,7 @@ impl std::fmt::Display for SusceptibilityCalls {
             .snp_calls
             .iter()
             .filter(|c| !c.call_tag().is_empty())
-            .map(|c| format!("{}: {}", c.site_label(), c.call_tag()))
+            .map(|c| format!("{} {}", c.site_label(), c.call_tag()))
             .collect();
         if !pnca.is_empty() {
             parts.push(format!("{}", pnca.join(", ")));

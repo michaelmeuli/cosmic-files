@@ -179,19 +179,20 @@ pub struct PncaSnpCall {
 }
 
 impl PncaSnpCall {
-    /// HGVS-style label for this site, e.g. `"c.-11"` or `"p.Ala102"`.
+    /// HGVS-style label for this site, e.g. `"c.-11A>C"` or `"p.Ala102Pro"`.
+    /// When the query didn't cover the site (`query_base`/`query_aa` is `None`), the alt is `"?"`.
     pub fn site_label(&self) -> String {
         match &self.kind {
-            PncaCallKind::Nucleotide { .. } => {
+            PncaCallKind::Nucleotide { wt_base, query_base } => {
                 // Recover the signed c. position from ref_pos for display.
                 let offset = self.ref_pos as isize - UPSTREAM_FLANK;
                 if offset >= 0 {
-                    format!("c.{}", offset + 1)
+                    format!("c.{}{}>{}", offset + 1, *wt_base as char, query_base.map(|b| b as char).unwrap_or('?'))
                 } else {
-                    format!("c.{}", offset)
+                    format!("c.{}{}>{}", offset, *wt_base as char, query_base.map(|b| b as char).unwrap_or('?'))
                 }
             }
-            PncaCallKind::Codon { codon, wt_aa, .. } => format!("p.{wt_aa}{codon}"),
+            PncaCallKind::Codon { codon, wt_aa, query_aa } => format!("p.{}{}{}", wt_aa, codon, query_aa.as_deref().unwrap_or("?")),
         }
     }
 
@@ -204,7 +205,7 @@ impl PncaSnpCall {
                     let key = (*b as char).to_string();
                     match self.resistance_alts.get(&key) {
                         Some((drugs, confidence)) => {
-                            format!("{} ({}, {})", *b as char, drugs.join(", "), confidence)
+                            format!("({}, {})", drugs.join(", "), confidence)
                         }
                         None => format!("{} (mutation, untested)", *b as char),
                     }
@@ -215,7 +216,7 @@ impl PncaSnpCall {
                 Some(aa) if aa == wt_aa => format!(""),
                 Some(aa) => match self.resistance_alts.get(aa) {
                     Some((drugs, confidence)) => {
-                        format!("{} ({}, {})", aa, drugs.join(", "), confidence)
+                        format!("({}, {})", drugs.join(", "), confidence)
                     }
                     None => format!("{aa} (mutation, untested)"),
                 },
@@ -264,9 +265,9 @@ pub struct PncaSusceptibilityCalls {
 
 /// Returns `Some(false)` when any covered site's allele matches a catalogued resistance-
 /// conferring alt at confidence rank `< 2` (e.g. "Assoc w R"). Returns `Some(true)` only when
-/// every diagnostic site is covered *and* every observed allele is wildtype — a fully wildtype
-/// read is positive evidence of susceptibility. Returns `None` whenever any site went uncovered,
-/// an uncatalogued variant was found, or no diagnostic site was reached at all.
+/// every diagnostic site is covered *and* every observed allele is wildtype. Returns `None`
+/// whenever any site went uncovered, an uncatalogued variant was found, weak/uncertain
+/// resistance evidence was seen, or no diagnostic site was reached at all.
 pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
     let mut saw_wildtype = false;
     let mut saw_problem = false;
@@ -452,14 +453,34 @@ mod tests {
             kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: None },
             resistance_alts: BTreeMap::new(),
         };
-        assert_eq!(nt_call.site_label(), "c.-11");
+        assert_eq!(nt_call.site_label(), "c.-11A>?");
 
         let nt_call = PncaSnpCall {
             ref_pos: nt_pos_to_ref_idx(103).unwrap(),
             kind: PncaCallKind::Nucleotide { wt_base: b'C', query_base: None },
             resistance_alts: BTreeMap::new(),
         };
-        assert_eq!(nt_call.site_label(), "c.103");
+        assert_eq!(nt_call.site_label(), "c.103C>?");
+
+        // With a known alt base.
+        let nt_call = PncaSnpCall {
+            ref_pos: nt_pos_to_ref_idx(-11).unwrap(),
+            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'C') },
+            resistance_alts: BTreeMap::new(),
+        };
+        assert_eq!(nt_call.site_label(), "c.-11A>C");
+
+        // Codon label.
+        let codon_call = PncaSnpCall {
+            ref_pos: codon_to_ref_idx(102).unwrap(),
+            kind: PncaCallKind::Codon {
+                codon: 102,
+                wt_aa: "Ala".to_string(),
+                query_aa: Some("Pro".to_string()),
+            },
+            resistance_alts: BTreeMap::new(),
+        };
+        assert_eq!(codon_call.site_label(), "p.Ala102Pro");
     }
 
     #[test]
@@ -535,7 +556,7 @@ mod tests {
             Some(false)
         );
 
-        // Only weak/uncertain evidence observed → susceptible.
+        // Weak/uncertain catalogue entry → unknown (not enough to call susceptible or resistant).
         let uncertain_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'G') },
@@ -544,16 +565,15 @@ mod tests {
                 (vec!["pyrazinamide".to_string()], "Uncertain significance".to_string()),
             )]),
         };
-        assert_eq!(is_susceptible_pnca(&[uncertain_call]), Some(true));
+        assert_eq!(is_susceptible_pnca(&[uncertain_call]), None);
 
-        // A non-wildtype allele with no catalogue entry at all → covered but uncatalogued;
-        // doesn't confirm resistance, so still susceptible.
+        // A non-wildtype allele with no catalogue entry at all → uncatalogued, unknown.
         let uncatalogued_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'T') },
             resistance_alts: resistance_alts(),
         };
-        assert_eq!(is_susceptible_pnca(&[uncatalogued_call]), Some(true));
+        assert_eq!(is_susceptible_pnca(&[uncatalogued_call]), None);
     }
 
     #[test]

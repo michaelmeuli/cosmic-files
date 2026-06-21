@@ -163,7 +163,7 @@ pub fn scan_ab1_directory(
             if *cached_mtime == mtime_secs && !cached_record.seq_id_hits.is_empty() {
                 log::debug!("ab1_scan: disk cache hit for {} ({} hits, canonical={})", path.display(), cached_record.seq_id_hits.len(), canonical_path.display());
                 if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
-                    guard.entry(canonical_path).or_insert_with(|| cached_record.seq_id_hits.clone());
+                    guard.insert(canonical_path, cached_record.seq_id_hits.clone());
                 }
                 records.push(cached_record.clone());
                 continue;
