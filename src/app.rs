@@ -528,7 +528,9 @@ pub enum Message {
     SetTbPair1Suffix(String),
     SetTbPair2Suffix(String),
     SetTbAb1ScanPath(String),
-    SetTbAb1OutDir(String),
+    SetTbAb1CachePath(String),
+    SetTbAb1OutDirCsv(String),
+    SetTbAb1OutDirPdf(String),
     SetNtfyTopic(String),
     SetTbReportMaxAgeDays(String),
     ScanAb1Directory,
@@ -2624,9 +2626,21 @@ impl App {
                     ),
                 )
                 .add(
-                    widget::settings::item::builder("AB1 output directory").control(
-                        widget::text_input("", &self.config.tb_config.ab1_out_dir)
-                            .on_input(Message::SetTbAb1OutDir),
+                    widget::settings::item::builder("AB1 cache file").control(
+                        widget::text_input("", &self.config.tb_config.ab1_cache_path)
+                            .on_input(Message::SetTbAb1CachePath),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("AB1 CSV output directory").control(
+                        widget::text_input("", &self.config.tb_config.ab1_out_dir_csv)
+                            .on_input(Message::SetTbAb1OutDirCsv),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("AB1 PDF output directory").control(
+                        widget::text_input("", &self.config.tb_config.ab1_out_dir_pdf)
+                            .on_input(Message::SetTbAb1OutDirPdf),
                     ),
                 )
                 .add(
@@ -6405,9 +6419,21 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
-            Message::SetTbAb1OutDir(path) => {
+            Message::SetTbAb1CachePath(path) => {
                 let mut tb_config = self.config.tb_config.clone();
-                tb_config.ab1_out_dir = path;
+                tb_config.ab1_cache_path = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbAb1OutDirCsv(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_out_dir_csv = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbAb1OutDirPdf(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_out_dir_pdf = path;
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
@@ -6430,17 +6456,21 @@ impl Application for App {
                 if scan_path.is_empty() {
                     return Task::none();
                 }
-                let ab1_out_dir = self.config.tb_config.ab1_out_dir.clone();
+                let ab1_out_dir_csv = self.config.tb_config.ab1_out_dir_csv.clone();
+                let ab1_cache_path = self.config.tb_config.ab1_cache_path.clone();
                 let max_age_days = self.config.tb_config.report_max_age_days;
                 return Task::future(async move {
                     let records = tokio::task::spawn_blocking(move || {
-                        let cache_base = if !ab1_out_dir.is_empty() {
-                            ab1_out_dir.clone()
+                        let cache_path = if !ab1_cache_path.is_empty() {
+                            Some(std::path::PathBuf::from(ab1_cache_path))
                         } else {
-                            scan_path.clone()
+                            let cache_base = if !ab1_out_dir_csv.is_empty() {
+                                ab1_out_dir_csv.clone()
+                            } else {
+                                scan_path.clone()
+                            };
+                            Some(std::path::PathBuf::from(cache_base).join("ab1_scan_cache.json"))
                         };
-                        let cache_path =
-                            Some(std::path::PathBuf::from(cache_base).join("ab1_scan_cache.json"));
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
                             cache_path,
@@ -6453,10 +6483,10 @@ impl Application for App {
                 });
             }
             Message::Ab1ScanComplete(records) => {
-                let ab1_out_dir = self.config.tb_config.ab1_out_dir.clone();
+                let ab1_out_dir_csv = self.config.tb_config.ab1_out_dir_csv.clone();
                 let scan_path = self.config.tb_config.ab1_scan_path.clone();
-                let out_path = if !ab1_out_dir.is_empty() {
-                    std::path::PathBuf::from(&ab1_out_dir).join("ab1_susceptibility_report.csv")
+                let out_path = if !ab1_out_dir_csv.is_empty() {
+                    std::path::PathBuf::from(&ab1_out_dir_csv).join("ab1_susceptibility_report.csv")
                 } else {
                     std::path::PathBuf::from(&scan_path).join("ab1_susceptibility_report.csv")
                 };
