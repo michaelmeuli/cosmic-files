@@ -6456,20 +6456,15 @@ impl Application for App {
                 if scan_path.is_empty() {
                     return Task::none();
                 }
-                let ab1_out_dir_csv = self.config.tb_config.ab1_out_dir_csv.clone();
                 let ab1_cache_path = self.config.tb_config.ab1_cache_path.clone();
                 let max_age_days = self.config.tb_config.report_max_age_days;
                 return Task::future(async move {
                     let records = tokio::task::spawn_blocking(move || {
                         let cache_path = if !ab1_cache_path.is_empty() {
-                            Some(std::path::PathBuf::from(ab1_cache_path))
+                            let p = std::path::PathBuf::from(ab1_cache_path);
+                            Some(if p.is_dir() { p.join("ab1_scan_cache.json") } else { p })
                         } else {
-                            let cache_base = if !ab1_out_dir_csv.is_empty() {
-                                ab1_out_dir_csv.clone()
-                            } else {
-                                scan_path.clone()
-                            };
-                            Some(std::path::PathBuf::from(cache_base).join("ab1_scan_cache.json"))
+                            Some(std::path::PathBuf::from(scan_path.clone()).join("ab1_scan_cache.json"))
                         };
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
