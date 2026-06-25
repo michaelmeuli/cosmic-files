@@ -270,6 +270,42 @@ fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
     result
 }
 
+/// Within each `description` group, remove entries whose sequence (uppercased) is a contiguous
+/// substring of a longer entry that shares the same description. Longer entries survive; the
+/// shorter entries are redundant for alignment purposes because the aligner will find the same
+/// best position inside the longer reference.
+fn dedup_substring_same_desc(
+    mut entries: Vec<(String, String, Vec<u8>)>,
+) -> Vec<(String, String, Vec<u8>)> {
+    // Sort longest-first so inner loop only has to check shorter against longer.
+    entries.sort_by_key(|(_, _, s)| std::cmp::Reverse(s.len()));
+    let upper: Vec<Vec<u8>> = entries
+        .iter()
+        .map(|(_, _, s)| s.iter().map(|b| b.to_ascii_uppercase()).collect())
+        .collect();
+    let mut keep = vec![true; entries.len()];
+    for i in 0..entries.len() {
+        if !keep[i] {
+            continue;
+        }
+        for j in (i + 1)..entries.len() {
+            if !keep[j] {
+                continue;
+            }
+            if entries[i].1 == entries[j].1
+                && upper[i].windows(upper[j].len()).any(|w| w == upper[j])
+            {
+                keep[j] = false;
+            }
+        }
+    }
+    entries
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(e, k)| k.then_some(e))
+        .collect()
+}
+
 fn format_pairwise_alignment(
     accession: &str,
     description: &str,

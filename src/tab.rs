@@ -3950,7 +3950,7 @@ impl Item {
             details = details.push(widget::text::heading(
                 "Species identification (16S database):",
             ));
-            for hit in &hits[..hits.len().min(3)] {
+            for hit in &hits[..hits.len().min(8)] {
                 details = details.push(
                     widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
                         .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))

@@ -1,6 +1,6 @@
 use super::{
-    GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta,
-    reverse_complement,
+    GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
+    dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -73,6 +73,10 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
     .map(|(species, csv)| (species, parse_rrs_resistance_snps(csv)))
     .collect()
 });
+
+/// Parsed and substring-deduplicated rrs reference sequences, initialised once.
+static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
+    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RRS)));
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall {
@@ -171,12 +175,12 @@ fn call_rrs_snps(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall> {
 ///    query coordinates using the alignment offset.
 pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
-    let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRS)
-        .into_iter()
+    let mut hits: Vec<SeqIdHit> = RRS_REFS
+        .iter()
         .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRS_REF_LEN)
         .map(|(accession, description, refseq)| {
-            let fwd = align_to_ref(query, &refseq);
-            let rev = align_to_ref(&rc, &refseq);
+            let fwd = align_to_ref(query, refseq);
+            let rev = align_to_ref(&rc, refseq);
             let (ga, is_reverse) = if rev.identity > fwd.identity {
                 (rev, true)
             } else {
@@ -191,8 +195,8 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
                 vec![]
             };
             SeqIdHit {
-                accession,
-                description,
+                accession: accession.clone(),
+                description: description.clone(),
                 identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
