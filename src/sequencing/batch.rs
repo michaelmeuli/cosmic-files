@@ -74,13 +74,13 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
 
     let lower_name = name.to_ascii_lowercase();
     let gene = if lower_name.contains("erm41") || lower_name.contains("erm") {
-        Some("erm41".to_string())
+        Some("erm(41)".to_string())
     } else if lower_name.contains("hsp65") || lower_name.contains("65kda") {
         Some("hsp65".to_string())
     } else if lower_name.contains("rpob") || lower_name.contains("rpo") {
         Some("rpoB".to_string())
     } else if lower_name.contains("mbak14") {
-        Some("16s".to_string())
+        Some("16S".to_string())
     } else if lower_name.contains("rrl") || lower_name.contains("mclr") {
         Some("rrl".to_string())
     } else if lower_name.contains("pnca") {

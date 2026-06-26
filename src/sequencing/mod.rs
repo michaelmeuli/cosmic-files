@@ -128,7 +128,10 @@ impl std::fmt::Display for SusceptibilityCalls {
             parts.push(format!("{}", rrl.join(", ")));
         }
 
-        let rrs: Vec<String> = self.rrs.snp_calls.iter().map(|c| c.call_tag()).collect();
+        let rrs: Vec<String> = self.rrs.snp_calls.iter()
+            .map(|c| c.call_tag())
+            .filter(|t| !t.is_empty())
+            .collect();
         if !rrs.is_empty() {
             parts.push(format!("{}", rrs.join(", ")));
         }
