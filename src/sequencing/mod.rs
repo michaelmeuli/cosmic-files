@@ -196,25 +196,39 @@ pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'
 }
 
 
-/// Trim leading and trailing bases whose Phred quality score is below `min_q`.
-/// Returns `None` if no base meets the threshold (the caller decides the fallback).
+/// Trim leading and trailing low-quality bases using a sliding-window average.
+///
+/// Scans inward from each end with a window of [`WINDOW`] bases; the first
+/// window position (from each end) whose mean Phred quality ≥ `min_q` defines
+/// the trim boundary. Falls back to single-base scan when `seq` is shorter
+/// than the window. Returns `None` when no region meets the threshold.
 pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> Option<&'a [u8]> {
-    let start = seq
-        .iter()
-        .enumerate()
-        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
-        .map(|(i, _)| i)
-        .unwrap_or(seq.len());
+    const WINDOW: usize = 15;
 
-    let end = seq
-        .iter()
-        .enumerate()
+    let n = seq.len().min(qual.len());
+
+    // Short read: single-base scan (same semantics as before, just on the
+    // clamped length so qual and seq indices stay in bounds).
+    if n < WINDOW {
+        let start = (0..n).find(|&i| qual[i] >= min_q).unwrap_or(n);
+        let end = (0..n).rev().find(|&i| qual[i] >= min_q).map(|i| i + 1).unwrap_or(0);
+        return if start < end { Some(&seq[start..end]) } else { None };
+    }
+
+    let threshold = min_q as u32 * WINDOW as u32;
+
+    // Scan left → right: first window whose average ≥ min_q.
+    let start = (0..=(n - WINDOW))
+        .find(|&i| qual[i..i + WINDOW].iter().map(|&q| q as u32).sum::<u32>() >= threshold)
+        .unwrap_or(n);
+
+    // Scan right → left: last window-end whose average ≥ min_q.
+    let end = (WINDOW..=n)
         .rev()
-        .find(|&(i, _)| qual.get(i).copied().unwrap_or(0) >= min_q)
-        .map(|(i, _)| i + 1)
+        .find(|&e| qual[e - WINDOW..e].iter().map(|&q| q as u32).sum::<u32>() >= threshold)
         .unwrap_or(0);
 
-    if start >= end { None } else { Some(&seq[start..end]) }
+    if start < end { Some(&seq[start..end]) } else { None }
 }
 
 /// Parse a FASTA string, returning just the sequence bytes (ignores header).

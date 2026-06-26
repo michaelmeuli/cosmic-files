@@ -203,7 +203,7 @@ pub fn scan_ab1_directory(
 
         let seq_id_hits = if let Some(seq) = ab1_seq.as_ref() {
             let trimmed: &[u8] = match &ab1_qual {
-                Some(qual) => trim_to_min_quality(seq, qual, 10).unwrap_or(seq.as_slice()),
+                Some(qual) => trim_to_min_quality(seq, qual, 20).unwrap_or(seq.as_slice()),
                 None => seq.as_slice(),
             };
             if is_erm41 {

@@ -895,7 +895,7 @@ pub fn item_from_entry(
                 if let Some(seq) = ab1_seq.as_ref() {
                     let length = seq.len();
                     let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => match trim_to_min_quality(seq, qual, 10) {
+                        Some(qual) => match trim_to_min_quality(seq, qual, 20) {
                             Some(trimmed) => {
                                 let removed = seq.len() - trimmed.len();
                                 if removed > 0 {
