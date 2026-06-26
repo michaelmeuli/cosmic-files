@@ -1,7 +1,8 @@
 use super::reverse_complement;
-use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos};
+use super::{GappedAlignment, REF_MYCO_HSP65, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta};
 use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
     // (0-based ref pos, gastri_base, kansasii_base)
@@ -57,6 +58,10 @@ fn call_marinum_ulcerans_snps(ga: &GappedAlignment) -> Vec<MarinumUlceransSnpCal
         .collect()
 }
 
+/// Parsed and substring-deduplicated hsp65 reference sequences, initialised once.
+static HSP65_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
+    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_HSP65)));
+
 /// Trim hsp65 amplification primers from a sequencing read.
 ///
 /// Unlike [`trim_start_end`](super::trim_start_end), which takes a single primer per boundary,
@@ -105,16 +110,16 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
     let query = query.as_slice();
     let rc = reverse_complement(query);
 
-    let mut hits: Vec<SeqIdHit> = super::parse_multi_fasta(super::REF_MYCO_HSP65)
-        .into_iter()
+    let mut hits: Vec<SeqIdHit> = HSP65_REFS
+        .iter()
         .map(|(raw_acc, description, refseq)| {
             // Strip version suffix so SNP dispatch and is_kansasii() etc. work correctly.
             let accession = raw_acc
                 .rsplit_once('.')
                 .map(|(base, _)| base.to_string())
-                .unwrap_or(raw_acc);
-            let fwd = align_to_ref(query, &refseq);
-            let rev = align_to_ref(&rc, &refseq);
+                .unwrap_or_else(|| raw_acc.clone());
+            let fwd = align_to_ref(query, refseq);
+            let rev = align_to_ref(&rc, refseq);
             let (ga, is_reverse) = if rev.identity > fwd.identity {
                 (rev, true)
             } else {
@@ -134,7 +139,7 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 };
             SeqIdHit {
                 accession,
-                description,
+                description: description.clone(),
                 identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls,

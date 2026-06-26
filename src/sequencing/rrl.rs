@@ -1,6 +1,6 @@
 use super::reverse_complement;
 use super::{RRL_ANCHOR_L, RRL_ANCHOR_R, REF_MYCO_RRL};
-use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta};
+use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -186,6 +186,10 @@ fn parse_rrl_resistance_snps(csv: &str) -> RrlSnpMap {
     map
 }
 
+/// Parsed and substring-deduplicated rrl reference sequences, initialised once.
+static RRL_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
+    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RRL)));
+
 static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrlSnpMap>> = LazyLock::new(|| {
     [
         ("Mycobacterium abscessus", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
@@ -319,12 +323,12 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let rrl_position_2058_2059_opt = RrlPosition2058_2059::from_single_read(query);
 
-    let mut hits: Vec<SeqIdHit> = parse_multi_fasta(REF_MYCO_RRL)
-        .into_iter()
+    let mut hits: Vec<SeqIdHit> = RRL_REFS
+        .iter()
         .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRL_REF_LEN)
         .map(|(accession, description, refseq)| {
-            let fwd = align_to_ref(query, &refseq);
-            let rev = align_to_ref(&rc, &refseq);
+            let fwd = align_to_ref(query, refseq);
+            let rev = align_to_ref(&rc, refseq);
             let (ga, is_reverse) = if rev.identity > fwd.identity {
                 (rev, true)
             } else {
@@ -339,8 +343,8 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 vec![]
             };
             SeqIdHit {
-                accession,
-                description,
+                accession: accession.clone(),
+                description: description.clone(),
                 identity: ga.identity,
                 is_reverse,
                 kansasii_gastri_snp_calls: vec![],
