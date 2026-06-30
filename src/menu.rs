@@ -807,6 +807,12 @@ pub fn menu_bar<'a>(
                             Action::ToggleShowHidden,
                         ),
                         menu::Item::CheckBox(
+                            fl!("show-susceptible-samples"),
+                            None,
+                            tab_opt.is_some_and(|tab| tab.config.show_susceptible),
+                            Action::ToggleShowSusceptible,
+                        ),
+                        menu::Item::CheckBox(
                             fl!("list-directories-first"),
                             None,
                             tab_opt.is_some_and(|tab| tab.config.folders_first),
@@ -818,6 +824,12 @@ pub fn menu_bar<'a>(
                             config.show_details,
                             Action::Preview,
                         ),
+                        menu::Item::CheckBox(
+                            fl!("show-as-samples"),
+                            None,
+                            config.tab.show_as_samples,
+                            Action::ToggleShowAsSamples,
+                        ),
                         menu::Item::Divider,
                         menu_button_optional(
                             fl!("gallery-preview"),
@@ -826,6 +838,11 @@ pub fn menu_bar<'a>(
                         ),
                         menu::Item::Divider,
                         menu::Item::Button(fl!("menu-settings"), None, Action::Settings),
+                        menu::Item::Button(
+                            fl!("menu-tb-profiler-settings"),
+                            None,
+                            Action::TBSettings,
+                        ),
                         menu::Item::Divider,
                         menu::Item::Button(fl!("menu-about"), None, Action::About),
                     ],
