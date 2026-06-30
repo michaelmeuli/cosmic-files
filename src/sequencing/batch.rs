@@ -92,6 +92,33 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
     (sample_id, gene)
 }
 
+/// For 16S hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
+fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
+    let first = hits.first()?;
+    let base_identity = first.identity;
+    let (prefix, first_epithet) = first
+        .description
+        .rsplit_once(' ')
+        .map(|(p, e)| (p, e))
+        .unwrap_or(("", first.description.as_str()));
+    let mut epithets: Vec<&str> = vec![first_epithet];
+    for hit in &hits[1..] {
+        if (hit.identity - base_identity).abs() > 0.1 {
+            break;
+        }
+        if let Some((_, epithet)) = hit.description.rsplit_once(' ') {
+            if !epithets.contains(&epithet) {
+                epithets.push(epithet);
+            }
+        }
+    }
+    Some(if epithets.len() == 1 {
+        first.description.clone()
+    } else {
+        format!("{} {}", prefix, epithets.join("/"))
+    })
+}
+
 /// Walk `scan_path` recursively, analyse every `.ab1` file, and return a
 /// `SampleSusceptibilityRecord` per file sorted reverse-alphabetically by
 /// `sample_id` (highest first).
@@ -288,7 +315,11 @@ pub fn scan_ab1_directory(
             file_path: path.to_path_buf(),
             file_created,
             susceptibility_calls,
-            species: seq_id_hits.first().map(|h| h.description.clone()),
+            species: if is_16s {
+                species_from_16s_hits(&seq_id_hits)
+            } else {
+                seq_id_hits.first().map(|h| h.description.clone())
+            },
             identity: seq_id_hits.first().map(|h| h.identity),
             is_susceptible,
             seq_id_hits: seq_id_hits.iter().take(5).cloned().collect(),
