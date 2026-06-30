@@ -4078,8 +4078,7 @@ impl Item {
                 )));
                 for snp in &snp_hit.rrs_snp_calls {
                     details = details.push(widget::text::body(format!(
-                        "  pos {}: {}",
-                        snp.ref_pos + 1,
+                        "{}",
                         snp.call_tag()
                     )));
                 }
@@ -4176,8 +4175,7 @@ impl Item {
                 )));
                 for snp in &snp_hit.rrl_snp_calls {
                     details = details.push(widget::text::body(format!(
-                        "  pos {}: {}",
-                        snp.ref_pos + 1,
+                        "{}", 
                         snp.call_tag()
                     )));
                 }

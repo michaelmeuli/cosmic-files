@@ -104,9 +104,6 @@ impl std::fmt::Display for SusceptibilityCalls {
         let mut parts: Vec<String> = Vec::new();
 
         let mut erm: Vec<String> = Vec::new();
-        if let Some(pos) = &self.erm41.position_28 {
-            erm.push(pos.to_string());
-        }
         for c in &self.erm41.lof_snp_calls {
             let tag = c.call_tag();
             if !tag.is_empty() {

@@ -223,18 +223,20 @@ impl RrlSnpCall {
             .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
 
         match self.query_base {
-            None => "".to_string(),
+            None => {
+                format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, "?")
+            },
             Some(b) if b == self.wt_base => match ecoli_prefix {
-                Some(p) => format!("{} (wt, E.coli {})", b as char, p),
-                None    => format!("{} (wt)", b as char),
+                Some(p) => format!("{}{}{} (E.coli: {}{})", self.wt_base as char, self.ref_pos + 1, b as char, p, b as char),
+                None    => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
             },
             Some(b) if self.resistance_bases.contains_key(&b) => {
                 let (drugs, ecoli) = &self.resistance_bases[&b];
-                format!("{} ({}, E.coli {})", b as char, drugs.join(", "), ecoli)
+                format!("{}{}{} ({}, E.coli: {})", self.wt_base as char, self.ref_pos + 1, b as char, drugs.join(", "), ecoli)
             }
             Some(b) => match ecoli_prefix {
-                Some(p) => format!("{} (mutation, E.coli {}{})", b as char, p, b as char),
-                None    => format!("{} (mutation)", b as char),
+                Some(p) => format!("{}{}{} (E.coli: {}{})", self.wt_base as char, self.ref_pos + 1, b as char, p, b as char),
+                None    => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
             },
         }
     }
