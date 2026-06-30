@@ -95,6 +95,9 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
 /// For 16S hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
 fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
+    if first.description.contains("abscessus") {
+        return Some("M. abscessus complex".to_string());
+    }
     let base_identity = first.identity;
     let (prefix, first_epithet) = first
         .description
