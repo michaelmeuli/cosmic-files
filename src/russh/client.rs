@@ -358,6 +358,7 @@ async fn remote_sftp_list(
             overlaps_drag_rect: false,
             dir_size: DirSize::NotDirectory,
             cut: false,
+            checksums: tab::ChecksumState::default(),
         });
     }
 
@@ -473,6 +474,7 @@ async fn remote_sftp_list(
             overlaps_drag_rect: false,
             dir_size: DirSize::NotDirectory,
             cut: false,
+            checksums: tab::ChecksumState::default(),
         });
     }
 
@@ -607,6 +609,7 @@ async fn remote_sftp_parent(
         overlaps_drag_rect: false,
         dir_size: DirSize::NotDirectory,
         cut: false,
+        checksums: tab::ChecksumState::default(),
     };
     Ok(item)
 }

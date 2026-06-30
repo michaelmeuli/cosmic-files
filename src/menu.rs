@@ -10,16 +10,18 @@ use cosmic::widget::{
     self, Row, button, column, container, divider, responsive_menu_bar, space, text,
 };
 use cosmic::{Element, theme};
+use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use crate::app::{Action, Message};
 use crate::config::{Config, ContextActionPreset, TBConfig};
 use crate::fl;
-use crate::tab::{self, HeadingOptions, Location, LocationMenuAction, SearchLocation, Tab};
+use crate::tab::{
+    self, HeadingOptions, ItemMetadata, Location, LocationMenuAction, SearchLocation, Tab,
+};
 use crate::trash::{Trash, TrashExt};
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
@@ -40,6 +42,18 @@ macro_rules! menu_button {
     );
 }
 
+const fn menu_button_optional(
+    label: String,
+    action: Action,
+    enabled: bool,
+) -> menu::Item<Action, String> {
+    if enabled {
+        menu::Item::Button(label, None, action)
+    } else {
+        menu::Item::ButtonDisabled(label, None, action)
+    }
+}
+
 fn is_valid_fastq_selection(paths: &[PathBuf], config: &TBConfig) -> bool {
     let mut sample_map: HashMap<String, HashSet<u8>> = HashMap::new();
     for path in paths.iter() {
@@ -56,18 +70,6 @@ fn is_valid_fastq_selection(paths: &[PathBuf], config: &TBConfig) -> bool {
         }
     }
     sample_map.values().all(|set| set.len() == 2)
-}
-
-const fn menu_button_optional(
-    label: String,
-    action: Action,
-    enabled: bool,
-) -> menu::Item<Action, String> {
-    if enabled {
-        menu::Item::Button(label, None, action)
-    } else {
-        menu::Item::ButtonDisabled(label, None, action)
-    }
 }
 
 pub fn context_menu<'a>(
@@ -157,6 +159,7 @@ pub fn context_menu<'a>(
     let mut selected_mount_point = 0;
     let mut selected_client_point = 0;
     let mut selected_remote_paths: Vec<PathBuf> = Vec::new();
+    let mut any_trash_item = false;
     if let Some(items) = tab.items_opt() {
         for item in items {
             if item.selected {
@@ -180,6 +183,9 @@ pub fn context_menu<'a>(
                         selected_desktop_entry = Some(&**path);
                     }
                     _ => (),
+                }
+                if matches!(&item.metadata, ItemMetadata::Trash { .. }) {
+                    any_trash_item = true;
                 }
                 selected_types.push(item.mime.clone());
             }
@@ -225,7 +231,7 @@ pub fn context_menu<'a>(
                 if !Trash::is_empty() {
                     children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash).into());
                 }
-            } else if let Some(_entry) = selected_desktop_entry {
+            } else if let Some(entry) = selected_desktop_entry {
                 children.push(menu_item(fl!("open"), Action::Open).into());
                 #[cfg(feature = "desktop")]
                 {
@@ -276,7 +282,7 @@ pub fn context_menu<'a>(
                     children.extend(action_items);
                 }
                 children.push(divider::horizontal::light().into());
-                if selected_mount_point == 0 && selected_client_point == 0 {
+                if selected_mount_point == 0 {
                     children.push(menu_item(fl!("rename"), Action::Rename).into());
                     children.push(menu_item(fl!("cut"), Action::Cut).into());
                 }
@@ -302,27 +308,38 @@ pub fn context_menu<'a>(
 
                 //TODO: Print?
                 children.push(menu_item(fl!("show-details"), Action::Preview).into());
-                if matches!(tab.mode, tab::Mode::App) {
+                if any_trash_item {
                     children.push(divider::horizontal::light().into());
-                    children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
-                }
-                children.push(divider::horizontal::light().into());
-                if tab.location.is_recents() {
                     children.push(
-                        menu_item(fl!("remove-from-recents"), Action::RemoveFromRecents).into(),
+                        menu_item(fl!("restore-from-trash"), Action::RestoreFromTrash).into(),
                     );
                     children.push(divider::horizontal::light().into());
-                }
-                if selected_mount_point == 0 && selected_client_point == 0 {
-                    if modifiers.shift() && !modifiers.control() {
-                        children.push(
-                            menu_item(fl!("delete-permanently"), Action::PermanentlyDelete).into(),
-                        );
-                    } else {
-                        children.push(menu_item(fl!("move-to-trash"), Action::Delete).into());
+                    children.push(menu_item(fl!("delete-permanently"), Action::Delete).into());
+                } else {
+                    if matches!(tab.mode, tab::Mode::App) {
+                        children.push(divider::horizontal::light().into());
+                        children
+                            .push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar).into());
                     }
-                } else if selected == 1 {
-                    children.push(menu_item(fl!("eject"), Action::Eject).into());
+                    children.push(divider::horizontal::light().into());
+                    if tab.location.is_recents() {
+                        children.push(
+                            menu_item(fl!("remove-from-recents"), Action::RemoveFromRecents).into(),
+                        );
+                        children.push(divider::horizontal::light().into());
+                    }
+                    if selected_mount_point == 0 {
+                        if modifiers.shift() && !modifiers.control() {
+                            children.push(
+                                menu_item(fl!("delete-permanently"), Action::PermanentlyDelete)
+                                    .into(),
+                            );
+                        } else {
+                            children.push(menu_item(fl!("move-to-trash"), Action::Delete).into());
+                        }
+                    } else if selected == 1 {
+                        children.push(menu_item(fl!("eject"), Action::Eject).into());
+                    }
                 }
             } else {
                 //TODO: need better designs for menu with no selection
@@ -790,12 +807,6 @@ pub fn menu_bar<'a>(
                             Action::ToggleShowHidden,
                         ),
                         menu::Item::CheckBox(
-                            fl!("show-susceptible-samples"),
-                            None,
-                            tab_opt.is_some_and(|tab| tab.config.show_susceptible),
-                            Action::ToggleShowSusceptible,
-                        ),
-                        menu::Item::CheckBox(
                             fl!("list-directories-first"),
                             None,
                             tab_opt.is_some_and(|tab| tab.config.folders_first),
@@ -807,12 +818,6 @@ pub fn menu_bar<'a>(
                             config.show_details,
                             Action::Preview,
                         ),
-                        menu::Item::CheckBox(
-                            fl!("show-as-samples"),
-                            None,
-                            config.tab.show_as_samples,
-                            Action::ToggleShowAsSamples,
-                        ),
                         menu::Item::Divider,
                         menu_button_optional(
                             fl!("gallery-preview"),
@@ -821,11 +826,6 @@ pub fn menu_bar<'a>(
                         ),
                         menu::Item::Divider,
                         menu::Item::Button(fl!("menu-settings"), None, Action::Settings),
-                        menu::Item::Button(
-                            fl!("menu-tb-profiler-settings"),
-                            None,
-                            Action::TBSettings,
-                        ),
                         menu::Item::Divider,
                         menu::Item::Button(fl!("menu-about"), None, Action::About),
                     ],
