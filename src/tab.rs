@@ -28,6 +28,7 @@ use jiff_icu::ConvertFrom;
 use mime_guess::{Mime, mime};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::cmp::{Ordering, Reverse};
@@ -731,6 +732,7 @@ pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconS
         overlaps_drag_rect: false,
         dir_size,
         cut: false,
+        checksums: ChecksumState::default(),
     }
 }
 
@@ -862,6 +864,7 @@ pub fn item_from_entry(
         overlaps_drag_rect: false,
         dir_size,
         cut: false,
+        checksums: ChecksumState::default(),
     }
 }
 
@@ -873,6 +876,8 @@ pub fn item_from_trash_entry(
     let original_path = entry.original_path();
     let name = entry.name.to_string_lossy().into_owned();
     let display_name = Item::display_name(&name);
+
+    let location = crate::trash::trash_item_path(&entry).map(Location::Path);
 
     let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = match metadata.size
     {
@@ -901,7 +906,7 @@ pub fn item_from_trash_entry(
         is_mount_point: false,
         metadata: ItemMetadata::Trash { metadata, entry },
         hidden: false,
-        location_opt: None,
+        location_opt: location,
         image_dimensions: (mime.type_() == mime::IMAGE)
             .then(|| image::image_dimensions(&original_path).ok())
             .flatten(),
@@ -918,7 +923,33 @@ pub fn item_from_trash_entry(
         overlaps_drag_rect: false,
         dir_size: DirSize::NotDirectory,
         cut: false,
+        checksums: ChecksumState::default(),
     }
+}
+
+fn item_from_trash_child(
+    path: PathBuf,
+    name: String,
+    metadata: fs::Metadata,
+    sizes: IconSizes,
+) -> Option<Item> {
+    let original_path = crate::trash::original_path_for_trash_child(&path)?;
+    let entry = trash::TrashItem {
+        id: path.as_os_str().to_os_string(),
+        name: std::ffi::OsString::from(&name),
+        original_parent: original_path.parent()?.to_path_buf(),
+        time_deleted: 0,
+    };
+    let size = if metadata.is_dir() {
+        trash::TrashItemSize::Entries(0)
+    } else {
+        trash::TrashItemSize::Bytes(metadata.len())
+    };
+    Some(item_from_trash_entry(
+        entry,
+        trash::TrashItemMetadata { size },
+        sizes,
+    ))
 }
 
 fn get_filename_from_path(path: &Path) -> Result<String, String> {
@@ -1036,7 +1067,12 @@ pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
                             })
                             .ok()?;
 
-                        Some(item_from_entry(path, name, metadata, sizes))
+                        let trash = crate::trash::is_trash_path(tab_path);
+                        if trash {
+                            item_from_trash_child(path, name, metadata, sizes)
+                        } else {
+                            Some(item_from_entry(path, name, metadata, sizes))
+                        }
                     })
                     .collect();
             }
@@ -1341,6 +1377,7 @@ pub fn scan_desktop(
             overlaps_drag_rect: false,
             dir_size: DirSize::NotDirectory,
             cut: false,
+            checksums: ChecksumState::default(),
         });
     }
 
@@ -1762,6 +1799,9 @@ pub enum Message {
     HighlightDeactivate(usize),
     HighlightActivate(usize),
     DirectorySize(PathBuf, DirSize),
+    Checksums(PathBuf, ChecksumState),
+    CalculateChecksums(PathBuf),
+    CopyChecksum(String),
     ImageDecoded(PathBuf, u32, u32, Vec<u8>, Option<(u32, u32)>, u64), // path, width, height, pixels, display_size, generation
 }
 
@@ -1786,6 +1826,23 @@ pub enum DirSize {
     Calculating(Controller),
     Directory(u64),
     NotDirectory,
+    Error(String),
+}
+
+/// Checksums computed for a file. Only SHA256 is currently exposed; see
+/// [`calculate_checksums`] for how to add more.
+#[derive(Clone, Debug, Default)]
+pub struct FileChecksums {
+    pub sha256: String,
+}
+
+/// State of checksum computation for a file.
+#[derive(Clone, Debug, Default)]
+pub enum ChecksumState {
+    #[default]
+    NotCalculated,
+    Calculating,
+    Calculated(FileChecksums),
     Error(String),
 }
 
@@ -2240,6 +2297,7 @@ pub struct Item {
     pub cut: bool,
     pub overlaps_drag_rect: bool,
     pub dir_size: DirSize,
+    pub checksums: ChecksumState,
 }
 
 impl Item {
@@ -2516,6 +2574,55 @@ impl Item {
         }
         column = column.push(details);
 
+        if let Some(metadata) = self.file_metadata()
+            && !metadata.is_dir()
+            && let Some(path) = self.path_opt()
+        {
+            let control: Element<'_, Message> = match &self.checksums {
+                ChecksumState::NotCalculated => widget::button::standard(fl!("calculate"))
+                    .on_press(Message::CalculateChecksums(path.clone()))
+                    .into(),
+                ChecksumState::Calculating => widget::row::with_capacity(2)
+                    .align_y(Alignment::Center)
+                    .spacing(space_xxxs)
+                    .push(widget::indeterminate_circular().size(16.0))
+                    .push(widget::text::body(fl!("calculating")))
+                    .into(),
+                ChecksumState::Calculated(checksums) => {
+                    let value = checksums.sha256.clone();
+                    // Middle-ellipsize the digest to fit, full value on hover.
+                    let value_text = widget::tooltip(
+                        widget::text::body(value.clone())
+                            .font(cosmic::font::mono())
+                            .width(Length::Fill)
+                            .wrapping(text::Wrapping::None)
+                            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
+                                1,
+                            ))),
+                        widget::text::body(value.clone()),
+                        widget::tooltip::Position::Bottom,
+                    );
+                    let copy_button = widget::button::icon(
+                        widget::icon::from_name("edit-copy-symbolic").size(16),
+                    )
+                    .on_press(Message::CopyChecksum(value.clone()))
+                    .tooltip(fl!("copy"));
+                    widget::row::with_capacity(2)
+                        .align_y(Alignment::Center)
+                        .spacing(space_xxxs)
+                        .push(value_text)
+                        .push(copy_button)
+                        .into()
+                }
+                ChecksumState::Error(err) => {
+                    widget::text::body(format!("{}: {}", fl!("error"), err)).into()
+                }
+            };
+            settings.push(
+                widget::settings::item::builder(fl!("checksum", kind = "SHA256")).control(control),
+            );
+        }
+
         if let Some(path) = self.path_opt()
             && self.selected
         {
@@ -2711,6 +2818,32 @@ async fn calculate_dir_size(path: &Path, controller: Controller) -> Result<u64, 
         tokio::task::yield_now().await;
     }
     Ok(total)
+}
+
+/// Calculate file checksums in a single pass over the file. To add another
+/// digest, hash it alongside `sha256_hasher` in the loop below and add a field
+/// to [`FileChecksums`]; the file is only read once.
+async fn calculate_checksums(path: &Path) -> Result<FileChecksums, String> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| e.to_string())?;
+        let mut sha256_hasher = Sha256::new();
+
+        let mut buffer = [0u8; 8192];
+        loop {
+            let bytes_read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+            if bytes_read == 0 {
+                break;
+            }
+            sha256_hasher.update(&buffer[..bytes_read]);
+        }
+
+        Ok(FileChecksums {
+            sha256: format!("{:x}", sha256_hasher.finalize()),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn folder_name<P: AsRef<Path>>(path: P) -> (String, bool) {
@@ -3176,10 +3309,7 @@ impl Tab {
     }
 
     fn rows_per_page(&self) -> usize {
-        let viewport_height = self
-            .item_view_size_opt
-            .get()
-            .map_or(0.0, |s| s.height);
+        let viewport_height = self.item_view_size_opt.get().map_or(0.0, |s| s.height);
         let row_height = self
             .select_focus
             .and_then(|i| self.items_opt.as_ref()?.get(i))
@@ -3891,8 +4021,7 @@ impl Tab {
             }
             Message::ItemPageDown => {
                 self.dehighlight_all();
-                if let Some((row, col)) =
-                    self.select_focus_pos_opt().or(self.select_last_pos_opt())
+                if let Some((row, col)) = self.select_focus_pos_opt().or(self.select_last_pos_opt())
                 {
                     if self.select_focus.is_none() {
                         self.select_position(row, col, mod_shift);
@@ -3903,16 +4032,13 @@ impl Tab {
 
                     if !self.select_position(target_row, col, mod_shift) {
                         // Fall back to the last item at or before target_row
-                        let best = self
-                            .items_opt
-                            .as_ref()
-                            .and_then(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(|item| item.pos_opt.get())
-                                    .filter(|(r, _)| *r <= target_row)
-                                    .max()
-                            });
+                        let best = self.items_opt.as_ref().and_then(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.pos_opt.get())
+                                .filter(|(r, _)| *r <= target_row)
+                                .max()
+                        });
                         if let Some((best_row, best_col)) = best {
                             self.select_position(best_row, best_col, mod_shift);
                         }
@@ -3950,16 +4076,13 @@ impl Tab {
 
                     if !self.select_position(target_row, col, mod_shift) {
                         // Fall back to the first item at or after target_row
-                        let best = self
-                            .items_opt
-                            .as_ref()
-                            .and_then(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(|item| item.pos_opt.get())
-                                    .filter(|(r, _)| *r >= target_row)
-                                    .min()
-                            });
+                        let best = self.items_opt.as_ref().and_then(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.pos_opt.get())
+                                .filter(|(r, _)| *r >= target_row)
+                                .min()
+                        });
                         if let Some((best_row, best_col)) = best {
                             self.select_position(best_row, best_col, mod_shift);
                         }
@@ -4661,6 +4784,52 @@ impl Tab {
                         }
                     }
                 }
+            }
+            Message::Checksums(path, checksum_state) => {
+                let location = Location::Path(path);
+                if let Some(ref mut item) = self.parent_item_opt
+                    && item.location_opt.as_ref() == Some(&location)
+                {
+                    item.checksums = checksum_state.clone();
+                }
+                if let Some(ref mut items) = self.items_opt {
+                    for item in items.iter_mut() {
+                        if item.location_opt.as_ref() == Some(&location) {
+                            item.checksums = checksum_state;
+                            break;
+                        }
+                    }
+                }
+            }
+            Message::CalculateChecksums(path) => {
+                let location = Location::Path(path.clone());
+                if let Some(ref mut item) = self.parent_item_opt
+                    && item.location_opt.as_ref() == Some(&location)
+                {
+                    item.checksums = ChecksumState::Calculating;
+                }
+                if let Some(ref mut items) = self.items_opt {
+                    for item in items.iter_mut() {
+                        if item.location_opt.as_ref() == Some(&location) {
+                            item.checksums = ChecksumState::Calculating;
+                            break;
+                        }
+                    }
+                }
+                commands.push(Command::Iced(
+                    cosmic::Task::future(async move {
+                        match calculate_checksums(&path).await {
+                            Ok(checksums) => {
+                                Message::Checksums(path, ChecksumState::Calculated(checksums))
+                            }
+                            Err(err) => Message::Checksums(path, ChecksumState::Error(err)),
+                        }
+                    })
+                    .into(),
+                ));
+            }
+            Message::CopyChecksum(value) => {
+                commands.push(Command::Iced(cosmic::iced::clipboard::write(value).into()));
             }
         }
 
