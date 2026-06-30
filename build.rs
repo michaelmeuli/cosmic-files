@@ -43,6 +43,7 @@ struct AppendEntry {
     upstream_flank: u64,
     #[serde(default)]
     downstream_flank: u64,
+    strand: Option<u8>,
 }
 
 fn ncbi_url_encode(s: &str) -> String {
@@ -206,6 +207,7 @@ fn ncbi_fetch_genome_gene(
     seq_stop: Option<u64>,
     upstream_flank: u64,
     downstream_flank: u64,
+    strand_override: Option<u8>,
 ) -> Result<String, String> {
     let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
     let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
@@ -224,7 +226,7 @@ fn ncbi_fetch_genome_gene(
         parse_feature_table(&ft, tag)?
     } else {
         match (seq_start, seq_stop) {
-            (Some(s), Some(e)) => (s, e, 1u8),
+            (Some(s), Some(e)) => (s, e, strand_override.unwrap_or(1u8)),
             _ => return Err("must specify locus_tag or both seq_start and seq_stop".into()),
         }
     };
@@ -332,6 +334,7 @@ fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
                 BASE, EMAIL, api_key.as_deref(), &entry.accession,
                 entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
                 entry.upstream_flank, entry.downstream_flank,
+                None,
             )
         } else {
             ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
@@ -363,6 +366,7 @@ fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
                 BASE, EMAIL, api_key.as_deref(), &entry.accession,
                 entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
                 entry.upstream_flank, entry.downstream_flank,
+                entry.strand,
             )
         } else {
             ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)

@@ -86,3 +86,17 @@ output          = "pnca/pnca_canettii_CIPT_140010059.fasta"
 # seq_stop  = 92593
 # fasta     = "myco_erm41.fasta"
 
+
+# --- rrs (16S rRNA) ---
+
+[[append]]
+accession = "AF456240.1"      # Mycobacterium marinum ATCC 927 — 16S rRNA (near-complete)
+fasta     = "myco_rrs.fasta"
+
+[[append]]
+accession = "CP000325.1"      # Mycobacterium ulcerans Agy99 complete genome
+seq_start = 4413402           # rrs gene — complement strand (NCBI: c4414940-4413402)
+seq_stop  = 4414940
+strand    = 2
+fasta     = "myco_rrs.fasta"
+
