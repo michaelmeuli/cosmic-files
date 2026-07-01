@@ -328,7 +328,7 @@ impl Erm41LofCall {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char)
             },
             Some(b) if self.lof_alts.contains_key(&b) => {
-                format!("{}{}{} ({})", self.wt_base as char, self.ref_pos + 1, b as char, self.lof_alts[&b].0)
+                format!("{}{}{} ({}: loss of function)", self.wt_base as char, self.ref_pos + 1, b as char, self.lof_alts[&b].0)
             },
             Some(b) => {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char)
