@@ -70,6 +70,7 @@ use crate::sequencing::rrl::{
 use crate::sequencing::rrs::{
     RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare,
 };
+use crate::sequencing::rrs3end::{RrsSusceptibilityCalls3End, is_susceptible_rrs_3end, is_susceptible_rrs_by_snp_calls_rare_3end};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41Position28, Erm41SusceptibilityCalls, is_susceptible_erm41},
@@ -1008,6 +1009,12 @@ pub fn item_from_entry(
                 snp_calls: hit.rrs_snp_calls.clone(),
                 is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
                 is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
+            },
+            rrs3end: RrsSusceptibilityCalls3End {
+                position_1248: hit.rrs3end_position_1248_opt,
+                snp_calls: hit.rrs_snp_calls_3end.clone(),
+                is_susceptible: is_susceptible_rrs_3end(&hit.rrs_snp_calls_3end),
+                is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(&hit.rrs_snp_calls_3end),
             },
             pnca: PncaSusceptibilityCalls {
                 snp_calls: hit.pnca_snp_calls.clone(),
@@ -3123,6 +3130,11 @@ impl Item {
         !self.is_fasta() && lower.contains("mbak14")
     }
 
+    pub fn is_16s3end(&self) -> bool {
+        let lower = self.name.to_ascii_lowercase();
+        !self.is_fasta() && lower.contains("1098s") || lower.contains("1525a")
+    }
+
     pub fn is_rrl_ntm(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
         !self.is_fasta() && (lower.contains("mclr") || lower.contains("rrl"))
@@ -4082,6 +4094,137 @@ impl Item {
                         snp.call_tag()
                     )));
                 }
+            }
+        }
+
+        column = column.push(details);
+        column.into()
+    }
+
+    pub fn preview_16s3end(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
+
+        let hits = self.seq_id_hits_cached();
+        if hits.is_empty()
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
+            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+        {
+            details = details.push(widget::text::body(
+                "Could not align sequence to references.",
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+        } else {
+            let best = &hits[0];
+            let best_snp_hit = hits
+                .iter()
+                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty());
+            details = details.push(widget::text::body(format!(
+                "Sequence identity to {}: {:.1}%",
+                best.description, best.identity
+            )));
+            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Trimmed sequence length: {}",
+                    sequence_length_trimmed
+                )));
+            }
+            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+                details = details.push(widget::text::body(format!(
+                    "Average quality score: {:.1}",
+                    avg_qual
+                )));
+            }
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading(
+                "Species identification (16S database):",
+            ));
+            for hit in &hits[..hits.len().min(8)] {
+                details = details.push(
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
+                );
+            }
+            if let Some(snp_hit) = best_snp_hit {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body(
+                    "16S rRNA amikacin resistance SNPs (rrs):",
+                ));
+                details = details.push(widget::text::body(format!(
+                    "(Using commit: {} of ntm-db repository)",
+                    env!("NTM_DB_COMMIT")
+                )));
+                for snp in &snp_hit.rrs_snp_calls {
+                    details = details.push(widget::text::body(format!(
+                        "{}",
+                        snp.call_tag()
+                    )));
+                }
+            }
+            if let Some(chrom) = self
+                .metadata
+                .ab1_chromatogram()
+                .filter(|c| c.rrs3end_view_state_opt.is_some())
+                && !self.metadata.is_massiliense_seq_id()
+            {
+                let view_state = chrom.rrs3end_view_state_opt.unwrap();
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body(
+                    "Shown are bases 19-39, with E. coli position 1248 in bold.",
+                ));
+                if view_state.is_reverse {
+                    details = details.push(widget::text::body("reverse complement"));
+                }
+                details = details.push(widget::text::body(""));
+                let canvas = widget::Canvas::new(ChromatogramProgram {
+                    is_reverse: view_state.is_reverse,
+                    display_window: Some(view_state.window),
+                    highlighted_scans: chrom
+                        .peak_locs
+                        .get(view_state.pos28_base_idx as usize)
+                        .copied()
+                        .map(|v| vec![v])
+                        .unwrap_or_default(),
+                    chrom,
+                })
+                .width(Length::Fill)
+                .height(Length::Fixed(200.0));
+                details = details.push(canvas);
+                details = details.push(widget::text::body(""));
+            } else {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::body(
+                    "16S 3-End chromatogram view is not available.",
+                ));
+                details = details.push(widget::text::body(""));
             }
         }
 

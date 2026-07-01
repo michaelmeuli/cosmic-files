@@ -146,12 +146,14 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 marinum_ulcerans_snp_calls,
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
+                rrs_snp_calls_3end: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
                 aligned_query: ga.gapped_query,
                 aligned_ref: ga.gapped_ref,
                 ref_start: ga.ref_start,
                 erm41_position_28_opt: None,
+                rrs3end_position_1248_opt: None,
                 rrl_position_2058_2059_opt: None,
             }
         })

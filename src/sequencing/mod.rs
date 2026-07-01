@@ -21,6 +21,7 @@ pub mod ntfy_notify;
 pub mod pnca;
 pub mod rpob;
 pub mod rrs;
+pub mod rrs3end;
 pub mod rrl;
 pub mod serde_helpers;
 pub mod tb_data;
@@ -34,6 +35,7 @@ use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 use pnca::{PncaSnpCall, PncaSusceptibilityCalls};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
+use rrs3end::{RrsSnpCall3End, Rrs3EndPosition1248, RrsSusceptibilityCalls3End};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
@@ -50,6 +52,9 @@ const ERM41_FWD_START: &[u8] = b"gtgtccggccaacggtcgcg";
 const ERM41_FWD_END: &[u8] = b"tggtgatcaggcggcgctga";
 const ERM41_ANCHOR_L: &[u8] = b"GCCAACGGTCGCGACGCCAG";
 const ERM41_ANCHOR_R: &[u8] = b"GGGGCTGGTATCCGCTCACT";
+
+const RRS3END_ANCHOR_L: &[u8] = b"ACATGCTACAATGGCCGGT";
+const RRS3END_ANCHOR_R: &[u8] = b"CAAAGGGCTGCGATGCCGCG";
 
 const RRL_ANCHOR_L: &[u8] = b"CGTTACGCGCGGCAGGACGA";
 const RRL_ANCHOR_R: &[u8] = b"AGACCCCGGGACCTTCACTA";
@@ -96,6 +101,7 @@ pub struct SusceptibilityCalls {
     pub erm41: Erm41SusceptibilityCalls,
     pub rrl: RrlSusceptibilityCalls,
     pub rrs: RrsSusceptibilityCalls,
+    pub rrs3end: RrsSusceptibilityCalls3End,
     pub pnca: PncaSusceptibilityCalls,
 }
 
@@ -104,6 +110,9 @@ impl std::fmt::Display for SusceptibilityCalls {
         let mut parts: Vec<String> = Vec::new();
 
         let mut erm: Vec<String> = Vec::new();
+        if let Some(pos) = &self.erm41.position_28 {
+            erm.push(pos.to_string());
+        }
         for c in &self.erm41.lof_snp_calls {
             let tag = c.call_tag();
             if !tag.is_empty() {
@@ -131,6 +140,21 @@ impl std::fmt::Display for SusceptibilityCalls {
             .collect();
         if !rrs.is_empty() {
             parts.push(format!("{}", rrs.join(", ")));
+        }
+
+
+        let mut rrs3end: Vec<String> = Vec::new();
+        if let Some(pos) = &self.rrs3end.position_1248 {
+            rrs3end.push(pos.to_string());
+        }
+        for c in &self.rrs3end.snp_calls {
+            let tag = c.call_tag();
+            if !tag.is_empty() {
+                rrs3end.push(tag);
+            }
+        }
+        if !rrs3end.is_empty() {
+            parts.push(format!("{}", rrs3end.join(", ")));
         }
 
         let pnca: Vec<String> = self
@@ -684,6 +708,14 @@ impl Ab1Channels {
             },
         );
 
+        let rrs3end_view_state_opt = rrs3end::find_16s3end_display_window(&bases, &peak_locs).map(
+            |(start, end, is_reverse, pos28_base_idx)| Rrs3EndViewState {
+                window: (start, end),
+                is_reverse,
+                pos28_base_idx,
+            },
+        );
+
         let rrl_ntm_view_state_opt = rrl::find_rrl_ntm_display_window(&bases, &peak_locs).map(
             |(start, end, is_reverse, snp_base_idx)| RrlNtmViewState {
                 window: (start, end),
@@ -698,6 +730,7 @@ impl Ab1Channels {
             peak_locs,
             base_order,
             erm41_view_state_opt,
+            rrs3end_view_state_opt,
             rrl_ntm_view_state_opt,
         })
     }
@@ -711,6 +744,22 @@ impl Ab1Channels {
 /// diagnostic position 28 site.
 #[derive(Clone, Copy, Debug)]
 pub struct Erm41ViewState {
+    /// Scan-index range (inclusive start, exclusive end) of the display window.
+    pub window: (u16, u16),
+    /// `true` when the reverse complement matched the anchor.
+    pub is_reverse: bool,
+    /// Index into `bases` / `peak_locs` that corresponds to position 28.
+    pub pos28_base_idx: u16,
+}
+
+/// Chromatogram display parameters for the 16S 3-End region.
+///
+/// Built in [`Ab1Channels::parse`] via [`rrs3end::find_16s3end_display_window`]
+/// when [`RRS3END_ANCHOR_L`] is found in the basecall sequence. Stored inside
+/// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
+/// diagnostic position 28 site.
+#[derive(Clone, Copy, Debug)]
+pub struct Rrs3EndViewState {
     /// Scan-index range (inclusive start, exclusive end) of the display window.
     pub window: (u16, u16),
     /// `true` when the reverse complement matched the anchor.
@@ -749,6 +798,8 @@ pub struct Ab1Channels {
     pub base_order: [u8; 4],
     /// Erm41 view state; `None` when the anchor was not found in the basecall sequence.
     pub erm41_view_state_opt: Option<Erm41ViewState>,
+    /// 16S 3-End marinum/ulcerans view state; `None` when the anchor was not found in the basecall sequence.
+    pub rrs3end_view_state_opt: Option<Rrs3EndViewState>,
     /// Rrl/NTM view state; `None` when the anchor was not found in the basecall sequence.
     pub rrl_ntm_view_state_opt: Option<RrlNtmViewState>,
 }
@@ -781,6 +832,8 @@ pub struct SeqIdHit {
     pub rrl_snp_calls: Vec<RrlSnpCall>,
     /// Calls at each rrs aminoglycoside-resistance SNP position (16S rRNA).
     pub rrs_snp_calls: Vec<RrsSnpCall>,
+    /// Calls at each rrs aminoglycoside-resistance SNP position (16S rRNA).
+    pub rrs_snp_calls_3end: Vec<RrsSnpCall3End>,
     /// Calls at each erm(41) loss-of-function variant position.
     pub erm41_snp_calls: Vec<Erm41LofCall>,
     /// Calls at each pncA pyrazinamide-resistance nucleotide/codon position.
@@ -793,6 +846,8 @@ pub struct SeqIdHit {
     pub ref_start: usize,
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41_position_28_opt: Option<Erm41Position28>,
+    /// 16S 3'-End position 1248
+    pub rrs3end_position_1248_opt: Option<Rrs3EndPosition1248>,
     /// rrl position 2058 2059 call; `None` for non-rrl targets.
     pub rrl_position_2058_2059_opt: Option<RrlPosition2058_2059>,
 }

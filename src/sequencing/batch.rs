@@ -14,6 +14,7 @@ use super::{
     rpob::identify_sequence_rpob,
     rrl::{RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare},
     rrs::{RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare},
+    rrs3end::{RrsSusceptibilityCalls3End, identify_sequence_16s3end, is_susceptible_rrs_3end, is_susceptible_rrs_by_snp_calls_rare_3end},
     trim_to_min_quality,
 };
 
@@ -81,6 +82,8 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
         Some("rpoB".to_string())
     } else if lower_name.contains("mbak14") {
         Some("16S".to_string())
+    } else if lower_name.contains("1098s") || lower_name.contains("1525a") {
+        Some("16S 3'-End".to_string())
     } else if lower_name.contains("rrl") || lower_name.contains("mclr") {
         Some("rrl".to_string())
     } else if lower_name.contains("pnca") {
@@ -225,6 +228,7 @@ pub fn scan_ab1_directory(
         let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
         let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
         let is_16s = lower_name.contains("mbak14");
+        let is_16s3end = lower_name.contains("1098s") || lower_name.contains("1525a");
         let is_23s_ntm = lower_name.contains("rrl") || lower_name.contains("mclr");
         let is_pnca = lower_name.contains("pnca");
 
@@ -246,6 +250,8 @@ pub fn scan_ab1_directory(
                 identify_sequence_rrl_ntm(trimmed)
             } else if is_16s {
                 identify_sequence_16s(trimmed)
+            } else if is_16s3end {
+                identify_sequence_16s3end(trimmed)
             } else if is_pnca {
                 identify_sequence_pnca(trimmed)
             } else {
@@ -303,6 +309,12 @@ pub fn scan_ab1_directory(
                     snp_calls: hit.rrs_snp_calls.clone(),
                     is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
                     is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
+                },
+                rrs3end: RrsSusceptibilityCalls3End {
+                    position_1248: hit.rrs3end_position_1248_opt,
+                    snp_calls: hit.rrs_snp_calls_3end.clone(),
+                    is_susceptible: is_susceptible_rrs_3end(&hit.rrs_snp_calls_3end),
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(&hit.rrs_snp_calls_3end),  
                 },
                 pnca: PncaSusceptibilityCalls {
                     snp_calls: hit.pnca_snp_calls.clone(),

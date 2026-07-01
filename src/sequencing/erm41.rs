@@ -119,14 +119,14 @@ impl Erm41Position28 {
     }
 
     /// Calls erm41 position 28 from a single read, trying the forward orientation first and
-    /// falling back to the reverse complement. Returns [`Undetermined`](Self::Undetermined) if
-    /// the anchors are not found in either orientation.
-    pub fn from_single_read(read: &[u8]) -> Self {
+    /// falling back to the reverse complement. Returns `None` if the anchors are not found in
+    /// either orientation.
+    pub fn from_single_read(read: &[u8]) -> Option<Self> {
         if let Some(call) = Self::from_base(Self::call_position28(read)) {
-            return call;
+            return Some(call);
         }
         let rc = reverse_complement(read);
-        Self::from_base(Self::call_position28(&rc)).unwrap_or(Self::Undetermined)
+        Self::from_base(Self::call_position28(&rc))
     }
 }
 
@@ -399,7 +399,7 @@ pub(super) fn find_erm41_display_window(
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, ERM41_FWD_START, ERM41_FWD_END);
     let rc = reverse_complement(query);
-    let erm41_position_28 = Erm41Position28::from_single_read(query);
+    let erm41_position_28_opt = Erm41Position28::from_single_read(query);
 
     let refs: &[(&str, &str, &str)] = &[
         (
@@ -445,12 +445,14 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
+                rrs_snp_calls_3end: vec![],
                 erm41_snp_calls,
                 pnca_snp_calls: vec![],
                 aligned_query: ga.gapped_query,
                 aligned_ref: ga.gapped_ref,
                 ref_start: ga.ref_start,
-                erm41_position_28_opt: Some(erm41_position_28),
+                erm41_position_28_opt,
+                rrs3end_position_1248_opt: None,
                 rrl_position_2058_2059_opt: None,
             }
         })
