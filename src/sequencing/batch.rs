@@ -125,6 +125,14 @@ fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
     })
 }
 
+fn species_from_16s3end(hits: &[SeqIdHit]) -> Option<String> {
+    let first = hits.first()?;
+    if !first.description.contains("ulcerans") && !first.description.contains("marinum") {
+        return Some(String::new());
+    }
+    Some(first.description.clone())
+}
+
 /// Walk `scan_path` recursively, analyse every `.ab1` file, and return a
 /// `SampleSusceptibilityRecord` per file sorted reverse-alphabetically by
 /// `sample_id` (highest first).
@@ -332,6 +340,8 @@ pub fn scan_ab1_directory(
             susceptibility_calls,
             species: if is_16s {
                 species_from_16s_hits(&seq_id_hits)
+            } else if is_16s3end {
+                species_from_16s3end(&seq_id_hits)
             } else {
                 seq_id_hits.first().map(|h| h.description.clone())
             },

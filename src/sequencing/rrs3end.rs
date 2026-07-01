@@ -23,8 +23,8 @@ pub enum Rrs3EndPosition1248 {
 impl std::fmt::Display for Rrs3EndPosition1248 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::A1248 => write!(f, "A1248"),
-            Self::G1248 => write!(f, "G1248"),
+            Self::A1248 => write!(f, "A1248 (M. marinum)"),
+            Self::G1248 => write!(f, "G1248 (M. ulcerans)"),
             Self::C1248 => write!(f, "C1248"),
             Self::T1248 => write!(f, "T1248"),
             Self::Undetermined => write!(f, "Position 1248 not found"),
