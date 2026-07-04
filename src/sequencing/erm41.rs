@@ -1,6 +1,8 @@
 use super::reverse_complement;
 use super::{ERM41_ANCHOR_L, ERM41_ANCHOR_R, ERM41_FWD_END, ERM41_FWD_START};
-use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_fasta_seq};
+use super::{
+    GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, parse_fasta_seq, trim_alignment_ends,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -430,6 +432,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
             // Abscessus LOF SNP positions apply to all three subspecies — bolletii and
             // massiliense are sequence-similar enough, and no separate variants.csv exists for them.
             let erm41_snp_calls = ERM41_LOF_SNPS

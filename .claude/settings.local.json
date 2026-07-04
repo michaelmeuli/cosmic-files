@@ -34,7 +34,8 @@
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=CP063804.1&rettype=ft&retmode=text\" -o /tmp/orygis_ft.txt)",
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=nuccore&term=Mycobacterium+mungi%5BOrganism%5D+AND+pncA%5BGene%5D&retmode=json\")",
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=protein&term=Mycobacterium+mungi%5BOrganism%5D+AND+pncA&retmode=json\")",
-      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id=1032813423&retmode=json\")"
+      "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id=1032813423&retmode=json\")",
+      "Bash(cargo fmt *)"
     ]
   }
 }

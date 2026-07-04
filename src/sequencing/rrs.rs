@@ -1,6 +1,6 @@
 use super::{
     GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
-    dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
+    dedup_substring_same_desc, parse_multi_fasta, reverse_complement, trim_alignment_ends,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -188,6 +188,7 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
             let rrs_snp_calls = if accession.contains(':') {
                 RRS_RESISTANCE_SNPS
                     .get(description.as_str())

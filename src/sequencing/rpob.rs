@@ -1,4 +1,7 @@
-use super::{REF_MYCO_RPOB, SeqIdHit, align_to_ref, dedup_substring_same_desc, parse_multi_fasta, reverse_complement};
+use super::{
+    REF_MYCO_RPOB, SeqIdHit, align_to_ref, dedup_substring_same_desc, parse_multi_fasta,
+    reverse_complement, trim_alignment_ends,
+};
 use std::sync::LazyLock;
 
 /// Parsed and substring-deduplicated rpoB reference sequences, initialised once.
@@ -18,6 +21,7 @@ pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
             SeqIdHit {
                 accession: accession.clone(),
                 description: description.clone(),

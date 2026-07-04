@@ -1,7 +1,7 @@
 use super::tb_data::confidence_rank;
 use super::{
     GappedAlignment, REF_PNCA, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta,
-    reverse_complement,
+    reverse_complement, trim_alignment_ends,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -393,6 +393,7 @@ pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
 
             let mut pnca_snp_calls = call_pnca_nt_snps(nt_map, &ga);
             pnca_snp_calls.extend(call_pnca_aa_snps(aa_map, &ga));

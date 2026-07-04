@@ -1,6 +1,6 @@
 use super::{
     GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
-    dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
+    dedup_substring_same_desc, parse_multi_fasta, reverse_complement, trim_alignment_ends,
     RRS3END_ANCHOR_L, RRS3END_ANCHOR_R,
 };
 use serde::{Deserialize, Serialize};
@@ -287,6 +287,7 @@ pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
             let rrs_snp_calls_3end = if accession.contains(':') {
                 RRS_RESISTANCE_SNPS
                     .get(description.as_str())

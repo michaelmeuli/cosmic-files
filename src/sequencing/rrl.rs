@@ -1,6 +1,9 @@
 use super::reverse_complement;
 use super::{RRL_ANCHOR_L, RRL_ANCHOR_R, REF_MYCO_RRL};
-use super::{GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta};
+use super::{
+    GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc,
+    parse_multi_fasta, trim_alignment_ends,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -336,6 +339,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
             let rrl_snp_calls = if accession.contains(':') {
                 RRL_RESISTANCE_SNPS
                     .get(description.as_str())

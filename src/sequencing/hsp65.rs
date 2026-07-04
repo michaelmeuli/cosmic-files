@@ -1,5 +1,8 @@
 use super::reverse_complement;
-use super::{GappedAlignment, REF_MYCO_HSP65, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta};
+use super::{
+    GappedAlignment, REF_MYCO_HSP65, SeqIdHit, align_to_ref, base_at_ref_pos,
+    dedup_substring_same_desc, parse_multi_fasta, trim_alignment_ends,
+};
 use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -125,6 +128,7 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
             } else {
                 (fwd, false)
             };
+            let ga = trim_alignment_ends(ga);
             let kansasii_gastri_snp_calls =
                 if KANSASII_GASTRI_ACCS.contains(&accession.as_str()) {
                     call_kansasii_gastri_snps(&ga)

@@ -39,6 +39,14 @@ use rrs3end::{RrsSnpCall3End, Rrs3EndPosition1248, RrsSusceptibilityCalls3End};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
+/// Sliding-window size (aligned columns) for [`trim_alignment_ends`].
+const ALIGN_TRIM_WINDOW: usize = 15;
+/// Minimum per-window match rate for [`trim_alignment_ends`] to accept a window as
+/// well-supported. Deliberately looser than `MIN_SEQ_ID_IDENTITY`, which is the final
+/// whole-alignment reportability gate, not a per-window trim threshold — trimming should
+/// only shave off genuinely bad ends, not chase the reportability bar.
+const ALIGN_TRIM_MIN_IDENTITY: f32 = 70.0;
+
 const MIN_RRS_REF_LEN: usize = 1200;
 const MIN_RRL_REF_LEN: usize = 1200;
 const MIN_RPOB_REF_LEN: usize = 400;
@@ -231,8 +239,7 @@ pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> Option<
 
     let n = seq.len().min(qual.len());
 
-    // Short read: single-base scan (same semantics as before, just on the
-    // clamped length so qual and seq indices stay in bounds).
+    // Short read: single-base scan.
     if n < WINDOW {
         let start = (0..n).find(|&i| qual[i] >= min_q).unwrap_or(n);
         let end = (0..n).rev().find(|&i| qual[i] >= min_q).map(|i| i + 1).unwrap_or(0);
@@ -482,6 +489,128 @@ pub fn align_to_ref(query: &[u8], reference: &[u8]) -> GappedAlignment {
         gapped_query,
         gapped_ref,
         ref_start: alignment.ystart,
+    }
+}
+
+/// Trim leading and trailing low-identity columns from a gapped alignment.
+///
+/// `align_to_ref` forces the entire query into the alignment, so non-homologous read ends
+/// that quality/primer trimming missed (a noisy-but-technically-passing tail, stray
+/// off-target sequence) show up as mismatches/insertions at the ends. Two passes:
+///
+/// 1. Peel any run of pure query-insertion columns (`gapped_ref == '-'`) off both edges
+///    unconditionally. Insertion columns never contribute to `ref_span`/`matches` — e.g. a
+///    read that continues past the end of the true amplicon into vector/primer sequence —
+///    so removing them can never change `identity`, but left alone they show up as a
+///    prominent, misleading run of dashes in the alignment viewer under an unaffected
+///    (possibly 100%) identity figure.
+/// 2. Scan inward from each remaining edge with a window of [`ALIGN_TRIM_WINDOW`] aligned
+///    columns — the first window (from each end) whose match rate ≥
+///    [`ALIGN_TRIM_MIN_IDENTITY`] defines the trim boundary — mirroring
+///    [`trim_to_min_quality`]'s sliding-window idiom but scored on match/mismatch per column
+///    instead of Phred quality. A second insertion-peel pass then strips any residual pure
+///    insertion columns the window's match-rate slack left sitting at the boundary.
+///
+/// `ref_start` and `identity` are recomputed for the retained slice.
+///
+/// Note: this trims purely by local match rate, with no awareness of where any
+/// gene's diagnostic SNP positions fall — a genuine mutation sitting in a noisy edge region
+/// could in principle be trimmed away along with the junk. Never returns an alignment with
+/// lower identity than `ga`'s original identity; falls back to returning `ga` unchanged
+/// whenever trimming would not help.
+fn trim_alignment_ends(ga: GappedAlignment) -> GappedAlignment {
+    let n = ga.gapped_query.len();
+    if n == 0 {
+        return ga;
+    }
+
+    let is_match = |i: usize| -> bool {
+        let (q, r) = (ga.gapped_query[i], ga.gapped_ref[i]);
+        q != b'-' && r != b'-' && q.eq_ignore_ascii_case(&r)
+    };
+
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi && ga.gapped_ref[lo] == b'-' {
+        lo += 1;
+    }
+    while hi > lo && ga.gapped_ref[hi - 1] == b'-' {
+        hi -= 1;
+    }
+    if lo >= hi {
+        return ga;
+    }
+    let window_n = hi - lo;
+
+    let (mut start, mut end) = if window_n < ALIGN_TRIM_WINDOW {
+        let start = (lo..hi).find(|&i| is_match(i));
+        let end = (lo..hi).rev().find(|&i| is_match(i)).map(|i| i + 1);
+        match (start, end) {
+            (Some(s), Some(e)) if s < e => (s, e),
+            _ => (lo, hi),
+        }
+    } else {
+        let threshold = (ALIGN_TRIM_MIN_IDENTITY / 100.0 * ALIGN_TRIM_WINDOW as f32).round() as u32;
+
+        let window_matches = |from: usize| -> u32 {
+            (from..from + ALIGN_TRIM_WINDOW)
+                .filter(|&i| is_match(i))
+                .count() as u32
+        };
+
+        let start = (lo..=(hi - ALIGN_TRIM_WINDOW)).find(|&i| window_matches(i) >= threshold);
+        let end = (lo + ALIGN_TRIM_WINDOW..=hi)
+            .rev()
+            .find(|&e| window_matches(e - ALIGN_TRIM_WINDOW) >= threshold);
+        match (start, end) {
+            (Some(s), Some(e)) if s < e => (s, e),
+            _ => (lo, hi),
+        }
+    };
+
+    while start < end && ga.gapped_ref[start] == b'-' {
+        start += 1;
+    }
+    while end > start && ga.gapped_ref[end - 1] == b'-' {
+        end -= 1;
+    }
+
+    if start == 0 && end == n {
+        return ga;
+    }
+
+    let removed_prefix_ref_bases = ga.gapped_ref[..start]
+        .iter()
+        .filter(|&&b| b != b'-')
+        .count();
+
+    let trimmed_query = ga.gapped_query[start..end].to_vec();
+    let trimmed_ref = ga.gapped_ref[start..end].to_vec();
+
+    let ref_span = trimmed_ref.iter().filter(|&&b| b != b'-').count();
+    let matches = trimmed_query
+        .iter()
+        .zip(trimmed_ref.iter())
+        .filter(|&(&q, &r)| q != b'-' && r != b'-' && q.eq_ignore_ascii_case(&r))
+        .count();
+    let identity = if ref_span > 0 {
+        matches as f32 / ref_span as f32 * 100.0
+    } else {
+        0.0
+    };
+
+    // Defensive safety net: the windowed heuristic only removes columns that fail a
+    // minimum-match-rate window, which should not pull the average down, but guard
+    // explicitly rather than rely on that holding in every rounding edge case.
+    if identity < ga.identity {
+        return ga;
+    }
+
+    GappedAlignment {
+        identity,
+        gapped_query: trimmed_query,
+        gapped_ref: trimmed_ref,
+        ref_start: ga.ref_start + removed_prefix_ref_bases,
     }
 }
 
@@ -1099,7 +1228,30 @@ fn pdf_days_to_ymd(days: u32) -> (u32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_multi_fasta;
+    use super::{
+        GappedAlignment, align_to_ref, base_at_ref_pos, parse_multi_fasta, trim_alignment_ends,
+    };
+
+    #[test]
+    fn test_trim_alignment_ends_strips_unmatched_insertion_tail() {
+        // A read that continues past the end of the true amplicon (e.g. into vector/primer
+        // sequence) aligns as a pure insertion tail (`gapped_ref == '-'`), which never lowers
+        // `identity` (matches / ref_span excludes insertion columns) even though it's a
+        // visibly unaligned run of dashes in the alignment viewer.
+        let refseq: Vec<u8> = b"ACGTACGTACGTACGTACGTACGTACGTAC".to_vec();
+        let mut query = refseq.clone();
+        query.extend(b"TTTTTTTTTTTTTTTTTTTT");
+        let ga = align_to_ref(&query, &refseq);
+        assert!((ga.identity - 100.0).abs() < f32::EPSILON); // already 100% before trimming
+        assert_eq!(ga.gapped_query.len(), 50);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query, refseq);
+        assert_eq!(trimmed.gapped_ref, refseq);
+        assert!(!trimmed.gapped_ref.contains(&b'-'));
+        assert!((trimmed.identity - 100.0).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn test_parse_multi_fasta_distinguishes_infrasubspecific_descriptions() {
@@ -1131,5 +1283,156 @@ ACGT
                 "Mycobacterium abscessus",
             ]
         );
+    }
+
+    /// Build a `GappedAlignment` from raw gapped strings, computing `identity` with the same
+    /// `matches / ref_span * 100` formula `align_to_ref` uses.
+    fn make_ga(gapped_query: &[u8], gapped_ref: &[u8], ref_start: usize) -> GappedAlignment {
+        let ref_span = gapped_ref.iter().filter(|&&b| b != b'-').count();
+        let matches = gapped_query
+            .iter()
+            .zip(gapped_ref.iter())
+            .filter(|&(&q, &r)| q != b'-' && r != b'-' && q.eq_ignore_ascii_case(&r))
+            .count();
+        let identity = if ref_span > 0 {
+            matches as f32 / ref_span as f32 * 100.0
+        } else {
+            0.0
+        };
+        GappedAlignment {
+            identity,
+            gapped_query: gapped_query.to_vec(),
+            gapped_ref: gapped_ref.to_vec(),
+            ref_start,
+        }
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_junk_tail() {
+        let query = [vec![b'A'; 20], vec![b'T'; 15]].concat();
+        let refseq = vec![b'A'; 35];
+        let ga = make_ga(&query, &refseq, 100);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query.len(), 24);
+        assert_eq!(trimmed.gapped_ref.len(), 24);
+        assert_eq!(trimmed.ref_start, 100); // nothing trimmed from the front
+        assert!((trimmed.identity - 83.333_336).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_junk_head() {
+        let query = [vec![b'T'; 15], vec![b'A'; 20]].concat();
+        let refseq = vec![b'A'; 35];
+        let ga = make_ga(&query, &refseq, 100);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query.len(), 24);
+        assert_eq!(trimmed.gapped_ref.len(), 24);
+        assert_eq!(trimmed.ref_start, 111); // 11 non-gap ref bases trimmed off the front
+        assert!((trimmed.identity - 83.333_336).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_fully_clean_no_trim() {
+        let seq = vec![b'A'; 30];
+        let ga = make_ga(&seq, &seq, 50);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query, seq);
+        assert_eq!(trimmed.gapped_ref, seq);
+        assert_eq!(trimmed.ref_start, 50);
+        assert!((trimmed.identity - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_fully_junk_unchanged() {
+        let query = vec![b'T'; 30];
+        let refseq = vec![b'A'; 30];
+        let ga = make_ga(&query, &refseq, 7);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query, query);
+        assert_eq!(trimmed.gapped_ref, refseq);
+        assert_eq!(trimmed.ref_start, 7);
+        assert!((trimmed.identity - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_shorter_than_window_unchanged() {
+        // n < ALIGN_TRIM_WINDOW exercises the short-alignment fallback path.
+        let query = vec![b'T'; 5];
+        let refseq = vec![b'A'; 5];
+        let ga = make_ga(&query, &refseq, 3);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query, query);
+        assert_eq!(trimmed.gapped_ref, refseq);
+        assert_eq!(trimmed.ref_start, 3);
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_empty_no_panic() {
+        let ga = make_ga(&[], &[], 0);
+        let trimmed = trim_alignment_ends(ga);
+        assert!(trimmed.gapped_query.is_empty());
+        assert!(trimmed.gapped_ref.is_empty());
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_ref_start_excludes_insertions_in_removed_prefix() {
+        // 15-column junk prefix containing one query-insertion column (gapped_ref == '-')
+        // at index 5, followed by a 20-column clean matching core.
+        let mut query = vec![b'T'; 15];
+        let mut refseq = vec![b'A'; 15];
+        query[5] = b'G';
+        refseq[5] = b'-';
+        query.extend(vec![b'A'; 20]);
+        refseq.extend(vec![b'A'; 20]);
+        let ga = make_ga(&query, &refseq, 200);
+
+        let trimmed = trim_alignment_ends(ga);
+
+        assert_eq!(trimmed.gapped_query.len(), 24);
+        // 11 columns removed from the front, only 10 of which advance the reference
+        // (index 5 is a query insertion and consumes no reference coordinate).
+        assert_eq!(trimmed.ref_start, 210);
+        assert_eq!(
+            base_at_ref_pos(
+                &trimmed.gapped_query,
+                &trimmed.gapped_ref,
+                trimmed.ref_start,
+                trimmed.ref_start
+            ),
+            Some(trimmed.gapped_query[0].to_ascii_uppercase())
+        );
+    }
+
+    #[test]
+    fn test_trim_alignment_ends_never_decreases_identity() {
+        let fixtures: Vec<GappedAlignment> = vec![
+            make_ga(
+                &[vec![b'A'; 20], vec![b'T'; 15]].concat(),
+                &vec![b'A'; 35],
+                0,
+            ),
+            make_ga(
+                &[vec![b'T'; 15], vec![b'A'; 20]].concat(),
+                &vec![b'A'; 35],
+                0,
+            ),
+            make_ga(&vec![b'A'; 30], &vec![b'A'; 30], 0),
+            make_ga(&vec![b'T'; 30], &vec![b'A'; 30], 0),
+        ];
+        for ga in fixtures {
+            let original_identity = ga.identity;
+            let trimmed = trim_alignment_ends(ga);
+            assert!(trimmed.identity >= original_identity);
+        }
     }
 }
