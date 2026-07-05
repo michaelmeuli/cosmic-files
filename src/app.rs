@@ -2489,7 +2489,7 @@ impl App {
                                     } else if item.is_16s() {
                                         Some(item.preview_16s())
                                     } else if item.is_16s3end() {
-                                        Some(item.preview_16s3end())
+                                        Some(item.preview_16s3end(items))
                                     } else if item.is_rrl_ntm() {
                                         Some(item.preview_rrl_ntm())
                                     } else if item.is_pnca() {

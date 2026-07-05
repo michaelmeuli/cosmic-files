@@ -35,7 +35,9 @@
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=nuccore&term=Mycobacterium+mungi%5BOrganism%5D+AND+pncA%5BGene%5D&retmode=json\")",
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=protein&term=Mycobacterium+mungi%5BOrganism%5D+AND+pncA&retmode=json\")",
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id=1032813423&retmode=json\")",
-      "Bash(cargo fmt *)"
+      "Bash(cargo fmt *)",
+      "Bash(cargo build *)",
+      "Bash(cargo check *)"
     ]
   }
 }

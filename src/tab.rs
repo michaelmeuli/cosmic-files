@@ -44,6 +44,7 @@ use std::sync::{Arc, LazyLock, RwLock, atomic};
 use std::time::{Duration, Instant, SystemTime};
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
+use tracing_subscriber::fmt::writer::EitherWriter::A;
 use trash::{TrashItem, TrashItemMetadata, TrashItemSize};
 use walkdir::WalkDir;
 
@@ -63,6 +64,7 @@ use crate::mime_icon::{mime_for_path, mime_icon};
 use crate::mounter::MOUNTERS;
 use crate::operation::{Controller, OperationError};
 use crate::russh::CLIENTS;
+use crate::sequencing::batch::parse_ab1_filename;
 use crate::sequencing::rrl::{
     RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl,
     is_susceptible_rrl_by_snp_calls_rare,
@@ -70,7 +72,10 @@ use crate::sequencing::rrl::{
 use crate::sequencing::rrs::{
     RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare,
 };
-use crate::sequencing::rrs3end::{RrsSusceptibilityCalls3End, is_susceptible_rrs_3end, is_susceptible_rrs_by_snp_calls_rare_3end};
+use crate::sequencing::rrs3end::{
+    Rrs3EndPosition1248, RrsSusceptibilityCalls3End, is_susceptible_rrs_3end,
+    is_susceptible_rrs_by_snp_calls_rare_3end,
+};
 use crate::sequencing::{
     Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
     erm41::{Erm41Position28, Erm41SusceptibilityCalls, is_susceptible_erm41},
@@ -1014,7 +1019,9 @@ pub fn item_from_entry(
                 position_1248: hit.rrs3end_position_1248_opt,
                 snp_calls: hit.rrs_snp_calls_3end.clone(),
                 is_susceptible: is_susceptible_rrs_3end(&hit.rrs_snp_calls_3end),
-                is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(&hit.rrs_snp_calls_3end),
+                is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
+                    &hit.rrs_snp_calls_3end,
+                ),
             },
             pnca: PncaSusceptibilityCalls {
                 snp_calls: hit.pnca_snp_calls.clone(),
@@ -2477,6 +2484,23 @@ impl ItemMetadata {
         )
     }
 
+    pub fn rrs3endposition_call(&self) -> Rrs3EndPosition1248 {
+        match self {
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()
+                .and_then(|s| s.seq_id_hits.first()?.rrs3end_position_1248_opt)
+                .unwrap_or(Rrs3EndPosition1248::Undetermined),
+            _ => Rrs3EndPosition1248::Undetermined,
+        }
+    }
+
+    pub fn is_rrs3endposition(&self) -> bool {
+        !matches!(
+            self.rrs3endposition_call(),
+            Rrs3EndPosition1248::Undetermined
+        )
+    }
+
     pub fn seq_id_hits(&self) -> &[SeqIdHit] {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
@@ -3087,11 +3111,18 @@ impl Item {
     pub fn seq_id_hits_cached(&self) -> Vec<SeqIdHit> {
         let stored = self.metadata.seq_id_hits();
         if !stored.is_empty() {
-            log::debug!("seq_id_hits_cached({}): {} stored hits", self.name, stored.len());
+            log::debug!(
+                "seq_id_hits_cached({}): {} stored hits",
+                self.name,
+                stored.len()
+            );
             return stored.to_vec();
         }
         let path = self.path_opt();
-        let cache_size = crate::sequencing::batch::AB1_SEQ_CACHE.read().map(|g| g.len()).unwrap_or(0);
+        let cache_size = crate::sequencing::batch::AB1_SEQ_CACHE
+            .read()
+            .map(|g| g.len())
+            .unwrap_or(0);
         let result = path
             .and_then(|p| {
                 crate::sequencing::batch::AB1_SEQ_CACHE
@@ -3100,7 +3131,13 @@ impl Item {
                     .and_then(|guard| guard.get(p).cloned())
             })
             .unwrap_or_default();
-        log::debug!("seq_id_hits_cached({}): path={:?}, cache_size={}, found {} hits", self.name, path, cache_size, result.len());
+        log::debug!(
+            "seq_id_hits_cached({}): path={:?}, cache_size={}, found {} hits",
+            self.name,
+            path,
+            cache_size,
+            result.len()
+        );
         result
     }
 
@@ -3133,6 +3170,43 @@ impl Item {
     pub fn is_16s3end(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
         !self.is_fasta() && lower.contains("1098s") || lower.contains("1525a")
+    }
+
+    fn sibling_16s<'a>(&self, items: &'a [Item]) -> Option<&'a Item> {
+        let (sample_id, _) = parse_ab1_filename(&self.name);
+        items
+            .iter()
+            .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
+    }
+
+    pub fn is_marinum(&self, items: &[Item]) -> bool {
+        let marinum_ulcerans = self
+            .sibling_16s(items)
+            .and_then(|sibling| {
+                sibling.seq_id_hits_cached().first().map(|top| {
+                    top.description.contains("marinum") || top.description.contains("ulcerans")
+                })
+            })
+            .unwrap_or(false);
+        marinum_ulcerans && self.metadata.rrs3endposition_call() == Rrs3EndPosition1248::A1248
+    }
+
+    pub fn is_ulcerans(&self, items: &[Item]) -> bool {
+        let marinum_ulcerans = self
+            .sibling_16s(items)
+            .and_then(|sibling| {
+                sibling.seq_id_hits_cached().first().map(|top| {
+                    top.description.contains("ulcerans") || top.description.contains("marinum")
+                })
+            })
+            .unwrap_or(false);
+        marinum_ulcerans && self.metadata.rrs3endposition_call() == Rrs3EndPosition1248::G1248
+    }
+
+    pub fn species_from_16s_hits(&self, items: &[Item]) -> Option<String> {
+        self.sibling_16s(items).and_then(|sibling| {
+            crate::sequencing::batch::species_from_16s_hits(&sibling.seq_id_hits_cached())
+        })
     }
 
     pub fn is_rrl_ntm(&self) -> bool {
@@ -3655,7 +3729,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3712,6 +3788,7 @@ impl Item {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::heading(format!("erm(41) {}", call)));
             }
+
             details = details.push(widget::text::body(""));
             {
                 let snp_tags: Vec<String> = best
@@ -3733,6 +3810,7 @@ impl Item {
                     }
                 }
             }
+
             if let Some(chrom) = self
                 .metadata
                 .ab1_chromatogram()
@@ -3812,7 +3890,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -3949,7 +4029,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -4024,7 +4106,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -4089,10 +4173,7 @@ impl Item {
                     env!("NTM_DB_COMMIT")
                 )));
                 for snp in &snp_hit.rrs_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "{}",
-                        snp.call_tag()
-                    )));
+                    details = details.push(widget::text::body(format!("{}", snp.call_tag())));
                 }
             }
         }
@@ -4101,7 +4182,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_16s3end(&self) -> Element<'_, Message> {
+    pub fn preview_16s3end(&self, items: &[Item]) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -4118,7 +4199,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -4146,10 +4229,6 @@ impl Item {
             let best_snp_hit = hits
                 .iter()
                 .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty());
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
             if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Trimmed sequence length: {}",
@@ -4162,17 +4241,29 @@ impl Item {
                     avg_qual
                 )));
             }
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (16S database):",
-            ));
-            for hit in &hits[..hits.len().min(8)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
+
+            match self.species_from_16s_hits(items) {
+                Some(species) => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(format!("16S: {}", species)));
+                }
+                None => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(
+                        "16S: No species identified from 16S hits.",
+                    ));
+                }
             }
+
+            if self.is_marinum(items) {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::heading("16S and 16S 3'-End: Mycobacterium marinum"));
+            }
+            if self.is_ulcerans(items) {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::heading("16S and 16S 3'-End: Mycobacterium ulcerans"));
+            }
+
             if let Some(snp_hit) = best_snp_hit {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
@@ -4183,10 +4274,7 @@ impl Item {
                     env!("NTM_DB_COMMIT")
                 )));
                 for snp in &snp_hit.rrs_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "{}",
-                        snp.call_tag()
-                    )));
+                    details = details.push(widget::text::body(format!("{}", snp.call_tag())));
                 }
             }
             if let Some(chrom) = self
@@ -4226,6 +4314,46 @@ impl Item {
                 ));
                 details = details.push(widget::text::body(""));
             }
+
+            match self.metadata.rrs3endposition_call() {
+                Rrs3EndPosition1248::A1248 => {
+                    details = details.push(widget::text::heading(
+                        "16S 3'-End position 1248 = A:  M. marinum",
+                    ))
+                }
+                Rrs3EndPosition1248::G1248 => {
+                    details = details.push(widget::text::heading(
+                        "16S 3'-End position 1248 = G:  M. ulcerans",
+                    ))
+                }
+                Rrs3EndPosition1248::C1248 => {
+                    details = details.push(widget::text::heading(
+                        "16S 3'-End position 1248 = C",
+                    ))
+                }
+                Rrs3EndPosition1248::T1248 => {
+                    details = details.push(widget::text::heading(
+                        "16S 3'-End position 1248 = T",
+                    ))
+                }
+                Rrs3EndPosition1248::Undetermined => {
+                    details = details.push(widget::text::heading(
+                        "16S 3'-End position 1248 = undetermined",
+                    ))
+                }
+            }
+
+            details = details.push(widget::text::heading(""));
+            details = details.push(widget::text::heading(
+                "Species identification only using 16S 3'-End sequencing:",
+            ));
+            for hit in &hits[..hits.len().min(8)] {
+                details = details.push(
+                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
+                        .padding(0),
+                );
+            }
         }
 
         column = column.push(details);
@@ -4249,7 +4377,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to references.",
@@ -4317,10 +4447,7 @@ impl Item {
                     env!("NTM_DB_COMMIT")
                 )));
                 for snp in &snp_hit.rrl_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "{}", 
-                        snp.call_tag()
-                    )));
+                    details = details.push(widget::text::body(format!("{}", snp.call_tag())));
                 }
             }
             if let Some(chrom) = self
@@ -4402,7 +4529,9 @@ impl Item {
                 .metadata
                 .sequence_length_trimmed()
                 .is_some_and(|n| n < 100)
-            || hits.first().is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
                 "Could not align sequence to the pncA reference.",
