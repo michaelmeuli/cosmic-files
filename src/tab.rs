@@ -3203,7 +3203,7 @@ impl Item {
         marinum_ulcerans && self.metadata.rrs3endposition_call() == Rrs3EndPosition1248::G1248
     }
 
-    pub fn species_from_16s_hits(&self, items: &[Item]) -> Option<String> {
+    pub fn species_from_16s_sibling(&self, items: &[Item]) -> Option<String> {
         self.sibling_16s(items).and_then(|sibling| {
             crate::sequencing::batch::species_from_16s_hits(&sibling.seq_id_hits_cached())
         })
@@ -4242,7 +4242,7 @@ impl Item {
                 )));
             }
 
-            match self.species_from_16s_hits(items) {
+            match self.species_from_16s_sibling(items) {
                 Some(species) => {
                     details = details.push(widget::text::body(""));
                     details = details.push(widget::text::heading(format!("16S: {}", species)));
