@@ -37,7 +37,7 @@ use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 use rrs3end::{RrsSnpCall3End, Rrs3EndPosition1248, RrsSusceptibilityCalls3End};
 
-pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
+pub const MIN_SEQ_ID_IDENTITY: f32 = 90.0;
 
 /// Sliding-window size (aligned columns) for [`trim_alignment_ends`].
 const ALIGN_TRIM_WINDOW: usize = 15;

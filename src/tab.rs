@@ -4152,6 +4152,20 @@ impl Item {
                     avg_qual
                 )));
             }
+
+            match crate::sequencing::batch::species_from_16s_hits(&hits) {
+                Some(species) => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(format!("16S: {}", species)));
+                }
+                None => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(
+                        "16S: No species identified from 16S hits.",
+                    ));
+                }
+            }
+
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading(
                 "Species identification (16S database):",
