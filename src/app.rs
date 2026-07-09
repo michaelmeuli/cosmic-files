@@ -6712,9 +6712,9 @@ impl Application for App {
                     &records,
                     self.config.tb_config.report_max_age_days,
                 );
-                let ab1_out_dir_pdf = self.config.tb_config.ab1_out_dir_pdf_2.clone();
-                let pdf_path = if !ab1_out_dir_pdf.is_empty() {
-                    let p = std::path::PathBuf::from(&ab1_out_dir_pdf);
+                let ab1_out_dir_pdf_2 = self.config.tb_config.ab1_out_dir_pdf_2.clone();
+                let pdf_path_2 = if !ab1_out_dir_pdf_2.is_empty() {
+                    let p = std::path::PathBuf::from(&ab1_out_dir_pdf_2);
                     if p.is_dir() {
                         p.join("ab1_susceptibility_report_2.pdf")
                     } else {
@@ -6723,10 +6723,10 @@ impl Application for App {
                 } else {
                     out_path.with_file_name("ab1_susceptibility_report_2.pdf")
                 };
-                if let Err(e) = std::fs::write(&pdf_path, &pdf_bytes) {
+                if let Err(e) = std::fs::write(&pdf_path_2, &pdf_bytes) {
                     log::warn!("PDF write failed: {e}");
                 } else {
-                    log::info!("PDF report → {}", pdf_path.display());
+                    log::info!("PDF report → {}", pdf_path_2.display());
                 }
 
                 let topic = self.config.tb_config.ntfy_topic.clone();
