@@ -99,7 +99,7 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
 pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
     if first.description.contains("abscessus") {
-        return Some("M. abscessus complex".to_string());
+        return Some("M. chelonae / M. abscessus complex".to_string());
     }
     if first.description.contains("marinum") || first.description.contains("ulcerans") {
         return Some("M. marinum/ulcerans".to_string());
@@ -134,6 +134,39 @@ fn species_from_16s3end(hits: &[SeqIdHit]) -> Option<String> {
         return Some(String::new());
     }
     Some(first.description.clone())
+}
+
+/// For rpoB hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
+pub(crate) fn species_from_rpob_hits(hits: &[SeqIdHit]) -> Option<String> {
+    let first = hits.first()?;
+    if first.description.contains("abscessus") {
+        return Some("M. abscessus complex".to_string());
+    }
+    if first.description.contains("chelonae") {
+        return Some("M. chelonae".to_string());
+    }
+    let base_identity = first.identity;
+    let (prefix, first_epithet) = first
+        .description
+        .rsplit_once(' ')
+        .map(|(p, e)| (p, e))
+        .unwrap_or(("", first.description.as_str()));
+    let mut epithets: Vec<&str> = vec![first_epithet];
+    for hit in &hits[1..] {
+        if (hit.identity - base_identity).abs() > 0.1 {
+            break;
+        }
+        if let Some((_, epithet)) = hit.description.rsplit_once(' ') {
+            if !epithets.contains(&epithet) {
+                epithets.push(epithet);
+            }
+        }
+    }
+    Some(if epithets.len() == 1 {
+        first.description.clone()
+    } else {
+        format!("{} {}", prefix, epithets.join("/"))
+    })
 }
 
 /// Walk `scan_path` recursively, analyse every `.ab1` file, and return a
@@ -345,6 +378,8 @@ pub fn scan_ab1_directory(
                 species_from_16s_hits(&seq_id_hits)
             } else if is_16s3end {
                 species_from_16s3end(&seq_id_hits)
+            } else if is_rpob {
+                species_from_rpob_hits(&seq_id_hits)
             } else {
                 seq_id_hits.first().map(|h| h.description.clone())
             },

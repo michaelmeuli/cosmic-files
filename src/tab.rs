@@ -3185,6 +3185,22 @@ impl Item {
             .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
     }
 
+    pub fn is_chelonae(&self, items: &[Item]) -> bool {
+        let chelonae_abscessus_complex = self
+            .sibling_16s(items)
+            .and_then(|sibling| {
+                sibling.seq_id_hits_cached().first().map(|top| {
+                    top.description.contains("chelonae") || top.description.contains("abscessus")
+                })
+            })
+            .unwrap_or(false);
+        chelonae_abscessus_complex
+            && self
+                .seq_id_hits_cached()
+                .first()
+                .is_some_and(|top| top.description.contains("chelonae"))
+    }
+
     pub fn is_marinum(&self, items: &[Item]) -> bool {
         let marinum_ulcerans = self
             .sibling_16s(items)
@@ -3213,6 +3229,10 @@ impl Item {
         self.sibling_16s(items).and_then(|sibling| {
             crate::sequencing::batch::species_from_16s_hits(&sibling.seq_id_hits_cached())
         })
+    }
+
+    pub fn species_from_rpob_hits(&self) -> Option<String> {
+        crate::sequencing::batch::species_from_rpob_hits(&self.seq_id_hits_cached())
     }
 
     pub fn is_rrl_ntm(&self) -> bool {
@@ -4106,6 +4126,26 @@ impl Item {
                 }
             }
 
+            match self.species_from_rpob_hits() {
+                Some(species) => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(format!("rpoB: {}", species)));
+                }
+                None => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(
+                        "rpoB: No species identified from rpoB hits.",
+                    ));
+                }
+            }
+
+            if self.is_chelonae(items) {
+                details = details.push(widget::text::body(""));
+                details = details.push(widget::text::heading(
+                    "16S and rpoB: Mycobacteroides chelonae",
+                ));
+            }
+
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading(
                 "Species identification (rpoB database):",
@@ -4305,11 +4345,15 @@ impl Item {
 
             if self.is_marinum(items) {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::heading("16S and 16S 3'-End: Mycobacterium marinum"));
+                details = details.push(widget::text::heading(
+                    "16S and 16S 3'-End: Mycobacterium marinum",
+                ));
             }
             if self.is_ulcerans(items) {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::heading("16S and 16S 3'-End: Mycobacterium ulcerans"));
+                details = details.push(widget::text::heading(
+                    "16S and 16S 3'-End: Mycobacterium ulcerans",
+                ));
             }
 
             if let Some(snp_hit) = best_snp_hit {
@@ -4375,14 +4419,10 @@ impl Item {
                     ))
                 }
                 Rrs3EndPosition1248::C1248 => {
-                    details = details.push(widget::text::heading(
-                        "16S 3'-End position 1248 = C",
-                    ))
+                    details = details.push(widget::text::heading("16S 3'-End position 1248 = C"))
                 }
                 Rrs3EndPosition1248::T1248 => {
-                    details = details.push(widget::text::heading(
-                        "16S 3'-End position 1248 = T",
-                    ))
+                    details = details.push(widget::text::heading("16S 3'-End position 1248 = T"))
                 }
                 Rrs3EndPosition1248::Undetermined => {
                     details = details.push(widget::text::heading(
