@@ -3237,7 +3237,7 @@ impl Item {
 
     pub fn is_rrl_ntm(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("mclr") || lower.contains("rrl"))
+        !self.is_fasta() && (lower.contains("mclr"))
     }
 
     pub fn is_pnca(&self) -> bool {
@@ -4457,6 +4457,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
+        details = details.push(widget::text::heading("NTM: 23S-CLR-Sequenzierung, AHB NR. 32.43605"));
         details = details.push(widget::text::heading(self.name.clone()));
 
         let hits = self.seq_id_hits_cached();
