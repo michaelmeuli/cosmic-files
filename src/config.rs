@@ -176,6 +176,10 @@ pub struct TBConfig {
     pub ab1_cache_path: String,
     pub ab1_out_dir_csv: String,
     pub ab1_out_dir_pdf: String,
+    pub ab1_scan_path_2: String,
+    pub ab1_cache_path_2: String,
+    pub ab1_out_dir_csv_2: String,
+    pub ab1_out_dir_pdf_2: String,
     pub ntfy_topic: String,
     pub report_max_age_days: u32,
 }
@@ -196,6 +200,10 @@ impl Default for TBConfig {
             ab1_cache_path: String::new(),
             ab1_out_dir_csv: String::new(),
             ab1_out_dir_pdf: String::new(),
+            ab1_scan_path_2: String::new(),
+            ab1_cache_path_2: String::new(),
+            ab1_out_dir_csv_2: String::new(),
+            ab1_out_dir_pdf_2: String::new(),
             ntfy_topic: String::new(),
             report_max_age_days: DEFAULT_REPORT_MAX_AGE_DAYS,
         }

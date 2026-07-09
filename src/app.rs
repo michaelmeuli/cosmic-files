@@ -536,10 +536,16 @@ pub enum Message {
     SetTbAb1CachePath(String),
     SetTbAb1OutDirCsv(String),
     SetTbAb1OutDirPdf(String),
+    SetTbAb1ScanPath2(String),
+    SetTbAb1CachePath2(String),
+    SetTbAb1OutDirCsv2(String),
+    SetTbAb1OutDirPdf2(String),
     SetNtfyTopic(String),
     SetTbReportMaxAgeDays(String),
     ScanAb1Directory,
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
+    ScanAb1Directory2,
+    Ab1ScanComplete2(Vec<crate::sequencing::SampleSusceptibilityRecord>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2659,6 +2665,30 @@ impl App {
                     ),
                 )
                 .add(
+                    widget::settings::item::builder("AB1 scan directory 2").control(
+                        widget::text_input("", &self.config.tb_config.ab1_scan_path_2)
+                            .on_input(Message::SetTbAb1ScanPath2),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("AB1 cache file 2").control(
+                        widget::text_input("", &self.config.tb_config.ab1_cache_path_2)
+                            .on_input(Message::SetTbAb1CachePath2),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("AB1 CSV output directory 2").control(
+                        widget::text_input("", &self.config.tb_config.ab1_out_dir_csv_2)
+                            .on_input(Message::SetTbAb1OutDirCsv2),
+                    ),
+                )
+                .add(
+                    widget::settings::item::builder("AB1 PDF output directory 2").control(
+                        widget::text_input("", &self.config.tb_config.ab1_out_dir_pdf_2)
+                            .on_input(Message::SetTbAb1OutDirPdf2),
+                    ),
+                )
+                .add(
                     widget::settings::item::builder("ntfy topic").control(
                         widget::text_input(
                             "my-lab-topic or https://ntfy.example.org/topic",
@@ -2877,6 +2907,10 @@ impl Application for App {
 
         if !app.config.tb_config.ab1_scan_path.is_empty() {
             commands.push(app.update(Message::ScanAb1Directory));
+        }
+
+        if !app.config.tb_config.ab1_scan_path_2.is_empty() {
+            commands.push(app.update(Message::ScanAb1Directory2));
         }
 
         for location in flags.locations {
@@ -6495,6 +6529,30 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
+            Message::SetTbAb1ScanPath2(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_scan_path_2 = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbAb1CachePath2(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_cache_path_2 = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbAb1OutDirCsv2(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_out_dir_csv_2 = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            Message::SetTbAb1OutDirPdf2(path) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.ab1_out_dir_pdf_2 = path;
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
             Message::SetNtfyTopic(v) => {
                 let mut tb_config = self.config.tb_config.clone();
                 tb_config.ntfy_topic = v;
@@ -6539,7 +6597,12 @@ impl Application for App {
                 let ab1_out_dir_csv = self.config.tb_config.ab1_out_dir_csv.clone();
                 let scan_path = self.config.tb_config.ab1_scan_path.clone();
                 let out_path = if !ab1_out_dir_csv.is_empty() {
-                    std::path::PathBuf::from(&ab1_out_dir_csv).join("ab1_susceptibility_report.csv")
+                    let p = std::path::PathBuf::from(&ab1_out_dir_csv);
+                    if p.is_dir() {
+                        p.join("ab1_susceptibility_report.csv")
+                    } else {
+                        p
+                    }
                 } else {
                     std::path::PathBuf::from(&scan_path).join("ab1_susceptibility_report.csv")
                 };
@@ -6563,7 +6626,103 @@ impl Application for App {
                     &records,
                     self.config.tb_config.report_max_age_days,
                 );
-                let pdf_path = out_path.with_file_name("ab1_susceptibility_report.pdf");
+                let ab1_out_dir_pdf = self.config.tb_config.ab1_out_dir_pdf.clone();
+                let pdf_path = if !ab1_out_dir_pdf.is_empty() {
+                    let p = std::path::PathBuf::from(&ab1_out_dir_pdf);
+                    if p.is_dir() {
+                        p.join("ab1_susceptibility_report.pdf")
+                    } else {
+                        p
+                    }
+                } else {
+                    out_path.with_file_name("ab1_susceptibility_report.pdf")
+                };
+                if let Err(e) = std::fs::write(&pdf_path, &pdf_bytes) {
+                    log::warn!("PDF write failed: {e}");
+                } else {
+                    log::info!("PDF report → {}", pdf_path.display());
+                }
+
+                let topic = self.config.tb_config.ntfy_topic.clone();
+                if !topic.is_empty() {
+                    let n = records.len();
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::sequencing::ntfy_notify::send_report_ntfy(&topic, pdf_bytes, n).await {
+                            log::warn!("ntfy notification failed: {e}");
+                        }
+                    });
+                }
+            }
+            Message::ScanAb1Directory2 => {
+                let scan_path = self.config.tb_config.ab1_scan_path_2.clone();
+                if scan_path.is_empty() {
+                    return Task::none();
+                }
+                let ab1_cache_path = self.config.tb_config.ab1_cache_path_2.clone();
+                let max_age_days = self.config.tb_config.report_max_age_days;
+                return Task::future(async move {
+                    let records = tokio::task::spawn_blocking(move || {
+                        let cache_path = if !ab1_cache_path.is_empty() {
+                            let p = std::path::PathBuf::from(ab1_cache_path);
+                            Some(if p.is_dir() { p.join("ab1_scan_cache.json") } else { p })
+                        } else {
+                            Some(std::path::PathBuf::from(scan_path.clone()).join("ab1_scan_cache.json"))
+                        };
+                        crate::sequencing::batch::scan_ab1_directory(
+                            std::path::PathBuf::from(scan_path),
+                            cache_path,
+                            max_age_days,
+                        )
+                    })
+                    .await
+                    .unwrap_or_default();
+                    cosmic::action::app(Message::Ab1ScanComplete2(records))
+                });
+            }
+            Message::Ab1ScanComplete2(records) => {
+                let ab1_out_dir_csv = self.config.tb_config.ab1_out_dir_csv_2.clone();
+                let scan_path = self.config.tb_config.ab1_scan_path_2.clone();
+                let out_path = if !ab1_out_dir_csv.is_empty() {
+                    let p = std::path::PathBuf::from(&ab1_out_dir_csv);
+                    if p.is_dir() {
+                        p.join("ab1_susceptibility_report_2.csv")
+                    } else {
+                        p
+                    }
+                } else {
+                    std::path::PathBuf::from(&scan_path).join("ab1_susceptibility_report_2.csv")
+                };
+                if let Err(e) = crate::sequencing::batch::write_ab1_csv(&records, &out_path) {
+                    log::warn!("AB1 CSV write failed: {e}");
+                } else {
+                    log::info!(
+                        "AB1 scan complete: {} records → {}",
+                        records.len(),
+                        out_path.display()
+                    );
+                }
+                let rare_path = out_path.with_file_name("rare_mutations_2.csv");
+                if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path) {
+                    log::warn!("Rare mutations CSV write failed: {e}");
+                } else {
+                    log::info!("Rare mutations CSV → {}", rare_path.display());
+                }
+
+                let pdf_bytes = crate::sequencing::build_report_pdf(
+                    &records,
+                    self.config.tb_config.report_max_age_days,
+                );
+                let ab1_out_dir_pdf = self.config.tb_config.ab1_out_dir_pdf_2.clone();
+                let pdf_path = if !ab1_out_dir_pdf.is_empty() {
+                    let p = std::path::PathBuf::from(&ab1_out_dir_pdf);
+                    if p.is_dir() {
+                        p.join("ab1_susceptibility_report_2.pdf")
+                    } else {
+                        p
+                    }
+                } else {
+                    out_path.with_file_name("ab1_susceptibility_report_2.pdf")
+                };
                 if let Err(e) = std::fs::write(&pdf_path, &pdf_bytes) {
                     log::warn!("PDF write failed: {e}");
                 } else {
@@ -8402,6 +8561,13 @@ impl Application for App {
             subscriptions.push(
                 iced::time::every(time::Duration::from_secs(2 * 60 * 60))
                     .map(|_| Message::ScanAb1Directory),
+            );
+        }
+
+        if !self.config.tb_config.ab1_scan_path_2.is_empty() {
+            subscriptions.push(
+                iced::time::every(time::Duration::from_secs(2 * 60 * 60))
+                    .map(|_| Message::ScanAb1Directory2),
             );
         }
 
