@@ -3879,7 +3879,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_hsp65(&self) -> Element<'_, Message> {
+    pub fn preview_hsp65(&self, items: &[Item]) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -3939,6 +3939,20 @@ impl Item {
                     avg_qual
                 )));
             }
+
+            match self.species_from_16s_sibling(items) {
+                Some(species) => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(format!("16S: {}", species)));
+                }
+                None => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(
+                        "16S: No species identified from 16S hits.",
+                    ));
+                }
+            }
+
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading(
                 "Species identification (hsp65 database):",
@@ -4018,7 +4032,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_rpob(&self) -> Element<'_, Message> {
+    pub fn preview_rpob(&self, items: &[Item]) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -4078,6 +4092,20 @@ impl Item {
                     avg_qual
                 )));
             }
+
+            match self.species_from_16s_sibling(items) {
+                Some(species) => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(format!("16S: {}", species)));
+                }
+                None => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(
+                        "16S: No species identified from 16S hits.",
+                    ));
+                }
+            }
+
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading(
                 "Species identification (rpoB database):",
@@ -4380,7 +4408,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_rrl_ntm(&self) -> Element<'_, Message> {
+    pub fn preview_rrl_ntm(&self, items: &[Item]) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -4446,6 +4474,20 @@ impl Item {
                     avg_qual
                 )));
             }
+
+            match self.species_from_16s_sibling(items) {
+                Some(species) => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(format!("16S: {}", species)));
+                }
+                None => {
+                    details = details.push(widget::text::body(""));
+                    details = details.push(widget::text::heading(
+                        "16S: No species identified from 16S hits.",
+                    ));
+                }
+            }
+
             details = details.push(widget::text::heading(""));
             details = details.push(widget::text::heading(
                 "Species identification (rrl database):",

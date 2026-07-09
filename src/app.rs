@@ -2484,15 +2484,15 @@ impl App {
                                     if item.is_erm41() {
                                         Some(item.preview_erm41())
                                     } else if item.is_hsp65() {
-                                        Some(item.preview_hsp65())
+                                        Some(item.preview_hsp65(items))
                                     } else if item.is_rpob() {
-                                        Some(item.preview_rpob())
+                                        Some(item.preview_rpob(items))
                                     } else if item.is_16s() {
                                         Some(item.preview_16s())
                                     } else if item.is_16s3end() {
                                         Some(item.preview_16s3end(items))
                                     } else if item.is_rrl_ntm() {
-                                        Some(item.preview_rrl_ntm())
+                                        Some(item.preview_rrl_ntm(items))
                                     } else if item.is_pnca() {
                                         Some(item.preview_pnca())
                                     } else if item.metadata.is_tbprofiler_json() {
