@@ -3162,10 +3162,9 @@ impl Item {
         !self.is_fasta() && (lower.contains("hsp65") || lower.contains("65kda"))
     }
 
-    pub fn is_rpob(&self) -> bool {
+    pub fn is_rpob_ntm(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta()
-            && (lower.contains("rpob") || lower.contains("2573f") || lower.contains("3337r"))
+        !self.is_fasta() && lower.contains("2573f") || lower.contains("3337r")
     }
 
     pub fn is_16s(&self) -> bool {
@@ -3747,7 +3746,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(18).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading("32.43622-erm(41)-Endpunkt-PCR"));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -3908,7 +3907,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading("32.43505-2-Mykobakterien NTM 65kDa"));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -4052,7 +4051,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_rpob(&self, items: &[Item]) -> Element<'_, Message> {
+    pub fn preview_rpob_ntm(&self, items: &[Item]) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -4061,7 +4060,9 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading(
+            "32.43504-3-Mykobakterien NTM rpob-seq",
+        ));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -4172,7 +4173,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading("32.43501-1-Mtb-NTM Kulturen-LC"));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -4279,7 +4280,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading("32.43506-1-16SEnd"));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -4457,8 +4458,9 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
-        details = details.push(widget::text::heading("NTM: 23S-CLR-Sequenzierung, AHB NR. 32.43605"));
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading(
+            "32.43605-1-PCR - NTM 23S CLR-Sequenzierung",
+        ));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -4624,7 +4626,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
+        details = details.push(widget::text::heading("32.43616-2-MtbKomplex-pncA-Seq"));
 
         let hits = self.seq_id_hits_cached();
         if hits.is_empty()
@@ -4688,15 +4690,14 @@ impl Item {
                 .filter(|c| !c.call_tag().is_empty())
                 .collect();
             details = details.push(widget::text::body(""));
-            details = details.push(widget::text::heading(
-                "Pyrazinamide resistance calls (pncA, WHO mutation catalogue):",
-            ));
+            details = details.push(widget::text::heading("Pyrazinamide resistance calls"));
+            details = details.push(widget::text::body("(pncA, WHO mutation catalogue):"));
             if called.is_empty() {
                 details = details.push(widget::text::body("No catalogued sites covered."));
             } else {
                 for snp in &called {
                     details = details.push(widget::text::body(format!(
-                        "  {}: {}",
+                        "    {}: {}",
                         snp.site_label(),
                         snp.call_tag()
                     )));
