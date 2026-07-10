@@ -129,6 +129,17 @@ pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
     if first.description.contains("marinum") || first.description.contains("ulcerans") {
         return Some("M. marinum/ulcerans".to_string());
     }
+    if first.description.starts_with("Mycobacterium kansasii")
+        || first.description.starts_with("Mycobacterium persicum")
+        || first
+            .description
+            .starts_with("Mycobacterium pseudokansasii")
+        || first.description.starts_with("Mycobacterium ostraviense")
+        || first.description.starts_with("Mycobacterium innocens")
+        || first.description.starts_with("Mycobacterium attenuatum")
+    {
+        return Some("M. kansasii complex".to_string());
+    }
     let base_identity = first.identity;
     let (prefix, first_epithet) = first
         .description
@@ -157,7 +168,9 @@ pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
 /// diagnostic for them.
 fn species_from_16s3end(hits: &[SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
-    if !first.description.contains("ulcerans") && !first.description.contains("marinum") {
+    if !first.description.starts_with("Mycobacterium ulcerans")
+        && !first.description.starts_with("Mycobacterium marinum")
+    {
         return Some(String::new());
     }
     Some(first.description.clone())
