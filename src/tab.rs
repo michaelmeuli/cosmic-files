@@ -3645,10 +3645,6 @@ impl Item {
             space_m,
             ..
         } = theme::active().cosmic().spacing;
-        let mut column = widget::column::with_capacity(10).spacing(space_m);
-        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
-
         let tbprofilerjson_opt = match &self.metadata {
             ItemMetadata::Path {
                 tbprofilerjson_opt, ..
@@ -3659,6 +3655,11 @@ impl Item {
             } => tbprofilerjson_opt.as_ref(),
             _ => None,
         };
+
+        let dr_variant_count = tbprofilerjson_opt.map_or(0, |json| json.dr_variants.len());
+        let mut column = widget::column::with_capacity(5 + dr_variant_count).spacing(space_m);
+        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
+        details = details.push(widget::text::heading(self.name.clone()));
 
         column = column.push(details);
 
@@ -3744,11 +3745,19 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+        let erm41_snp_tag_count = hits.first().map_or(0, |best| {
+            best.erm41_snp_calls
+                .iter()
+                .filter(|s| !s.call_tag().is_empty())
+                .count()
+        });
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(18).spacing(space_xxxs);
+        let mut details =
+            widget::column::with_capacity(22 + erm41_snp_tag_count).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43622-erm(41)-Endpunkt-PCR"));
 
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
@@ -3905,11 +3914,20 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+        let (kansasii_gastri_n, marinum_ulcerans_n) = hits.first().map_or((0, 0), |best| {
+            (
+                best.kansasii_gastri_snp_calls.len(),
+                best.marinum_ulcerans_snp_calls.len(),
+            )
+        });
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
+        let mut details =
+            widget::column::with_capacity(18 + kansasii_gastri_n + marinum_ulcerans_n)
+                .spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43505-2-Mykobakterien NTM 65kDa"));
 
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
@@ -4058,13 +4076,13 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(15).spacing(space_xxxs);
         details = details.push(widget::text::heading(
             "32.43504-3-Mykobakterien NTM rpob-seq",
         ));
-
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
@@ -4171,11 +4189,17 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+        let best_snp_hit = hits.first().and_then(|best| {
+            hits.iter()
+                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
+        });
+        let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls.len());
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(19 + rrs_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43501-1-Mtb-NTM Kulturen-LC"));
 
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
@@ -4208,9 +4232,6 @@ impl Item {
             }
         } else {
             let best = &hits[0];
-            let best_snp_hit = hits
-                .iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty());
             details = details.push(widget::text::body(format!(
                 "Sequence identity to {}: {:.1}%",
                 best.description, best.identity
@@ -4278,11 +4299,17 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+        let best_snp_hit = hits.first().and_then(|best| {
+            hits.iter()
+                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
+        });
+        let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls.len());
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(29 + rrs_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43506-1-16SEnd"));
 
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
@@ -4314,10 +4341,6 @@ impl Item {
                 )));
             }
         } else {
-            let best = &hits[0];
-            let best_snp_hit = hits
-                .iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty());
             if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Trimmed sequence length: {}",
@@ -4456,13 +4479,22 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
+        // for the winning species, since SNP positions are anchored to the gene start
+        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
+        let best_snp_hit = hits.first().and_then(|best| {
+            hits.iter()
+                .find(|h| h.description == best.description && !h.rrl_snp_calls.is_empty())
+        });
+        let rrl_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrl_snp_calls.len());
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(10).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(21 + rrl_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading(
             "32.43605-1-PCR - NTM 23S CLR-Sequenzierung",
         ));
 
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
@@ -4495,12 +4527,6 @@ impl Item {
             }
         } else {
             let best = &hits[0];
-            // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-            // for the winning species, since SNP positions are anchored to the gene start
-            // in the ntm-db full-gene sequences, not to partial NCBI sequences.
-            let best_snp_hit = hits
-                .iter()
-                .find(|h| h.description == best.description && !h.rrl_snp_calls.is_empty());
             details = details.push(widget::text::body(format!(
                 "Sequence identity to {}: {:.1}%",
                 best.description, best.identity
@@ -4624,11 +4650,21 @@ impl Item {
             ..
         } = theme::active().cosmic().spacing;
 
+        let hits = self.seq_id_hits_cached();
+        let pnca_called_count = self
+            .metadata
+            .susceptibility_calls()
+            .pnca
+            .snp_calls
+            .iter()
+            .filter(|c| !c.call_tag().is_empty())
+            .count()
+            .max(1);
+
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(6).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(9 + pnca_called_count).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43616-2-MtbKomplex-pncA-Seq"));
 
-        let hits = self.seq_id_hits_cached();
         if hits.is_empty()
             || self
                 .metadata
