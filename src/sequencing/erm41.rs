@@ -1,3 +1,14 @@
+//! erm(41) loss-of-function calling for *M. abscessus* complex macrolide resistance.
+//!
+//! erm(41) confers inducible macrolide (clarithromycin/azithromycin) resistance unless it has
+//! been inactivated. Two independent lines of evidence feed [`is_susceptible_erm41`]:
+//!
+//! - **Position 28** ([`Erm41Position28`]): a single well-known codon whose base alone predicts
+//!   function — C28/G28/A28 are susceptible, T28 is the classic inducible-resistance allele.
+//! - **Loss-of-function SNPs** ([`Erm41LofCall`]): any other SNP in the gene that TBProfiler's
+//!   ntm-db catalogue annotates as knocking erm(41) out (nonsense/frameshift-equivalent amino
+//!   acid changes), which override position 28 and force susceptibility.
+
 use super::reverse_complement;
 use super::{ERM41_ANCHOR_L, ERM41_ANCHOR_R, ERM41_FWD_END, ERM41_FWD_START};
 use super::{
@@ -11,13 +22,20 @@ use std::sync::LazyLock;
 /// `(mutation_label, drug)`.
 type Erm41LofSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (String, Option<String>)>)>;
 
+/// The base observed at erm(41) codon position 28, the single site that predicts macrolide
+/// susceptibility on its own (see [module docs](self)).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Erm41Position28 {
-    C28,          // Cytosine — reference allele in some strains
-    T28,          // Thymine  — inducible macrolide resistance (ATCC 19977 type)
-    G28,          // Guanine
-    A28,          // Adenine
-    Undetermined, // Anchor not found in read
+    /// Cytosine — susceptible reference allele in some strains.
+    C28,
+    /// Thymine — inducible macrolide resistance (ATCC 19977 type).
+    T28,
+    /// Guanine — susceptible.
+    G28,
+    /// Adenine — susceptible.
+    A28,
+    /// Anchor sequence not found in the read, so the base at position 28 couldn't be located.
+    Undetermined,
 }
 
 impl std::fmt::Display for Erm41Position28 {
@@ -73,8 +91,12 @@ pub fn is_susceptible_erm41_by_position28(pos: &Erm41Position28) -> Option<bool>
 /// All erm(41) susceptibility evidence for one sample, ready for UI display.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Erm41SusceptibilityCalls {
+    /// Position 28 call, or `None` if the anchor wasn't found in any read.
     pub position_28: Option<Erm41Position28>,
+    /// Every known loss-of-function SNP position, with whatever base (if any) was observed.
     pub lof_snp_calls: Vec<Erm41LofCall>,
+    /// Combined verdict from [`is_susceptible_erm41`]: position 28 overridden by any observed
+    /// LOF SNP.
     pub is_susceptible: Option<bool>,
 }
 
@@ -135,6 +157,8 @@ impl Erm41Position28 {
     }
 }
 
+/// Translates a single DNA codon (case-insensitive) to its one-letter amino acid code, or `*`
+/// for a stop codon. Returns `0` for a codon shorter than 3 bases or containing unknown bases.
 fn translate_codon(codon: &[u8]) -> u8 {
     if codon.len() < 3 {
         return 0;
@@ -170,6 +194,8 @@ fn translate_codon(codon: &[u8]) -> u8 {
     }
 }
 
+/// Converts a 3-letter amino acid code (e.g. `"Trp"`, case-insensitive) as used in HGVS protein
+/// annotations to its one-letter code. Returns `0` for an unrecognized code.
 fn three_letter_to_one(aa3: &str) -> u8 {
     match aa3.to_ascii_uppercase().as_str() {
         "ALA" => b'A',
@@ -196,6 +222,7 @@ fn three_letter_to_one(aa3: &str) -> u8 {
     }
 }
 
+/// Deserializes a CSV field as `None` if missing or blank/whitespace-only, `Some` otherwise.
 fn empty_string_as_none<'de, D>(de: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -204,12 +231,14 @@ where
     Ok(s.filter(|s| !s.trim().is_empty()))
 }
 
+/// One row of the ntm-db `variants.csv` resistance catalogue.
 #[derive(Debug, Deserialize)]
 struct Erm41LofRow {
     #[serde(rename = "Gene")]
     gene: String,
     #[serde(rename = "Mutation")]
     mutation: String,
+    /// Only rows where this is `"loss_of_function"` are relevant here.
     #[serde(rename = "type")]
     variant_type: String,
     /// `None` means no drug resistance annotated — interpret as susceptible (`Some(true)`).
@@ -299,6 +328,9 @@ fn parse_erm41_lof_snps(csv: &str, refseq: &[u8]) -> Erm41LofSnpMap {
     map
 }
 
+/// Loss-of-function SNP maps per subspecies description, parsed once. Currently only
+/// [`super::DESC_ABSCESSUS`] has its own ntm-db `variants.csv`; see the comment in
+/// [`identify_sequence_erm41`] for why bolletii/massiliense reuse it.
 static ERM41_LOF_SNPS: LazyLock<BTreeMap<&'static str, Erm41LofSnpMap>> = LazyLock::new(|| {
     [(
         super::DESC_ABSCESSUS,
@@ -310,10 +342,14 @@ static ERM41_LOF_SNPS: LazyLock<BTreeMap<&'static str, Erm41LofSnpMap>> = LazyLo
     .collect()
 });
 
+/// One known loss-of-function SNP position, with the base observed in the query (if covered).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Erm41LofCall {
+    /// 0-based position in the erm(41) reference sequence.
     pub ref_pos: usize,
+    /// Base observed in the query at this position, or `None` if not covered by the alignment.
     pub query_base: Option<u8>,
+    /// Wild-type base at this position.
     pub wt_base: u8,
     /// Maps each loss-of-function alt base to `(mutation_label, drug)`.
     #[serde(with = "super::serde_helpers::u8_btree_map")]
@@ -321,6 +357,8 @@ pub struct Erm41LofCall {
 }
 
 impl Erm41LofCall {
+    /// Human-readable HGVS-ish tag, e.g. `A123T (p.Trp28*: loss of function)` when the observed
+    /// base is a known LOF alt, or plain `A123T`/`A123?` otherwise.
     pub fn call_tag(&self) -> String {
         match self.query_base {
             None => {
@@ -365,6 +403,12 @@ fn call_erm41_lof_snps(snps: &Erm41LofSnpMap, ga: &GappedAlignment) -> Vec<Erm41
         .collect()
 }
 
+/// Locates the chromatogram window to display around erm(41) position 28.
+///
+/// Searches `bases` for `ERM41_ANCHOR_L` in the forward orientation, then for the reverse
+/// complement of `ERM41_ANCHOR_R` (i.e. the reverse-complement orientation), and converts the
+/// hit position to a peak-index window via [`super::scan_window`]. Returns
+/// `(start, end, is_reverse, position_28_index)`, or `None` if neither anchor is found.
 pub(super) fn find_erm41_display_window(
     bases: &[u8],
     peak_locs: &[u16],
@@ -400,7 +444,13 @@ pub(super) fn find_erm41_display_window(
     None
 }
 
-/// Unlike identify_sequence_hsp65() and identify_sequence_rrl_ntm(), this only uses reference sequences extracted via sequences.toml and not the database fetched via fetch_myco_sequences().
+/// Identifies the closest-matching *M. abscessus* complex subspecies for an erm(41) read, and
+/// attaches position-28 and loss-of-function SNP calls to every hit.
+///
+/// Unlike [`identify_sequence_hsp65`](super::hsp65::identify_sequence_hsp65), this only aligns
+/// against the three subspecies references extracted via `sequences.toml` (`build.rs`), not the
+/// broader NCBI-fetched database — erm(41) is used for LOF/position-28 resistance calling within
+/// *M. abscessus* complex, not general species identification.
 pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
     let query = super::trim_start_end(query, ERM41_FWD_START, ERM41_FWD_END);
     let rc = reverse_complement(query);

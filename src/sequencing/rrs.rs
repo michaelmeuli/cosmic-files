@@ -1,3 +1,12 @@
+//! 16S rRNA (rrs) species identification and aminoglycoside resistance calling for
+//! *M. abscessus*, *M. avium*, and *M. intracellulare*.
+//!
+//! Unlike [`rrl`](super::rrl) and [`erm41`](super::erm41), rrs has no single well-characterized
+//! diagnostic position — resistance is called purely from the SNP catalogue
+//! ([`RRS_RESISTANCE_SNPS`], [`RrsSnpCall`]) parsed from ntm-db's per-species `variants.csv`.
+//! See [`rrs3end`](super::rrs3end) for the companion module covering the 3' end of the gene
+//! (position 1248).
+
 use super::{
     GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
     dedup_substring_same_desc, parse_multi_fasta, reverse_complement, trim_alignment_ends,
@@ -10,6 +19,7 @@ use std::sync::LazyLock;
 /// `(drugs, E.coli nomenclature)`.
 type RrsSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
+/// One row of the ntm-db `variants.csv` resistance catalogue.
 #[derive(Debug, Deserialize, Clone)]
 struct ResistanceVariant {
     #[serde(rename = "Gene")]
@@ -24,6 +34,10 @@ struct ResistanceVariant {
     ecoli_nomenclature: String,
 }
 
+/// Parses rrs resistance SNPs (`gene == "rrs"`, `type == "drug_resistance"`) out of an ntm-db
+/// `variants.csv`, keyed by **0-based nucleotide position** in the rrs reference sequence.
+/// Mutations are expected in `n.<pos><wt>><alt>` HGVS nucleotide notation (e.g. `n.1401A>G`);
+/// rows that don't parse in that form are skipped.
 fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
     let mut map: RrsSnpMap = BTreeMap::new();
@@ -66,6 +80,8 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
     map
 }
 
+/// Resistance SNP maps per species description, parsed once from each species' ntm-db
+/// `variants.csv`.
 static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLock::new(|| {
     [
         (
@@ -104,6 +120,10 @@ pub struct RrsSnpCall {
 }
 
 impl RrsSnpCall {
+    /// Human-readable tag, e.g. `A1401G (amikacin, E.coli: A1401G)` for a resistance alt, or
+    /// `A1401A (E.coli: A1401A)`/`A1401?` otherwise — always includes the *E. coli*-numbered
+    /// equivalent when known, since that's the numbering most aminoglycoside-resistance
+    /// literature uses.
     pub fn call_tag(&self) -> String {
         let ecoli_prefix: Option<&str> = self
             .resistance_bases
@@ -155,8 +175,12 @@ impl RrsSnpCall {
 /// All rrs susceptibility evidence for one sample, ready for UI display.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RrsSusceptibilityCalls {
+    /// Every known resistance-conferring SNP position, with whatever base (if any) was observed.
     pub snp_calls: Vec<RrsSnpCall>,
+    /// Verdict from [`is_susceptible_rrs`].
     pub is_susceptible: Option<bool>,
+    /// Verdict from [`is_susceptible_rrs_by_snp_calls_rare`] — identical to `is_susceptible` for
+    /// rrs (see that function's docs for why).
     pub is_susceptible_rare: Option<bool>,
 }
 
@@ -180,6 +204,8 @@ pub fn is_susceptible_rrs_by_snp_calls_rare(snp_calls: &[RrsSnpCall]) -> Option<
     is_susceptible_rrs(snp_calls)
 }
 
+/// Maps each known resistance SNP position to the base observed in the query sequence,
+/// adjusting for the alignment offset between reference and query coordinates.
 fn call_rrs_snps(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall> {
     snps.iter()
         .map(|(&ref_pos, (wt_base, alt_to_drugs))| {
@@ -200,11 +226,11 @@ fn call_rrs_snps(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall> {
 ///
 /// # Algorithm
 ///
-/// For each reference sequence (filtered to ≥ [`MIN_RRS_REF_LEN`] bp to avoid inflated scores
-/// from truncated entries):
+/// For each reference sequence (filtered to ≥ [`super::MIN_RRS_REF_LEN`] bp to avoid inflated
+/// scores from truncated entries):
 ///
-/// 1. **Strand**: both forward and reverse-complement alignments are scored via [`best_alignment`];
-///    the strand with the higher identity wins.
+/// 1. **Strand**: both forward and reverse-complement alignments are scored via
+///    [`align_to_ref`]; the strand with the higher identity wins.
 /// 2. **Identity**: gapless (shift-only) alignment — the shorter sequence is slid along the longer
 ///    and the best-matching offset is chosen. Identity = matching bases / shorter length.
 /// 3. **SNP calls**: for species that have an entry in [`RRS_RESISTANCE_SNPS`] (accession

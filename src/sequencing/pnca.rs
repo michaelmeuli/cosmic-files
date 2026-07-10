@@ -1,3 +1,13 @@
+//! pncA pyrazinamide resistance calling for *M. tuberculosis* complex.
+//!
+//! Unlike the fixed-anchor SNP sets in [`erm41`](super::erm41)/[`rrl`](super::rrl)/
+//! [`rrs`](super::rrs), pncA resistance mutations are scattered across the whole gene (plus a
+//! promoter region) with no small fixed set of diagnostic positions, so this module dynamically
+//! parses the WHO resistance catalogue (`tbprofiler/mutations.csv`) into per-position lookup
+//! maps at startup ([`PNCA_RESISTANCE_SNPS`]) and calls every site the catalogue mentions
+//! ([`PncaSnpCall`]) against the read's alignment. See [`is_susceptible_pnca`] for how those
+//! per-site calls are combined into one verdict.
+
 use super::tb_data::confidence_rank;
 use super::{
     GappedAlignment, REF_PNCA, SeqIdHit, align_to_ref, base_at_ref_pos, parse_multi_fasta,
@@ -27,6 +37,7 @@ const AA3: [&str; 20] = [
     "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val",
 ];
 
+/// One row of `tbprofiler/mutations.csv` (the WHO resistance catalogue).
 #[derive(Debug, Deserialize, Clone)]
 struct MutationRow {
     #[serde(rename = "Gene")]
@@ -35,6 +46,8 @@ struct MutationRow {
     mutation: String,
     #[serde(rename = "drug")]
     drug: String,
+    /// WHO confidence label; empty means this row carries no resistance evidence and is
+    /// skipped (see [`confidence_rank`]).
     #[serde(rename = "confidence")]
     confidence: String,
 }
@@ -168,13 +181,19 @@ static PNCA_RESISTANCE_SNPS: LazyLock<(PncaNtSnpMap, PncaAaSnpMap)> =
 /// One diagnostic pncA site: either a single nucleotide (promoter or coding) or a single codon.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PncaCallKind {
+    /// A single promoter or coding-sequence nucleotide substitution (HGVS `c.` notation).
     Nucleotide {
         wt_base: u8,
+        /// Base observed in the query at this position, or `None` if not covered.
         query_base: Option<u8>,
     },
+    /// A single-codon amino acid substitution or nonsense call (HGVS `p.` notation).
     Codon {
+        /// 1-based codon number.
         codon: usize,
+        /// Wild-type amino acid, as a 3-letter code.
         wt_aa: String,
+        /// Amino acid translated from the query's codon, or `None` if not fully covered.
         query_aa: Option<String>,
     },
 }
@@ -225,6 +244,9 @@ impl PncaSnpCall {
         }
     }
 
+    /// Human-readable annotation for the observed allele at this site: empty when it matches
+    /// wildtype or wasn't covered, the catalogued `(drugs, confidence)` when it's a known
+    /// resistance alt, or `"<alt> (mutation, untested)"` for an uncatalogued variant.
     pub fn call_tag(&self) -> String {
         match &self.kind {
             PncaCallKind::Nucleotide {
@@ -298,7 +320,9 @@ enum PncaEvidence {
 /// All pncA susceptibility evidence for one sample, ready for UI display.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PncaSusceptibilityCalls {
+    /// Every catalogued diagnostic site, with whatever allele (if any) was observed.
     pub snp_calls: Vec<PncaSnpCall>,
+    /// Verdict from [`is_susceptible_pnca`].
     pub is_susceptible: Option<bool>,
 }
 
@@ -370,6 +394,7 @@ fn codon_at_ref_pos(
     None
 }
 
+/// Maps each catalogued nucleotide SNP position to the base observed in the query sequence.
 fn call_pnca_nt_snps(map: &PncaNtSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCall> {
     map.iter()
         .filter_map(|(&c_pos, (wt_base, alts))| {
@@ -392,6 +417,7 @@ fn call_pnca_nt_snps(map: &PncaNtSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCal
         .collect()
 }
 
+/// Maps each catalogued codon to the amino acid translated from the query's aligned codon.
 fn call_pnca_aa_snps(map: &PncaAaSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCall> {
     map.iter()
         .filter_map(|(&codon, (wt_aa, alts))| {

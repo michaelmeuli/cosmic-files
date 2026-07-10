@@ -1,3 +1,13 @@
+//! Batch scanning of a directory of AB1 files into per-sample susceptibility records.
+//!
+//! [`scan_ab1_directory`] is the entry point: it walks a directory tree, infers each file's gene
+//! from its filename ([`parse_ab1_filename`]), runs the appropriate `identify_sequence_*` from
+//! the gene-specific modules, and combines the resulting hits into one
+//! [`SampleSusceptibilityRecord`] per file — with both an in-memory cache
+//! ([`AB1_SEQ_CACHE`], shared with the interactive single-file view) and an optional on-disk
+//! JSON cache keyed by file mtime, so re-scanning an unchanged directory is cheap.
+//! [`write_ab1_csv`] and [`write_rare_mutations_csv`] export the results.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -36,14 +46,20 @@ pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SampleSusceptibilityRecord {
     pub sample_id: String,
+    /// Gene inferred from the filename by [`parse_ab1_filename`], or `None` if unrecognized.
     pub gene: Option<String>,
     pub file_name: String,
     pub file_path: PathBuf,
     #[serde(with = "super::serde_helpers::option_systemtime_secs")]
     pub file_created: Option<SystemTime>,
+    /// Per-gene susceptibility evidence, populated from the best (first) alignment hit.
     pub susceptibility_calls: SusceptibilityCalls,
+    /// Species/subspecies description of the best alignment hit.
     pub species: Option<String>,
+    /// Alignment identity (%) of the best hit.
     pub identity: Option<f32>,
+    /// Combined susceptibility verdict across all genes (see [`scan_ab1_directory`]'s body for
+    /// the gene-priority order: erm41 → rrl → rrs → pncA, first `Some` wins).
     pub is_susceptible: Option<bool>,
     /// Top alignment hits — stored in disk cache (alignment strings stripped) so the preview
     /// panel can be populated from disk cache without re-running alignment.
@@ -52,7 +68,7 @@ pub struct SampleSusceptibilityRecord {
 }
 
 /// Find the first run of exactly 10 consecutive ASCII digits starting with "20"
-/// that is not embedded inside a longer digit run.
+/// (the lab's sample ID convention) that is not embedded inside a longer digit run.
 fn find_sample_id(s: &str) -> Option<&str> {
     let bytes = s.as_bytes();
     let mut i = 0;
@@ -136,6 +152,9 @@ pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
     })
 }
 
+/// For 16S 3'-end hits, only *M. marinum*/*M. ulcerans* (the pair position 1248 discriminates)
+/// gets a species description; other species return an empty string since this amplicon isn't
+/// diagnostic for them.
 fn species_from_16s3end(hits: &[SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
     if !first.description.contains("ulcerans") && !first.description.contains("marinum") {
@@ -695,6 +714,8 @@ pub fn write_rare_mutations_csv(
     Ok(())
 }
 
+/// Renders a susceptibility verdict for CSV output: `"susceptible"`, `"resistant"`, or empty
+/// for `None` (unknown).
 fn fmt_susceptible(v: Option<bool>) -> String {
     match v {
         Some(true) => "susceptible".to_string(),
@@ -703,6 +724,8 @@ fn fmt_susceptible(v: Option<bool>) -> String {
     }
 }
 
+/// Joins `(ref_pos, call_tag)` pairs into a semicolon-separated CSV cell, e.g.
+/// `"pos 2059: A2059G (clarithromycin, E.coli: A2059G)"`.
 fn snp_calls_str(calls: impl Iterator<Item = (usize, String)>) -> String {
     calls
         .map(|(pos, tag)| format!("pos {}: {}", pos + 1, tag))
@@ -710,6 +733,9 @@ fn snp_calls_str(calls: impl Iterator<Item = (usize, String)>) -> String {
         .join("; ")
 }
 
+/// Joins pncA calls with a non-empty [`call_tag`](super::pnca::PncaSnpCall::call_tag) into a
+/// semicolon-separated CSV cell, e.g. `"p.Ala102Pro: (pyrazinamide, Assoc w R)"`. Sites matching
+/// wildtype (empty tag) are omitted.
 fn pnca_snp_calls_str(calls: &[super::pnca::PncaSnpCall]) -> String {
     calls
         .iter()
@@ -738,6 +764,8 @@ fn system_time_to_iso8601(t: std::time::SystemTime) -> String {
     format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
 }
 
+/// Converts days since the Unix epoch (1970-01-01) to a proleptic Gregorian `(year, month,
+/// day)`, ignoring leap seconds, via the standard Julian Day Number algorithm.
 fn days_to_ymd(days: u32) -> (u32, u32, u32) {
     // Algorithm: Julian Day Number from Unix epoch, then Gregorian conversion
     // Unix epoch = JDN 2440588

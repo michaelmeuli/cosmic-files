@@ -1,3 +1,12 @@
+//! 16S rRNA (rrs) 3' end analysis: species discrimination at position 1248 plus the same
+//! aminoglycoside resistance SNP calling as [`rrs`](super::rrs).
+//!
+//! Position 1248 discriminates *M. marinum* (A1248) from *M. ulcerans* (G1248) — a pair that
+//! aren't reliably separated by the rest of the 16S gene alone. Otherwise this module mirrors
+//! [`rrs`](super::rrs)'s resistance-SNP machinery exactly (same ntm-db catalogue, same
+//! `variants.csv` parsing); the duplication exists because the two genes' anchor sequences and
+//! [`SeqIdHit`] fields (`rrs_snp_calls` vs `rrs_snp_calls_3end`) are kept independent.
+
 use super::{
     GappedAlignment, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R, SeqIdHit, align_to_ref,
     base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
@@ -11,13 +20,18 @@ use std::sync::LazyLock;
 /// `(drugs, E.coli nomenclature)`.
 type RrsSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
+/// The base observed at rrs position 1248, which discriminates *M. marinum* from
+/// *M. ulcerans*.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Rrs3EndPosition1248 {
-    A1248, // M. marinum
-    G1248, // M. ulcerans
+    /// *M. marinum*.
+    A1248,
+    /// *M. ulcerans*.
+    G1248,
     C1248,
     T1248,
-    Undetermined, // Anchor not found in read
+    /// Anchor sequence not found in the read, so the base at position 1248 couldn't be located.
+    Undetermined,
 }
 
 impl std::fmt::Display for Rrs3EndPosition1248 {
@@ -71,6 +85,7 @@ impl Rrs3EndPosition1248 {
     }
 }
 
+/// One row of the ntm-db `variants.csv` resistance catalogue.
 #[derive(Debug, Deserialize, Clone)]
 struct ResistanceVariant {
     #[serde(rename = "Gene")]
@@ -79,12 +94,17 @@ struct ResistanceVariant {
     mutation: String,
     #[serde(rename = "drug")]
     drug: String,
+    /// Only rows where this is `"drug_resistance"` are relevant here.
     #[serde(rename = "type")]
     confers: String,
     #[serde(rename = "E.coli-nomenclature", default)]
     ecoli_nomenclature: String,
 }
 
+/// Parses rrs resistance SNPs (`gene == "rrs"`, `type == "drug_resistance"`) out of an ntm-db
+/// `variants.csv`, keyed by **0-based nucleotide position** in the rrs reference sequence.
+/// Mutations are expected in `n.<pos><wt>><alt>` HGVS nucleotide notation (e.g. `n.1401A>G`);
+/// rows that don't parse in that form are skipped.
 fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
     let mut map: RrsSnpMap = BTreeMap::new();
@@ -127,6 +147,8 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
     map
 }
 
+/// Resistance SNP maps per species description, parsed once from each species' ntm-db
+/// `variants.csv`.
 static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLock::new(|| {
     [
         (
@@ -165,6 +187,10 @@ pub struct RrsSnpCall3End {
 }
 
 impl RrsSnpCall3End {
+    /// Human-readable tag, e.g. `A1401G (amikacin, E.coli: A1401G)` for a resistance alt, or
+    /// `A1401A (E.coli: A1401A)`/`A1401?` otherwise — always includes the *E. coli*-numbered
+    /// equivalent when known, since that's the numbering most aminoglycoside-resistance
+    /// literature uses.
     pub fn call_tag(&self) -> String {
         let ecoli_prefix: Option<&str> = self
             .resistance_bases
@@ -213,12 +239,20 @@ impl RrsSnpCall3End {
     }
 }
 
-/// All rrs susceptibility evidence for one sample, ready for UI display.
+/// All rrs 3'-end susceptibility evidence for one sample, ready for UI display.
+///
+/// Note: `position_1248` is a species-discrimination call, not a susceptibility signal — it has
+/// no bearing on `is_susceptible`/`is_susceptible_rare`, which come purely from `snp_calls`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RrsSusceptibilityCalls3End {
+    /// Position 1248 call, or `None` if the anchor wasn't found in any read.
     pub position_1248: Option<Rrs3EndPosition1248>,
+    /// Every known resistance-conferring SNP position, with whatever base (if any) was observed.
     pub snp_calls: Vec<RrsSnpCall3End>,
+    /// Verdict from [`is_susceptible_rrs_3end`].
     pub is_susceptible: Option<bool>,
+    /// Verdict from [`is_susceptible_rrs_by_snp_calls_rare_3end`] — identical to `is_susceptible`
+    /// (see that function's docs for why).
     pub is_susceptible_rare: Option<bool>,
 }
 
@@ -242,6 +276,8 @@ pub fn is_susceptible_rrs_by_snp_calls_rare_3end(snp_calls: &[RrsSnpCall3End]) -
     is_susceptible_rrs_3end(snp_calls)
 }
 
+/// Maps each known resistance SNP position to the base observed in the query sequence,
+/// adjusting for the alignment offset between reference and query coordinates.
 fn call_rrs_snps_3end(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall3End> {
     snps.iter()
         .map(|(&ref_pos, (wt_base, alt_to_drugs))| {
@@ -257,11 +293,17 @@ fn call_rrs_snps_3end(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall3
         .collect()
 }
 
+/// Locates the chromatogram window to display around rrs position 1248.
+///
+/// Searches `bases` for `RRS3END_ANCHOR_L` in the forward orientation, then for the reverse
+/// complement of `RRS3END_ANCHOR_R` (i.e. the reverse-complement orientation), and converts the
+/// hit position to a peak-index window via [`super::scan_window`]. Returns
+/// `(start, end, is_reverse, position_1248_index)`, or `None` if neither anchor is found.
 pub(super) fn find_16s3end_display_window(
     bases: &[u8],
     peak_locs: &[u16],
 ) -> Option<(u16, u16, bool, u16)> {
-    // Flanking bases to show: 9 before pos28, 11 after (pos28 is the first of the 11)
+    // Flanking bases to show: 10 before position 1248, 10 after
     const LEFT: usize = 10;
     const RIGHT: usize = 10;
 
@@ -295,18 +337,9 @@ pub(super) fn find_16s3end_display_window(
 /// Align `query` against every Mycobacteriaceae 16S rRNA reference in [`REF_MYCO_RRS`] and
 /// return all hits sorted by identity (highest first).
 ///
-/// # Algorithm
-///
-/// For each reference sequence (filtered to ≥ [`MIN_RRS_REF_LEN`] bp to avoid inflated scores
-/// from truncated entries):
-///
-/// 1. **Strand**: both forward and reverse-complement alignments are scored via [`best_alignment`];
-///    the strand with the higher identity wins.
-/// 2. **Identity**: gapless (shift-only) alignment — the shorter sequence is slid along the longer
-///    and the best-matching offset is chosen. Identity = matching bases / shorter length.
-/// 3. **SNP calls**: for species that have an entry in [`RRS_RESISTANCE_SNPS`] (accession
-///    contains `':'`), aminoglycoside-resistance SNPs are mapped from reference coordinates to
-///    query coordinates using the alignment offset.
+/// Identical alignment/SNP-calling algorithm to
+/// [`identify_sequence_16s`](super::rrs::identify_sequence_16s) (see its docs), plus a
+/// position-1248 call ([`Rrs3EndPosition1248::from_single_read`]) shared across all hits.
 pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let rrs3end_position_1248_opt = Rrs3EndPosition1248::from_single_read(query);

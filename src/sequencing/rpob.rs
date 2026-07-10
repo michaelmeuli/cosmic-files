@@ -1,3 +1,8 @@
+//! rpoB species identification.
+//!
+//! rpoB is used purely for species-level identification here (unlike hsp65, erm41, rrl, and
+//! rrs, it carries no diagnostic SNP calls in [`SeqIdHit`] — those fields are always left empty).
+
 use super::{
     REF_MYCO_RPOB, SeqIdHit, align_to_ref, dedup_substring_same_desc, parse_multi_fasta,
     reverse_complement, trim_alignment_ends,
@@ -8,6 +13,13 @@ use std::sync::LazyLock;
 static RPOB_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
     LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RPOB)));
 
+/// Identifies the closest-matching mycobacterial species for an rpoB read.
+///
+/// Aligns both strands of `query` against every reference in [`RPOB_REFS`] and returns one
+/// [`SeqIdHit`] per reference sorted by descending identity. References shorter than
+/// [`super::MIN_RPOB_REF_LEN`] are excluded up front — rpoB partial sequences below that length
+/// are too short to distinguish species reliably and would otherwise produce spuriously high
+/// identity matches.
 pub fn identify_sequence_rpob(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let mut hits: Vec<SeqIdHit> = RPOB_REFS

@@ -362,6 +362,8 @@ fn dedup_substring_same_desc(
         .collect()
 }
 
+/// Renders a [`GappedAlignment`] as a human-readable pairwise alignment listing (BLAST-style),
+/// wrapped at 60 columns per line with a `|`/`.`/` ` match line between query and reference.
 fn format_pairwise_alignment(
     accession: &str,
     description: &str,
@@ -654,6 +656,10 @@ pub fn base_at_ref_pos(
     None
 }
 
+/// Converts a base-index window (`center - left` .. `center + right`) to a scan-index (peak
+/// position) window via `peak_locs`, for scrolling a chromatogram viewer to a diagnostic site.
+/// Returns `None` if the window falls outside `peak_locs`, or (defensively) if the resulting
+/// scan range is empty/inverted.
 fn scan_window(center: usize, left: usize, right: usize, peak_locs: &[u16]) -> Option<(u16, u16)> {
     let base_start = center.checked_sub(left)?;
     let base_end = center + right;
@@ -898,14 +904,14 @@ pub struct Erm41ViewState {
 /// Built in [`Ab1Channels::parse`] via [`rrs3end::find_16s3end_display_window`]
 /// when [`RRS3END_ANCHOR_L`] is found in the basecall sequence. Stored inside
 /// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
-/// diagnostic position 28 site.
+/// diagnostic position 1248 site.
 #[derive(Clone, Copy, Debug)]
 pub struct Rrs3EndViewState {
     /// Scan-index range (inclusive start, exclusive end) of the display window.
     pub window: (u16, u16),
     /// `true` when the reverse complement matched the anchor.
     pub is_reverse: bool,
-    /// Index into `bases` / `peak_locs` that corresponds to position 28.
+    /// Index into `bases` / `peak_locs` that corresponds to position 1248.
     pub pos28_base_idx: u16,
 }
 
@@ -973,7 +979,8 @@ pub struct SeqIdHit {
     pub rrl_snp_calls: Vec<RrlSnpCall>,
     /// Calls at each rrs aminoglycoside-resistance SNP position (16S rRNA).
     pub rrs_snp_calls: Vec<RrsSnpCall>,
-    /// Calls at each rrs aminoglycoside-resistance SNP position (16S rRNA).
+    /// Calls at each rrs aminoglycoside-resistance SNP position from the 16S 3' end amplicon
+    /// (see [`rrs3end`]), populated instead of `rrs_snp_calls` for that target.
     pub rrs_snp_calls_3end: Vec<RrsSnpCall3End>,
     /// Calls at each erm(41) loss-of-function variant position.
     pub erm41_snp_calls: Vec<Erm41LofCall>,
@@ -987,9 +994,10 @@ pub struct SeqIdHit {
     pub ref_start: usize,
     /// Erm41 position 28 call; `None` for non-erm41 targets.
     pub erm41_position_28_opt: Option<Erm41Position28>,
-    /// 16S 3'-End position 1248
+    /// 16S 3'-End position 1248 call (marinum/ulcerans discrimination); `None` for non-rrs3end
+    /// targets.
     pub rrs3end_position_1248_opt: Option<Rrs3EndPosition1248>,
-    /// rrl position 2058 2059 call; `None` for non-rrl targets.
+    /// rrl position 2058/2059 call; `None` for non-rrl targets.
     pub rrl_position_2058_2059_opt: Option<RrlPosition2058_2059>,
 }
 
@@ -1007,18 +1015,24 @@ impl SeqIdHit {
         )
     }
 
+    /// Whether this hit's reference is the *M. kansasii* hsp65 accession.
     pub fn is_kansasii(&self) -> bool {
         self.accession == ACC_KANSASII
     }
+    /// Whether this hit's reference is the *M. gastri* hsp65 accession.
     pub fn is_gastri(&self) -> bool {
         self.accession == ACC_GASTRI
     }
+    /// Whether this hit's reference is the *M. marinum* hsp65 accession.
     pub fn is_marinum(&self) -> bool {
         self.accession == ACC_MARINUM
     }
+    /// Whether this hit's reference is the *M. ulcerans* hsp65 accession.
     pub fn is_ulcerans(&self) -> bool {
         self.accession == ACC_ULCERANS
     }
+    /// Majority vote across `kansasii_gastri_snp_calls`: whichever species more of the SNP
+    /// calls agree with, or `None` on a tie (including no calls at all).
     pub fn kansasii_gastri_snp_species_call(&self) -> Option<&'static str> {
         let gastri = self
             .kansasii_gastri_snp_calls
@@ -1036,6 +1050,8 @@ impl SeqIdHit {
             std::cmp::Ordering::Equal => None,
         }
     }
+    /// Majority vote across `marinum_ulcerans_snp_calls`: whichever species more of the SNP
+    /// calls agree with, or `None` on a tie (including no calls at all).
     pub fn marinum_ulcerans_snp_species_call(&self) -> Option<&'static str> {
         let marinum = self
             .marinum_ulcerans_snp_calls
@@ -1063,10 +1079,14 @@ impl SeqIdHit {
 /// downstream SNP / resistance calls for one reference match.
 #[derive(Clone, Debug)]
 pub struct SeqData {
+    /// Parsed chromatogram traces and basecalls; `None` if the file wasn't a valid AB1.
     pub chromatogram_opt: Option<Ab1Channels>,
     pub seq_id_hits: Vec<SeqIdHit>,
+    /// Full basecall sequence length, before quality trimming.
     pub length: usize,
+    /// Basecall sequence length after [`trim_to_min_quality`].
     pub trimmed_length: usize,
+    /// Mean Phred quality of the trimmed region; `None` if quality scores weren't available.
     pub trimmed_avg_quality_opt: Option<f32>,
 }
 
@@ -1180,6 +1200,7 @@ pub fn build_report_pdf(
     doc.save_to_bytes().unwrap_or_default()
 }
 
+/// Draws one row of table cells at fixed column x-offsets ([`PDF_COL_X`]).
 fn pdf_write_row(
     layer: &printpdf::PdfLayerReference,
     font: &printpdf::IndirectFontRef,
@@ -1193,6 +1214,7 @@ fn pdf_write_row(
     }
 }
 
+/// Renders a susceptibility verdict as a single-letter PDF table cell: `"S"`, `"R"`, or empty.
 fn pdf_sus(v: Option<bool>) -> &'static str {
     match v {
         Some(true) => "S",
@@ -1201,6 +1223,7 @@ fn pdf_sus(v: Option<bool>) -> &'static str {
     }
 }
 
+/// Draws a horizontal separator line spanning the table width at height `y`.
 fn pdf_hline(layer: &printpdf::PdfLayerReference, y: f32) {
     use printpdf::{Color, Greyscale, Line, Mm, Point};
     layer.set_outline_color(Color::Greyscale(Greyscale::new(0.5, None)));
@@ -1211,6 +1234,8 @@ fn pdf_hline(layer: &printpdf::PdfLayerReference, y: f32) {
     ]));
 }
 
+/// Truncates `s` to `max_chars` bytes, appending `".."` if it was cut. Byte-based, not
+/// char-aware — table cell contents here are ASCII (species names, filenames, call tags).
 fn pdf_truncate(s: &str, max_chars: usize) -> String {
     if s.len() <= max_chars {
         s.to_string()
@@ -1219,6 +1244,7 @@ fn pdf_truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// Today's date as `YYYY-MM-DD`, for the report header.
 fn pdf_current_date() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1228,6 +1254,9 @@ fn pdf_current_date() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// Converts days since the Unix epoch (1970-01-01) to a proleptic Gregorian `(year, month,
+/// day)`, ignoring leap seconds, via the standard Julian Day Number algorithm. Duplicates
+/// `batch::days_to_ymd` rather than sharing it, since that one is private to `batch`.
 fn pdf_days_to_ymd(days: u32) -> (u32, u32, u32) {
     let jdn = days + 2_440_588;
     let a = jdn + 32044;

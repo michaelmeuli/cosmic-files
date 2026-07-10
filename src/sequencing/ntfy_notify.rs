@@ -1,3 +1,5 @@
+//! Batch-scan completion notifications via [ntfy](https://ntfy.sh/).
+
 /// Push `pdf_bytes` to an ntfy topic as a PDF file attachment.
 ///
 /// `topic` may be a bare topic name (sent to `https://ntfy.sh/{topic}`) or a full URL.

@@ -1,3 +1,11 @@
+//! `#[serde(with = "...")]` helpers for types serde can't (de)serialize directly, used to make
+//! resistance-SNP-call structs (e.g. [`erm41::Erm41LofCall`](super::erm41::Erm41LofCall),
+//! [`rrl::RrlSnpCall`](super::rrl::RrlSnpCall)) and batch-scan records round-trip through JSON.
+
+/// (De)serializes a `BTreeMap<u8, V>` as a JSON array of `[key, value]` pairs.
+///
+/// serde_json (and JSON generally) only supports string map keys, so a `BTreeMap<u8, _>` can't
+/// be serialized as a JSON object directly; encoding it as an array of pairs sidesteps that.
 pub mod u8_btree_map {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::BTreeMap;
@@ -19,6 +27,10 @@ pub mod u8_btree_map {
     }
 }
 
+/// (De)serializes `Option<SystemTime>` as an optional Unix timestamp in whole seconds.
+///
+/// `SystemTime` has no stable serde representation of its own; this truncates to second
+/// precision, which is enough for cache-freshness comparisons.
 pub mod option_systemtime_secs {
     use serde::{Deserialize, Deserializer, Serializer};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
