@@ -1,9 +1,9 @@
 use super::reverse_complement;
-use super::{RRL_ANCHOR_L, RRL_ANCHOR_R, REF_MYCO_RRL};
 use super::{
     GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc,
     parse_multi_fasta, trim_alignment_ends,
 };
+use super::{REF_MYCO_RRL, RRL_ANCHOR_L, RRL_ANCHOR_R};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -12,14 +12,12 @@ use std::sync::LazyLock;
 /// `(drugs, E.coli nomenclature)`.
 type RrlSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RrlPosition2058_2059 {
-    SusceptibleWildtype, // A2058 and A2059
+    SusceptibleWildtype,          // A2058 and A2059
     ResistanceConferringMutation, // Any mutation at 2058 or 2059 that is not wildtype.
     Undetermined,
 }
-
 
 impl std::fmt::Display for RrlPosition2058_2059 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -86,10 +84,14 @@ impl RrlPosition2058_2059 {
 /// If any `snp_calls` entry shows a resistance-conferring alt base, returns `Some(false)`
 /// regardless of `pos_opt`. Otherwise delegates to the position-based call.
 /// `pos_opt: None` (anchor not found) still allows SNP calls to return `Some(false)`.
-pub fn is_susceptible_rrl(pos_opt: Option<&RrlPosition2058_2059>, snp_calls: &[RrlSnpCall]) -> Option<bool> {
-    let has_resistance = snp_calls
-        .iter()
-        .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)));
+pub fn is_susceptible_rrl(
+    pos_opt: Option<&RrlPosition2058_2059>,
+    snp_calls: &[RrlSnpCall],
+) -> Option<bool> {
+    let has_resistance = snp_calls.iter().any(|c| {
+        c.query_base
+            .is_some_and(|b| c.resistance_bases.contains_key(&b))
+    });
     if has_resistance {
         Some(false)
     } else {
@@ -105,10 +107,10 @@ pub fn is_susceptible_rrl_by_position(pos: &RrlPosition2058_2059) -> Option<bool
 /// Returns `Some(false)` if any observed SNP base is a resistance-conferring alt, or `None` if
 /// no resistance alt is observed.
 pub fn is_susceptible_rrl_by_snp_calls(snp_calls: &[RrlSnpCall]) -> Option<bool> {
-    if snp_calls
-        .iter()
-        .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)))
-    {
+    if snp_calls.iter().any(|c| {
+        c.query_base
+            .is_some_and(|b| c.resistance_bases.contains_key(&b))
+    }) {
         Some(false)
     } else {
         None
@@ -118,7 +120,10 @@ pub fn is_susceptible_rrl_by_snp_calls(snp_calls: &[RrlSnpCall]) -> Option<bool>
 /// Returns `Some(false)` only when position 2058/2059 is wildtype (`Some(true)`) **and** a
 /// resistance-conferring SNP alt is observed elsewhere; otherwise returns `None`.
 /// This captures rare mutations where resistance is not due to 2058/2059.
-pub fn is_susceptible_rrl_by_snp_calls_rare(pos_opt: Option<&RrlPosition2058_2059>, snp_calls: &[RrlSnpCall]) -> Option<bool> {
+pub fn is_susceptible_rrl_by_snp_calls_rare(
+    pos_opt: Option<&RrlPosition2058_2059>,
+    snp_calls: &[RrlSnpCall],
+) -> Option<bool> {
     if is_susceptible_rrl_by_position(pos_opt?) != Some(true) {
         return None;
     }
@@ -133,8 +138,6 @@ pub struct RrlSusceptibilityCalls {
     pub is_susceptible: Option<bool>,
     pub is_susceptible_rare: Option<bool>,
 }
-
-
 
 #[derive(Debug, Deserialize, Clone)]
 struct ResistanceVariant {
@@ -178,7 +181,10 @@ fn parse_rrl_resistance_snps(csv: &str) -> RrlSnpMap {
                         .and_then(|s| s.bytes().next()),
                 ) {
                     let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
-                    let variant = entry.1.entry(alt).or_insert_with(|| (Vec::new(), ecoli.clone()));
+                    let variant = entry
+                        .1
+                        .entry(alt)
+                        .or_insert_with(|| (Vec::new(), ecoli.clone()));
                     if !variant.0.contains(&drug) {
                         variant.0.push(drug);
                     }
@@ -195,15 +201,23 @@ static RRL_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
 
 static RRL_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrlSnpMap>> = LazyLock::new(|| {
     [
-        ("Mycobacterium abscessus", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
-        ("Mycobacterium avium",          include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv")),
-        ("Mycobacterium intracellulare", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_intracellulare/variants.csv")),
+        (
+            "Mycobacterium abscessus",
+            include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"),
+        ),
+        (
+            "Mycobacterium avium",
+            include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv"),
+        ),
+        (
+            "Mycobacterium intracellulare",
+            include_str!("../../res/sequences/ntm-db/db/Mycobacterium_intracellulare/variants.csv"),
+        ),
     ]
     .into_iter()
     .map(|(species, csv)| (species, parse_rrl_resistance_snps(csv)))
     .collect()
 });
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrlSnpCall {
@@ -221,25 +235,48 @@ pub struct RrlSnpCall {
 impl RrlSnpCall {
     pub fn call_tag(&self) -> String {
         // E.coli position prefix shared by all alts at this position (e.g. "A2059").
-        let ecoli_prefix: Option<&str> = self.resistance_bases.values()
+        let ecoli_prefix: Option<&str> = self
+            .resistance_bases
+            .values()
             .next()
             .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
 
         match self.query_base {
             None => {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, "?")
-            },
+            }
             Some(b) if b == self.wt_base => match ecoli_prefix {
-                Some(p) => format!("{}{}{} (E.coli: {}{})", self.wt_base as char, self.ref_pos + 1, b as char, p, b as char),
-                None    => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
+                Some(p) => format!(
+                    "{}{}{} (E.coli: {}{})",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    p,
+                    b as char
+                ),
+                None => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
             },
             Some(b) if self.resistance_bases.contains_key(&b) => {
                 let (drugs, ecoli) = &self.resistance_bases[&b];
-                format!("{}{}{} ({}, E.coli: {})", self.wt_base as char, self.ref_pos + 1, b as char, drugs.join(", "), ecoli)
+                format!(
+                    "{}{}{} ({}, E.coli: {})",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    drugs.join(", "),
+                    ecoli
+                )
             }
             Some(b) => match ecoli_prefix {
-                Some(p) => format!("{}{}{} (E.coli: {}{})", self.wt_base as char, self.ref_pos + 1, b as char, p, b as char),
-                None    => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
+                Some(p) => format!(
+                    "{}{}{} (E.coli: {}{})",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    p,
+                    b as char
+                ),
+                None => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
             },
         }
     }
@@ -259,7 +296,6 @@ fn call_rrl_snps(snps: &RrlSnpMap, ga: &GappedAlignment) -> Vec<RrlSnpCall> {
         })
         .collect()
 }
-
 
 /// Locate the SNP site in a Sanger read and return the scan-coordinate window
 /// to display around it.

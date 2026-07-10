@@ -28,7 +28,6 @@ const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
     (500, b'G', b'C'),
 ];
 
-
 fn call_kansasii_gastri_snps(ga: &GappedAlignment) -> Vec<KansasiiGastriSnpCall> {
     KANSASII_GASTRI_SNPS
         .iter()
@@ -129,18 +128,17 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 (fwd, false)
             };
             let ga = trim_alignment_ends(ga);
-            let kansasii_gastri_snp_calls =
-                if KANSASII_GASTRI_ACCS.contains(&accession.as_str()) {
-                    call_kansasii_gastri_snps(&ga)
-                } else {
-                    vec![]
-                };
-            let marinum_ulcerans_snp_calls =
-                if MARINUM_ULCERANS_ACCS.contains(&accession.as_str()) {
-                    call_marinum_ulcerans_snps(&ga)
-                } else {
-                    vec![]
-                };
+            let kansasii_gastri_snp_calls = if KANSASII_GASTRI_ACCS.contains(&accession.as_str()) {
+                call_kansasii_gastri_snps(&ga)
+            } else {
+                vec![]
+            };
+            let marinum_ulcerans_snp_calls = if MARINUM_ULCERANS_ACCS.contains(&accession.as_str())
+            {
+                call_marinum_ulcerans_snps(&ga)
+            } else {
+                vec![]
+            };
             SeqIdHit {
                 accession,
                 description: description.clone(),
@@ -170,7 +168,6 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
     });
     hits
 }
-
 
 /// A single diagnostic SNP position in the kansasii/gastri comparison.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -235,4 +232,3 @@ impl MarinumUlceransSnpCall {
         }
     }
 }
-

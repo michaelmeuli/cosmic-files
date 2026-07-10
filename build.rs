@@ -72,7 +72,9 @@ fn ncbi_bulk_download(
     output: &str,
     batch: usize,
 ) -> Result<usize, String> {
-    let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
+    let ak = api_key
+        .map(|k| format!("&api_key={}", k))
+        .unwrap_or_default();
     let encoded = ncbi_url_encode(query);
 
     let search_url = format!(
@@ -141,7 +143,9 @@ fn ncbi_fetch_single(
     api_key: Option<&str>,
     accession: &str,
 ) -> Result<String, String> {
-    let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
+    let ak = api_key
+        .map(|k| format!("&api_key={}", k))
+        .unwrap_or_default();
     let url = format!(
         "{}/efetch.fcgi?db=nuccore&id={}&rettype=fasta&retmode=text&email={}{}",
         base, accession, email, ak
@@ -186,14 +190,19 @@ fn parse_feature_table(ft: &str, locus_tag: &str) -> Result<(u64, u64, u8), Stri
             }
         } else {
             let parts: Vec<&str> = stripped.split('\t').collect();
-            if parts.len() >= 2 && parts[0] == "locus_tag" && parts[1] == locus_tag
+            if parts.len() >= 2
+                && parts[0] == "locus_tag"
+                && parts[1] == locus_tag
                 && let (Some(s), Some(e)) = (cur_start, cur_stop)
             {
                 return Ok((s, e, cur_strand));
             }
         }
     }
-    Err(format!("locus_tag {:?} not found in feature table", locus_tag))
+    Err(format!(
+        "locus_tag {:?} not found in feature table",
+        locus_tag
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -209,7 +218,9 @@ fn ncbi_fetch_genome_gene(
     downstream_flank: u64,
     strand_override: Option<u8>,
 ) -> Result<String, String> {
-    let ak = api_key.map(|k| format!("&api_key={}", k)).unwrap_or_default();
+    let ak = api_key
+        .map(|k| format!("&api_key={}", k))
+        .unwrap_or_default();
     let delay_ms = if api_key.is_some() { 120u64 } else { 350 };
 
     let (start, stop, strand) = if let Some(tag) = locus_tag {
@@ -236,9 +247,15 @@ fn ncbi_fetch_genome_gene(
     // i.e. the feature table listed coordinates descending) the 5' end sits at `stop`, so
     // upstream extends above it.
     let (start, stop) = if strand == 2 {
-        (start.saturating_sub(downstream_flank), stop + upstream_flank)
+        (
+            start.saturating_sub(downstream_flank),
+            stop + upstream_flank,
+        )
     } else {
-        (start.saturating_sub(upstream_flank), stop + downstream_flank)
+        (
+            start.saturating_sub(upstream_flank),
+            stop + downstream_flank,
+        )
     };
 
     let url = format!(
@@ -254,7 +271,10 @@ fn ncbi_fetch_genome_gene(
     if text.contains('>') {
         Ok(text)
     } else {
-        Err(format!("no FASTA returned for {}:{}-{}", accession, start, stop))
+        Err(format!(
+            "no FASTA returned for {}:{}-{}",
+            accession, start, stop
+        ))
     }
 }
 
@@ -289,13 +309,16 @@ fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
         let path = seq_dir.join(filename);
         println!("cargo:rerun-if-changed=res/sequences/{}", filename);
 
-        let needs_download = !path.exists()
-            || path.metadata().map(|m| m.len() == 0).unwrap_or(true);
+        let needs_download =
+            !path.exists() || path.metadata().map(|m| m.len() == 0).unwrap_or(true);
 
         if needs_download {
             println!("cargo:warning=fetch_myco: downloading {}", filename);
-            match ncbi_bulk_download(BASE, EMAIL, api_key.as_deref(), query, path.to_str().unwrap(), BATCH) {
-                Ok(n) => println!("cargo:warning=fetch_myco: wrote {} sequences → {}", n, filename),
+            match ncbi_bulk_download(BASE, EMAIL, api_key, query, path.to_str().unwrap(), BATCH) {
+                Ok(n) => println!(
+                    "cargo:warning=fetch_myco: wrote {} sequences → {}",
+                    n, filename
+                ),
                 Err(e) => println!("cargo:warning=fetch_myco: failed for {}: {}", filename, e),
             }
         }
@@ -324,27 +347,42 @@ fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
             println!("cargo:warning=fetch_myco: {} exists — skip", entry.output);
             continue;
         }
-        println!("cargo:warning=fetch_myco: fetching genome gene → {}", entry.output);
+        println!(
+            "cargo:warning=fetch_myco: fetching genome gene → {}",
+            entry.output
+        );
         if let Some(parent) = out_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
         let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
         let fetch_result = if is_genome {
             ncbi_fetch_genome_gene(
-                BASE, EMAIL, api_key.as_deref(), &entry.accession,
-                entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
-                entry.upstream_flank, entry.downstream_flank,
+                BASE,
+                EMAIL,
+                api_key,
+                &entry.accession,
+                entry.locus_tag.as_deref(),
+                entry.seq_start,
+                entry.seq_stop,
+                entry.upstream_flank,
+                entry.downstream_flank,
                 None,
             )
         } else {
-            ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
+            ncbi_fetch_single(BASE, EMAIL, api_key, &entry.accession)
         };
         match fetch_result {
             Ok(seq) => match fs::write(&out_path, seq.as_bytes()) {
                 Ok(_) => println!("cargo:warning=fetch_myco: wrote {}", entry.output),
-                Err(e) => println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.output),
+                Err(e) => println!(
+                    "cargo:warning=fetch_myco: write error for {}: {e}",
+                    entry.output
+                ),
             },
-            Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.output),
+            Err(e) => println!(
+                "cargo:warning=fetch_myco: failed to fetch {}: {e}",
+                entry.output
+            ),
         }
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
     }
@@ -356,45 +394,74 @@ fn fetch_sequences_from_toml(seq_dir: &std::path::Path, api_key: Option<&str>) {
             String::new()
         };
         if existing.contains(entry.accession.as_str()) {
-            println!("cargo:warning=fetch_myco: {} already in {} — skip", entry.accession, entry.fasta);
+            println!(
+                "cargo:warning=fetch_myco: {} already in {} — skip",
+                entry.accession, entry.fasta
+            );
             continue;
         }
-        println!("cargo:warning=fetch_myco: appending {} → {}", entry.accession, entry.fasta);
+        println!(
+            "cargo:warning=fetch_myco: appending {} → {}",
+            entry.accession, entry.fasta
+        );
         let is_genome = entry.locus_tag.is_some() || entry.seq_start.is_some();
         let fetch_result = if is_genome {
             ncbi_fetch_genome_gene(
-                BASE, EMAIL, api_key.as_deref(), &entry.accession,
-                entry.locus_tag.as_deref(), entry.seq_start, entry.seq_stop,
-                entry.upstream_flank, entry.downstream_flank,
+                BASE,
+                EMAIL,
+                api_key,
+                &entry.accession,
+                entry.locus_tag.as_deref(),
+                entry.seq_start,
+                entry.seq_stop,
+                entry.upstream_flank,
+                entry.downstream_flank,
                 entry.strand,
             )
         } else {
-            ncbi_fetch_single(BASE, EMAIL, api_key.as_deref(), &entry.accession)
+            ncbi_fetch_single(BASE, EMAIL, api_key, &entry.accession)
         };
         match fetch_result {
-            Ok(seq) => match fs::OpenOptions::new().append(true).create(true).open(&fasta_path) {
+            Ok(seq) => match fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&fasta_path)
+            {
                 Ok(mut f) => {
                     if let Err(e) = f.write_all(seq.as_bytes()) {
-                        println!("cargo:warning=fetch_myco: write error for {}: {e}", entry.accession);
+                        println!(
+                            "cargo:warning=fetch_myco: write error for {}: {e}",
+                            entry.accession
+                        );
                     } else {
                         println!("cargo:warning=fetch_myco: appended {}", entry.accession);
                     }
                 }
-                Err(e) => println!("cargo:warning=fetch_myco: open error for {}: {e}", entry.fasta),
+                Err(e) => println!(
+                    "cargo:warning=fetch_myco: open error for {}: {e}",
+                    entry.fasta
+                ),
             },
-            Err(e) => println!("cargo:warning=fetch_myco: failed to fetch {}: {e}", entry.accession),
+            Err(e) => println!(
+                "cargo:warning=fetch_myco: failed to fetch {}: {e}",
+                entry.accession
+            ),
         }
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
     }
 }
 
-
 fn reverse_complement_bytes(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b.to_ascii_uppercase() {
-        b'A' => b'T', b'T' => b'A',
-        b'G' => b'C', b'C' => b'G',
-        _ => b'N',
-    }).collect()
+    seq.iter()
+        .rev()
+        .map(|&b| match b.to_ascii_uppercase() {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'G' => b'C',
+            b'C' => b'G',
+            _ => b'N',
+        })
+        .collect()
 }
 
 fn load_genome_fasta(path: &std::path::Path) -> std::collections::HashMap<String, Vec<u8>> {
@@ -423,11 +490,11 @@ fn load_genome_fasta(path: &std::path::Path) -> std::collections::HashMap<String
 
 struct GffFeature {
     seqname: String,
-    ftype:   String,
-    start:   usize,
-    stop:    usize,
-    strand:  char,
-    attrs:   std::collections::HashMap<String, String>,
+    ftype: String,
+    start: usize,
+    stop: usize,
+    strand: char,
+    attrs: std::collections::HashMap<String, String>,
 }
 
 fn parse_gff(path: &std::path::Path) -> Vec<GffFeature> {
@@ -437,11 +504,21 @@ fn parse_gff(path: &std::path::Path) -> Vec<GffFeature> {
     };
     let mut features = Vec::new();
     for line in content.lines() {
-        if line.starts_with('#') || line.is_empty() { continue; }
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
         let cols: Vec<&str> = line.splitn(9, '\t').collect();
-        if cols.len() < 9 { continue; }
-        let start = match cols[3].parse::<usize>() { Ok(v) => v, Err(_) => continue };
-        let stop  = match cols[4].parse::<usize>() { Ok(v) => v, Err(_) => continue };
+        if cols.len() < 9 {
+            continue;
+        }
+        let start = match cols[3].parse::<usize>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let stop = match cols[4].parse::<usize>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
         let strand = cols[6].chars().next().unwrap_or('+');
         let mut attrs = std::collections::HashMap::new();
         for pair in cols[8].split(';') {
@@ -449,20 +526,27 @@ fn parse_gff(path: &std::path::Path) -> Vec<GffFeature> {
                 attrs.insert(k.trim().to_string(), v.trim().to_string());
             }
         }
-        features.push(GffFeature { seqname: cols[0].to_string(), ftype: cols[2].to_string(), start, stop, strand, attrs });
+        features.push(GffFeature {
+            seqname: cols[0].to_string(),
+            ftype: cols[2].to_string(),
+            start,
+            stop,
+            strand,
+            attrs,
+        });
     }
     features
 }
 
 fn gff_feature_matches(f: &GffFeature, gene: &str) -> bool {
-    let name    = f.attrs.get("Name").map(String::as_str).unwrap_or("");
+    let name = f.attrs.get("Name").map(String::as_str).unwrap_or("");
     let gene_kv = f.attrs.get("gene").map(String::as_str).unwrap_or("");
     let product = f.attrs.get("product").map(String::as_str).unwrap_or("");
     match gene {
-        "rrs"  => name == "rrs"  || (f.ftype == "rRNA" && product.contains("16S ribosomal RNA")),
-        "rrl"  => name == "rrl"  || (f.ftype == "rRNA" && product.contains("23S ribosomal RNA")),
+        "rrs" => name == "rrs" || (f.ftype == "rRNA" && product.contains("16S ribosomal RNA")),
+        "rrl" => name == "rrl" || (f.ftype == "rRNA" && product.contains("23S ribosomal RNA")),
         "rpoB" => name == "rpoB" || gene_kv == "rpoB",
-        "erm"  => !name.is_empty() && name.to_ascii_lowercase().contains("erm"),
+        "erm" => !name.is_empty() && name.to_ascii_lowercase().contains("erm"),
         _ => false,
     }
 }
@@ -470,13 +554,31 @@ fn gff_feature_matches(f: &GffFeature, gene: &str) -> bool {
 fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
     use std::collections::HashSet;
 
-    struct Target { gene: &'static str, fasta: &'static str }
+    struct Target {
+        gene: &'static str,
+        fasta: &'static str,
+    }
     let targets = [
-        Target { gene: "erm",  fasta: "myco_erm41.fasta" },
-        Target { gene: "rpoB", fasta: "myco_rpob.fasta" },
-        Target { gene: "hsp65", fasta: "myco_hsp65.fasta" },
-        Target { gene: "rrs",  fasta: "myco_rrs.fasta"  },
-        Target { gene: "rrl",  fasta: "myco_rrl.fasta"  },
+        Target {
+            gene: "erm",
+            fasta: "myco_erm41.fasta",
+        },
+        Target {
+            gene: "rpoB",
+            fasta: "myco_rpob.fasta",
+        },
+        Target {
+            gene: "hsp65",
+            fasta: "myco_hsp65.fasta",
+        },
+        Target {
+            gene: "rrs",
+            fasta: "myco_rrs.fasta",
+        },
+        Target {
+            gene: "rrl",
+            fasta: "myco_rrl.fasta",
+        },
     ];
 
     let db_dir = seq_dir.join("ntm-db/db");
@@ -487,16 +589,23 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
 
     for entry in entries.flatten() {
         let species_path = entry.path();
-        if !species_path.is_dir() { continue; }
+        if !species_path.is_dir() {
+            continue;
+        }
         let dir_name = entry.file_name().to_string_lossy().into_owned();
         let species_name = dir_name.replace('_', " ");
 
-        let gff_path   = species_path.join("genome.gff");
+        let gff_path = species_path.join("genome.gff");
         let fasta_path = species_path.join("genome.fasta");
-        println!("cargo:rerun-if-changed=res/sequences/ntm-db/db/{}/genome.gff", dir_name);
-        if !gff_path.exists() || !fasta_path.exists() { continue; }
+        println!(
+            "cargo:rerun-if-changed=res/sequences/ntm-db/db/{}/genome.gff",
+            dir_name
+        );
+        if !gff_path.exists() || !fasta_path.exists() {
+            continue;
+        }
 
-        let genome   = load_genome_fasta(&fasta_path);
+        let genome = load_genome_fasta(&fasta_path);
         let features = parse_gff(&gff_path);
 
         for target in &targets {
@@ -509,39 +618,63 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
 
             let mut seen: HashSet<(String, usize, usize)> = HashSet::new();
             for feature in &features {
-                if !gff_feature_matches(feature, target.gene) { continue; }
+                if !gff_feature_matches(feature, target.gene) {
+                    continue;
+                }
                 let coord_key = (feature.seqname.clone(), feature.start, feature.stop);
-                if !seen.insert(coord_key) { continue; }
+                if !seen.insert(coord_key) {
+                    continue;
+                }
 
                 let coord_str = format!("{}:{}-{}", feature.seqname, feature.start, feature.stop);
-                if existing.contains(&coord_str) { continue; }
+                if existing.contains(&coord_str) {
+                    continue;
+                }
 
                 let contig = match genome.get(&feature.seqname) {
                     Some(c) => c,
                     None => {
-                        println!("cargo:warning=ntm-db: contig {} not found in {}", feature.seqname, dir_name);
+                        println!(
+                            "cargo:warning=ntm-db: contig {} not found in {}",
+                            feature.seqname, dir_name
+                        );
                         continue;
                     }
                 };
                 if feature.start == 0 || feature.stop > contig.len() {
-                    println!("cargo:warning=ntm-db: coords out of range {} in {}", coord_str, dir_name);
+                    println!(
+                        "cargo:warning=ntm-db: coords out of range {} in {}",
+                        coord_str, dir_name
+                    );
                     continue;
                 }
 
                 let mut seq = contig[feature.start - 1..feature.stop].to_vec();
-                if feature.strand == '-' { seq = reverse_complement_bytes(&seq); }
+                if feature.strand == '-' {
+                    seq = reverse_complement_bytes(&seq);
+                }
 
-                let mut fasta_entry = format!(">{} {} {}\n", coord_str, species_name, target.gene).into_bytes();
+                let mut fasta_entry =
+                    format!(">{} {} {}\n", coord_str, species_name, target.gene).into_bytes();
                 for chunk in seq.chunks(70) {
                     fasta_entry.extend_from_slice(chunk);
                     fasta_entry.push(b'\n');
                 }
                 fasta_entry.push(b'\n');
 
-                match fs::OpenOptions::new().append(true).create(true).open(&target_path) {
+                match fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&target_path)
+                {
                     Ok(mut f) => match f.write_all(&fasta_entry) {
-                        Ok(_)  => println!("cargo:warning=ntm-db: {} {} → {}", species_name, target.gene, target.fasta),
-                        Err(e) => println!("cargo:warning=ntm-db: write error {}: {e}", target.fasta),
+                        Ok(_) => println!(
+                            "cargo:warning=ntm-db: {} {} → {}",
+                            species_name, target.gene, target.fasta
+                        ),
+                        Err(e) => {
+                            println!("cargo:warning=ntm-db: write error {}: {e}", target.fasta)
+                        }
                     },
                     Err(e) => println!("cargo:warning=ntm-db: open error {}: {e}", target.fasta),
                 }
@@ -577,8 +710,10 @@ fn check_rrl_integrity(seq_dir: &std::path::Path) {
         .filter_map(|l| {
             let mut words = l[1..].splitn(4, ' ');
             let accession = words.next()?;
-            if !accession.contains(':') { return None; } // skip NCBI partial sequences
-            let genus   = words.next()?;
+            if !accession.contains(':') {
+                return None;
+            } // skip NCBI partial sequences
+            let genus = words.next()?;
             let species = words.next()?;
             Some(format!("{} {}", genus, species))
         })
@@ -611,8 +746,10 @@ fn check_rrs_integrity(seq_dir: &std::path::Path) {
         .filter_map(|l| {
             let mut words = l[1..].splitn(4, ' ');
             let accession = words.next()?;
-            if !accession.contains(':') { return None; }
-            let genus   = words.next()?;
+            if !accession.contains(':') {
+                return None;
+            }
+            let genus = words.next()?;
             let species = words.next()?;
             Some(format!("{} {}", genus, species))
         })
@@ -648,8 +785,7 @@ fn check_hsp65_integrity(seq_dir: &std::path::Path) {
 fn main() {
     let seq_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("res/sequences");
     println!("cargo:rerun-if-env-changed=NCBI_API_KEY");
-    let api_key = env::var("NCBI_API_KEY")
-        .expect("NCBI_API_KEY must be set");
+    let api_key = env::var("NCBI_API_KEY").expect("NCBI_API_KEY must be set");
 
     fetch_myco_sequences(&seq_dir, Some(api_key.as_str()));
     fetch_sequences_from_toml(&seq_dir, Some(api_key.as_str()));

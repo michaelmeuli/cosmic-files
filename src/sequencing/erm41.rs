@@ -38,7 +38,10 @@ impl std::fmt::Display for Erm41Position28 {
 /// to render erm(41) non-functional, making the organism susceptible. Otherwise delegates to
 /// `pos_opt.is_susceptible()`, preserving `None` for ambiguous, undetermined, or absent positions.
 /// `pos_opt: None` (anchor not found) still allows LOF SNPs to return `Some(true)`.
-pub fn is_susceptible_erm41(pos_opt: Option<&Erm41Position28>, snp_calls: &[Erm41LofCall]) -> Option<bool> {
+pub fn is_susceptible_erm41(
+    pos_opt: Option<&Erm41Position28>,
+    snp_calls: &[Erm41LofCall],
+) -> Option<bool> {
     let has_lof = snp_calls
         .iter()
         .any(|c| c.query_base.is_some_and(|b| c.lof_alts.contains_key(&b)));
@@ -225,10 +228,7 @@ struct Erm41LofRow {
 ///   interpreted as susceptible).
 ///   Only single-nucleotide substitutions that produce the annotated LoF amino-acid change
 ///   (stop codon or annotated replacement) are included; synonymous changes are skipped.
-fn parse_erm41_lof_snps(
-    csv: &str,
-    refseq: &[u8],
-) -> Erm41LofSnpMap {
+fn parse_erm41_lof_snps(csv: &str, refseq: &[u8]) -> Erm41LofSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
     let mut map: Erm41LofSnpMap = BTreeMap::new();
     for row in rdr.deserialize::<Erm41LofRow>() {
@@ -325,13 +325,19 @@ impl Erm41LofCall {
         match self.query_base {
             None => {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, "?")
-            },
+            }
             Some(b) if b == self.wt_base => {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char)
-            },
+            }
             Some(b) if self.lof_alts.contains_key(&b) => {
-                format!("{}{}{} ({}: loss of function)", self.wt_base as char, self.ref_pos + 1, b as char, self.lof_alts[&b].0)
-            },
+                format!(
+                    "{}{}{} ({}: loss of function)",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    self.lof_alts[&b].0
+                )
+            }
             Some(b) => {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char)
             }
@@ -344,10 +350,7 @@ impl Erm41LofCall {
 ///
 /// `snps` maps each reference position to `(wt_base, lof_alts)`, where `lof_alts` maps each
 /// loss-of-function alternate base to a `(mutation_label, drug)` pair.
-fn call_erm41_lof_snps(
-    snps: &Erm41LofSnpMap,
-    ga: &GappedAlignment,
-) -> Vec<Erm41LofCall> {
+fn call_erm41_lof_snps(snps: &Erm41LofSnpMap, ga: &GappedAlignment) -> Vec<Erm41LofCall> {
     snps.iter()
         .map(|(&ref_pos, (wt_base, lof_alts))| {
             let query_base =

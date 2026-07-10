@@ -4,9 +4,9 @@
 use cosmic::app::Settings;
 use cosmic::iced::Limits;
 use std::path::PathBuf;
-use std::{env, fs};
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "redox"))))]
 use std::process;
+use std::{env, fs};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -32,11 +32,11 @@ mod mounter;
 mod mouse_area;
 pub mod operation;
 pub mod russh;
+pub mod sequencing;
 mod spawn_detached;
 pub mod tab;
 mod thumbnail_cacher;
 mod thumbnailer;
-pub mod sequencing;
 pub(crate) mod trash;
 mod zoom;
 

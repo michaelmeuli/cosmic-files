@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
-use serde::{Deserialize, Serialize};
 
 use super::{
     DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls,
@@ -12,9 +12,18 @@ use super::{
     parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
     rpob::identify_sequence_rpob,
-    rrl::{RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare},
-    rrs::{RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare},
-    rrs3end::{RrsSusceptibilityCalls3End, identify_sequence_16s3end, is_susceptible_rrs_3end, is_susceptible_rrs_by_snp_calls_rare_3end},
+    rrl::{
+        RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl,
+        is_susceptible_rrl_by_snp_calls_rare,
+    },
+    rrs::{
+        RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs,
+        is_susceptible_rrs_by_snp_calls_rare,
+    },
+    rrs3end::{
+        RrsSusceptibilityCalls3End, identify_sequence_16s3end, is_susceptible_rrs_3end,
+        is_susceptible_rrs_by_snp_calls_rare_3end,
+    },
     trim_to_min_quality,
 };
 
@@ -108,17 +117,16 @@ pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
     let (prefix, first_epithet) = first
         .description
         .rsplit_once(' ')
-        .map(|(p, e)| (p, e))
         .unwrap_or(("", first.description.as_str()));
     let mut epithets: Vec<&str> = vec![first_epithet];
     for hit in &hits[1..] {
         if (hit.identity - base_identity).abs() > 0.1 {
             break;
         }
-        if let Some((_, epithet)) = hit.description.rsplit_once(' ') {
-            if !epithets.contains(&epithet) {
-                epithets.push(epithet);
-            }
+        if let Some((_, epithet)) = hit.description.rsplit_once(' ')
+            && !epithets.contains(&epithet)
+        {
+            epithets.push(epithet);
         }
     }
     Some(if epithets.len() == 1 {
@@ -149,17 +157,16 @@ pub(crate) fn species_from_rpob_hits(hits: &[SeqIdHit]) -> Option<String> {
     let (prefix, first_epithet) = first
         .description
         .rsplit_once(' ')
-        .map(|(p, e)| (p, e))
         .unwrap_or(("", first.description.as_str()));
     let mut epithets: Vec<&str> = vec![first_epithet];
     for hit in &hits[1..] {
         if (hit.identity - base_identity).abs() > 0.1 {
             break;
         }
-        if let Some((_, epithet)) = hit.description.rsplit_once(' ') {
-            if !epithets.contains(&epithet) {
-                epithets.push(epithet);
-            }
+        if let Some((_, epithet)) = hit.description.rsplit_once(' ')
+            && !epithets.contains(&epithet)
+        {
+            epithets.push(epithet);
         }
     }
     Some(if epithets.len() == 1 {
@@ -181,7 +188,12 @@ pub fn scan_ab1_directory(
     cache_path: Option<PathBuf>,
     max_age_days: u32,
 ) -> Vec<SampleSusceptibilityRecord> {
-    log::debug!("ab1_scan: starting scan of {} (max_age_days={}, cache_path={:?})", scan_path.display(), max_age_days, cache_path);
+    log::debug!(
+        "ab1_scan: starting scan of {} (max_age_days={}, cache_path={:?})",
+        scan_path.display(),
+        max_age_days,
+        cache_path
+    );
 
     // Load disk cache: HashMap<path_string, (mtime_secs, record)>
     type DiskCache = HashMap<String, (u64, SampleSusceptibilityRecord)>;
@@ -193,8 +205,7 @@ pub fn scan_ab1_directory(
     log::debug!("ab1_scan: loaded {} disk cache entries", disk_cache.len());
 
     let now = SystemTime::now();
-    let max_age = (max_age_days > 0)
-        .then(|| Duration::from_secs(u64::from(max_age_days) * 86_400));
+    let max_age = (max_age_days > 0).then(|| Duration::from_secs(u64::from(max_age_days) * 86_400));
 
     let mut records = Vec::new();
     let mut cache_dirty = false;
@@ -216,11 +227,11 @@ pub fn scan_ab1_directory(
         let file_created: Option<SystemTime> = meta.as_ref().and_then(|m| m.created().ok());
 
         // Skip files outside the reporting window (same filter as the PDF report).
-        if let (Some(max_age), Some(created)) = (&max_age, file_created) {
-            if now.duration_since(created).is_ok_and(|age| age > *max_age) {
-                log::debug!("ab1_scan: skipping old file: {}", path.display());
-                continue;
-            }
+        if let (Some(max_age), Some(created)) = (&max_age, file_created)
+            && now.duration_since(created).is_ok_and(|age| age > *max_age)
+        {
+            log::debug!("ab1_scan: skipping old file: {}", path.display());
+            continue;
         }
 
         let mtime_secs: u64 = meta
@@ -238,14 +249,24 @@ pub fn scan_ab1_directory(
         // Disk cache hit: mtime unchanged and seq_id_hits stored → reuse previous result.
         if let Some((cached_mtime, cached_record)) = disk_cache.get(&path_key) {
             if *cached_mtime == mtime_secs && !cached_record.seq_id_hits.is_empty() {
-                log::debug!("ab1_scan: disk cache hit for {} ({} hits, canonical={})", path.display(), cached_record.seq_id_hits.len(), canonical_path.display());
+                log::debug!(
+                    "ab1_scan: disk cache hit for {} ({} hits, canonical={})",
+                    path.display(),
+                    cached_record.seq_id_hits.len(),
+                    canonical_path.display()
+                );
                 if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
                     guard.insert(canonical_path, cached_record.seq_id_hits.clone());
                 }
                 records.push(cached_record.clone());
                 continue;
             } else {
-                log::debug!("ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={})", path.display(), *cached_mtime == mtime_secs, cached_record.seq_id_hits.len());
+                log::debug!(
+                    "ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={})",
+                    path.display(),
+                    *cached_mtime == mtime_secs,
+                    cached_record.seq_id_hits.len()
+                );
             }
         } else {
             log::debug!("ab1_scan: no disk cache entry for {}", path.display());
@@ -306,7 +327,13 @@ pub fn scan_ab1_directory(
         };
 
         // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
-        log::debug!("ab1_scan: alignment done for {} → {} hits (top: {:?}, canonical={})", path.display(), seq_id_hits.len(), seq_id_hits.first().map(|h| (&h.description, h.identity)), canonical_path.display());
+        log::debug!(
+            "ab1_scan: alignment done for {} → {} hits (top: {:?}, canonical={})",
+            path.display(),
+            seq_id_hits.len(),
+            seq_id_hits.first().map(|h| (&h.description, h.identity)),
+            canonical_path.display()
+        );
         if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
             guard.insert(canonical_path, seq_id_hits.clone());
         }
@@ -320,7 +347,8 @@ pub fn scan_ab1_directory(
             if erm41_result.is_some() {
                 return erm41_result;
             }
-            let rrl_result = is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
+            let rrl_result =
+                is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
             if rrl_result.is_some() {
                 return rrl_result;
             }
@@ -340,14 +368,23 @@ pub fn scan_ab1_directory(
                     is_susceptible: if hit.description == DESC_MASSILIENSE {
                         Some(true)
                     } else {
-                        is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
+                        is_susceptible_erm41(
+                            hit.erm41_position_28_opt.as_ref(),
+                            &hit.erm41_snp_calls,
+                        )
                     },
                 },
                 rrl: RrlSusceptibilityCalls {
                     position_2058_2059: hit.rrl_position_2058_2059_opt,
                     snp_calls: hit.rrl_snp_calls.clone(),
-                    is_susceptible: is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
-                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls),
+                    is_susceptible: is_susceptible_rrl(
+                        hit.rrl_position_2058_2059_opt.as_ref(),
+                        &hit.rrl_snp_calls,
+                    ),
+                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
+                        hit.rrl_position_2058_2059_opt.as_ref(),
+                        &hit.rrl_snp_calls,
+                    ),
                 },
                 rrs: RrsSusceptibilityCalls {
                     snp_calls: hit.rrs_snp_calls.clone(),
@@ -358,7 +395,9 @@ pub fn scan_ab1_directory(
                     position_1248: hit.rrs3end_position_1248_opt,
                     snp_calls: hit.rrs_snp_calls_3end.clone(),
                     is_susceptible: is_susceptible_rrs_3end(&hit.rrs_snp_calls_3end),
-                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(&hit.rrs_snp_calls_3end),  
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
+                        &hit.rrs_snp_calls_3end,
+                    ),
                 },
                 pnca: PncaSusceptibilityCalls {
                     snp_calls: hit.pnca_snp_calls.clone(),
@@ -394,21 +433,23 @@ pub fn scan_ab1_directory(
     }
 
     // Persist the updated disk cache.
-    if cache_dirty {
-        if let Some(cp) = &cache_path {
-            match serde_json::to_string(&disk_cache) {
-                Ok(json) => {
-                    if let Err(e) = std::fs::write(cp, json) {
-                        log::warn!("ab1 scan: failed to write disk cache {}: {e}", cp.display());
-                    }
+    if cache_dirty && let Some(cp) = &cache_path {
+        match serde_json::to_string(&disk_cache) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(cp, json) {
+                    log::warn!("ab1 scan: failed to write disk cache {}: {e}", cp.display());
                 }
-                Err(e) => log::warn!("ab1 scan: failed to serialise disk cache: {e}"),
             }
+            Err(e) => log::warn!("ab1 scan: failed to serialise disk cache: {e}"),
         }
     }
 
     let mem_cache_size = AB1_SEQ_CACHE.read().map(|g| g.len()).unwrap_or(0);
-    log::debug!("ab1_scan: finished: {} records, AB1_SEQ_CACHE has {} entries", records.len(), mem_cache_size);
+    log::debug!(
+        "ab1_scan: finished: {} records, AB1_SEQ_CACHE has {} entries",
+        records.len(),
+        mem_cache_size
+    );
 
     // Reverse-alphabetical by sample_id (highest first)
     records.sort_by(|a, b| b.sample_id.cmp(&a.sample_id));
@@ -510,7 +551,9 @@ pub fn write_ab1_csv(
             rec.gene.as_deref().unwrap_or(""),
             overall.as_str(),
             rec.species.as_deref().unwrap_or(""),
-            &rec.identity.map(|i| format!("{:.1}", i)).unwrap_or_default(),
+            &rec.identity
+                .map(|i| format!("{:.1}", i))
+                .unwrap_or_default(),
             erm41_pos.as_str(),
             erm41_lof.as_str(),
             erm41_sus.as_str(),
@@ -631,7 +674,9 @@ pub fn write_rare_mutations_csv(
             rec.gene.as_deref().unwrap_or(""),
             overall.as_str(),
             rec.species.as_deref().unwrap_or(""),
-            &rec.identity.map(|i| format!("{:.1}", i)).unwrap_or_default(),
+            &rec.identity
+                .map(|i| format!("{:.1}", i))
+                .unwrap_or_default(),
             erm41_pos.as_str(),
             erm41_lof.as_str(),
             erm41_sus.as_str(),

@@ -5,13 +5,13 @@
 use cosmic::desktop::fde::GenericEntry;
 use mime_guess::Mime;
 use rustc_hash::FxHashMap;
-use std::path::Path;
-use std::sync::{LazyLock, Mutex};
-use std::process;
-#[cfg(not(windows))]
-use std::time::Instant;
 #[cfg(not(windows))]
 use std::fs;
+use std::path::Path;
+use std::process;
+use std::sync::{LazyLock, Mutex};
+#[cfg(not(windows))]
+use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub struct Thumbnailer {

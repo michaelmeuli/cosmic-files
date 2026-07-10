@@ -25,7 +25,7 @@ pub struct MimeIconCache {
 
 impl MimeIconCache {
     #[cfg(not(unix))]
-    pub fn get(&mut self, _key: MimeIconKey) -> Option<icon::Handle> {
+    fn get(&mut self, _key: MimeIconKey) -> Option<icon::Handle> {
         None
     }
 
@@ -83,7 +83,7 @@ pub fn mime_for_path(
         // Try the shared mime info cache first
         let mut gb = mime_icon_cache.shared_mime_info.guess_mime_type();
         gb.zero_size(false);
-    if remote {
+        if remote {
             if let Some(file_name) = path.file_name().and_then(std::ffi::OsStr::to_str) {
                 gb.file_name(file_name);
             }

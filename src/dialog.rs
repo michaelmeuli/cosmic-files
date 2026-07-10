@@ -451,7 +451,7 @@ enum Message {
     None,
     Cancel,
     Choice(usize, usize),
-    Config(Config),
+    Config(Box<Config>),
     DialogCancel,
     DialogComplete,
     DialogUpdate(DialogPage),
@@ -1341,11 +1341,12 @@ impl Application for App {
                 .map(|()| cosmic::action::none());
         }
         if let Some(data) = self.nav_model.data::<ClientData>(entity)
-            && let Some(client) = CLIENTS.get(&data.0) {
-                return client
-                    .connect(data.1.clone())
-                    .map(|()| cosmic::action::none());
-            }
+            && let Some(client) = CLIENTS.get(&data.0)
+        {
+            return client
+                .connect(data.1.clone())
+                .map(|()| cosmic::action::none());
+        }
         Task::none()
     }
 
@@ -1421,11 +1422,11 @@ impl Application for App {
                 }
             }
             Message::Config(config) => {
-                if config != self.flags.config {
+                if *config != self.flags.config {
                     log::info!("update config");
                     // Don't overwrite military time
                     let military_time = self.flags.config.tab.military_time;
-                    self.flags.config = config;
+                    self.flags.config = *config;
                     self.flags.config.tab.military_time = military_time;
                     return self.update_config();
                 }
@@ -1602,19 +1603,22 @@ impl Application for App {
                 if let Some(old_items) = self.client_items.get(&client_key) {
                     for old_item in old_items {
                         if let Some(old_path) = old_item.path()
-                            && old_item.is_connected() {
-                                let mut still_connected = false;
-                                for item in &client_items {
-                                    if let Some(path) = item.path()
-                                        && path == old_path && item.is_connected() {
-                                            still_connected = true;
-                                            break;
-                                        }
-                                }
-                                if !still_connected {
-                                    not_connected.push(Location::Path(old_path));
+                            && old_item.is_connected()
+                        {
+                            let mut still_connected = false;
+                            for item in &client_items {
+                                if let Some(path) = item.path()
+                                    && path == old_path
+                                    && item.is_connected()
+                                {
+                                    still_connected = true;
+                                    break;
                                 }
                             }
+                            if !still_connected {
+                                not_connected.push(Location::Path(old_path));
+                            }
+                        }
                     }
                 }
 
@@ -2170,7 +2174,7 @@ impl Application for App {
                         update.errors
                     );
                 }
-                Message::Config(update.config)
+                Message::Config(Box::new(update.config))
             }),
             cosmic_config::config_subscription::<_, TimeConfig>(
                 TypeId::of::<TimeSubscription>(),

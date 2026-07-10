@@ -17,9 +17,7 @@ use cosmic::iced::widget::button::focus;
 use cosmic::iced::widget::scrollable;
 use cosmic::iced::widget::scrollable::AbsoluteOffset;
 use cosmic::iced::window::{self, Event as WindowEvent, Id as WindowId};
-use cosmic::iced::{
-    self, Alignment, Event, Length, Size, Subscription, event, mouse, stream,
-};
+use cosmic::iced::{self, Alignment, Event, Length, Size, Subscription, event, mouse, stream};
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use cosmic::iced::{
     Limits, Point,
@@ -37,7 +35,7 @@ use cosmic::widget::menu::action::MenuAction;
 use cosmic::widget::menu::key_bind::KeyBind;
 use cosmic::widget::segmented_button::{self, Entity, ReorderEvent};
 use cosmic::widget::{self, icon, settings, space};
-use cosmic::{Application, ApplicationExt, Element, cosmic_theme, executor, style, surface, theme};
+use cosmic::{Application, ApplicationExt, Element, cosmic_theme, executor, surface, theme};
 use mime_guess::Mime;
 use notify_debouncer_full::notify::{self, RecommendedWatcher};
 use notify_debouncer_full::{DebouncedEvent, Debouncer, RecommendedCache, new_debouncer};
@@ -62,24 +60,24 @@ use crate::clipboard::{
     ClipboardPasteText, ClipboardPasteVideo,
 };
 use crate::config::{
-    AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TBConfig, TIME_CONFIG_ID, TabConfig,
-    TimeConfig, TypeToSearch,
+    AppTheme, Config, DesktopConfig, Favorite, IconSizes, State, TBConfig, TIME_CONFIG_ID,
+    TabConfig, TimeConfig, TypeToSearch,
 };
 use crate::dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings};
 use crate::key_bind::key_binds;
 use crate::localize::LANGUAGE_SORTER;
-use crate::mime_app::{MimeApp, MimeAppCache, MimeAppMatch};
 #[cfg(feature = "desktop")]
-use crate::mime_app as mime_app;
+use crate::mime_app;
+use crate::mime_app::{MimeApp, MimeAppCache, MimeAppMatch};
 use crate::mounter::{
     MOUNTERS, MounterAuth, MounterItem, MounterItems, MounterKey, MounterMessage,
-};
-use crate::russh::{
-    CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, SlurmJobId, same_uri,
 };
 use crate::operation::{
     Controller, Operation, OperationError, OperationErrorType, OperationSelection, ReplaceResult,
     copy_unique_path,
+};
+use crate::russh::{
+    CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, SlurmJobId, same_uri,
 };
 use crate::spawn_detached::spawn_detached;
 use crate::tab::{
@@ -2307,15 +2305,16 @@ impl App {
                 },
             ))
             .add(
-            widget::settings::item::builder(fl!("connected-drives")).toggler(
-                config.show_connected_drives,
-                move |show_connected_drives| {
-                    Message::DesktopConfig(DesktopConfig {
-                        show_connected_drives,
-                        ..config
-                    })
-                },
-            ));
+                widget::settings::item::builder(fl!("connected-drives")).toggler(
+                    config.show_connected_drives,
+                    move |show_connected_drives| {
+                        Message::DesktopConfig(DesktopConfig {
+                            show_connected_drives,
+                            ..config
+                        })
+                    },
+                ),
+            );
 
         let icon_size = config.icon_size;
         let grid_spacing = config.grid_spacing;
@@ -2966,7 +2965,7 @@ impl Application for App {
 
         let nav_model = self.nav_model()?;
 
-        let mut nav = cosmic::widget::nav_bar(nav_model, |entity| {
+        let nav = cosmic::widget::nav_bar(nav_model, |entity| {
             cosmic::Action::Cosmic(cosmic::app::Action::NavBar(entity))
         })
         .drag_id(self.nav_drag_id)
@@ -5384,7 +5383,7 @@ impl Application for App {
                         }
                         tab::Command::DeleteTbProfilerResults(uri, tb_config) => {
                             commands.push(
-                                self.update(Message::DeleteTbProfilerResults(uri, tb_config)),
+                                self.update(Message::DeleteTbProfilerResults(uri, *tb_config)),
                             );
                         }
                         tab::Command::AddToSidebar(path) => {
@@ -6578,9 +6577,16 @@ impl Application for App {
                     let records = tokio::task::spawn_blocking(move || {
                         let cache_path = if !ab1_cache_path.is_empty() {
                             let p = std::path::PathBuf::from(ab1_cache_path);
-                            Some(if p.is_dir() { p.join("ab1_scan_cache.json") } else { p })
+                            Some(if p.is_dir() {
+                                p.join("ab1_scan_cache.json")
+                            } else {
+                                p
+                            })
                         } else {
-                            Some(std::path::PathBuf::from(scan_path.clone()).join("ab1_scan_cache.json"))
+                            Some(
+                                std::path::PathBuf::from(scan_path.clone())
+                                    .join("ab1_scan_cache.json"),
+                            )
                         };
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
@@ -6616,7 +6622,9 @@ impl Application for App {
                     );
                 }
                 let rare_path = out_path.with_file_name("rare_mutations.csv");
-                if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path) {
+                if let Err(e) =
+                    crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path)
+                {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
                     log::info!("Rare mutations CSV → {}", rare_path.display());
@@ -6647,7 +6655,10 @@ impl Application for App {
                 if !topic.is_empty() {
                     let n = records.len();
                     tokio::spawn(async move {
-                        if let Err(e) = crate::sequencing::ntfy_notify::send_report_ntfy(&topic, pdf_bytes, n).await {
+                        if let Err(e) =
+                            crate::sequencing::ntfy_notify::send_report_ntfy(&topic, pdf_bytes, n)
+                                .await
+                        {
                             log::warn!("ntfy notification failed: {e}");
                         }
                     });
@@ -6664,9 +6675,16 @@ impl Application for App {
                     let records = tokio::task::spawn_blocking(move || {
                         let cache_path = if !ab1_cache_path.is_empty() {
                             let p = std::path::PathBuf::from(ab1_cache_path);
-                            Some(if p.is_dir() { p.join("ab1_scan_cache.json") } else { p })
+                            Some(if p.is_dir() {
+                                p.join("ab1_scan_cache_2.json")
+                            } else {
+                                p
+                            })
                         } else {
-                            Some(std::path::PathBuf::from(scan_path.clone()).join("ab1_scan_cache.json"))
+                            Some(
+                                std::path::PathBuf::from(scan_path.clone())
+                                    .join("ab1_scan_cache_2.json"),
+                            )
                         };
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
@@ -6702,7 +6720,9 @@ impl Application for App {
                     );
                 }
                 let rare_path = out_path.with_file_name("rare_mutations_2.csv");
-                if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path) {
+                if let Err(e) =
+                    crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path)
+                {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
                     log::info!("Rare mutations CSV → {}", rare_path.display());
@@ -6733,7 +6753,10 @@ impl Application for App {
                 if !topic.is_empty() {
                     let n = records.len();
                     tokio::spawn(async move {
-                        if let Err(e) = crate::sequencing::ntfy_notify::send_report_ntfy(&topic, pdf_bytes, n).await {
+                        if let Err(e) =
+                            crate::sequencing::ntfy_notify::send_report_ntfy(&topic, pdf_bytes, n)
+                                .await
+                        {
                             log::warn!("ntfy notification failed: {e}");
                         }
                     });

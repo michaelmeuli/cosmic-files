@@ -1,7 +1,7 @@
 use super::{
-    GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
-    dedup_substring_same_desc, parse_multi_fasta, reverse_complement, trim_alignment_ends,
-    RRS3END_ANCHOR_L, RRS3END_ANCHOR_R,
+    GappedAlignment, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R, SeqIdHit, align_to_ref,
+    base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
+    trim_alignment_ends,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -13,10 +13,10 @@ type RrsSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Rrs3EndPosition1248 {
-    A1248,        // M. marinum
-    G1248,         // M. ulcerans
-    C1248,         
-    T1248,         
+    A1248, // M. marinum
+    G1248, // M. ulcerans
+    C1248,
+    T1248,
     Undetermined, // Anchor not found in read
 }
 
@@ -113,7 +113,10 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
                         .and_then(|s| s.bytes().next()),
                 ) {
                     let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
-                    let variant = entry.1.entry(alt).or_insert_with(|| (Vec::new(), ecoli.clone()));
+                    let variant = entry
+                        .1
+                        .entry(alt)
+                        .or_insert_with(|| (Vec::new(), ecoli.clone()));
                     if !variant.0.contains(&drug) {
                         variant.0.push(drug);
                     }
@@ -126,9 +129,18 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
 
 static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLock::new(|| {
     [
-        ("Mycobacterium abscessus",      include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv")),
-        ("Mycobacterium avium",          include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv")),
-        ("Mycobacterium intracellulare", include_str!("../../res/sequences/ntm-db/db/Mycobacterium_intracellulare/variants.csv")),
+        (
+            "Mycobacterium abscessus",
+            include_str!("../../res/sequences/ntm-db/db/Mycobacterium_abscessus/variants.csv"),
+        ),
+        (
+            "Mycobacterium avium",
+            include_str!("../../res/sequences/ntm-db/db/Mycobacterium_avium/variants.csv"),
+        ),
+        (
+            "Mycobacterium intracellulare",
+            include_str!("../../res/sequences/ntm-db/db/Mycobacterium_intracellulare/variants.csv"),
+        ),
     ]
     .into_iter()
     .map(|(species, csv)| (species, parse_rrs_resistance_snps(csv)))
@@ -154,25 +166,48 @@ pub struct RrsSnpCall3End {
 
 impl RrsSnpCall3End {
     pub fn call_tag(&self) -> String {
-        let ecoli_prefix: Option<&str> = self.resistance_bases.values()
+        let ecoli_prefix: Option<&str> = self
+            .resistance_bases
+            .values()
             .next()
             .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
 
         match self.query_base {
             None => {
                 format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, "?")
-            },
+            }
             Some(b) if b == self.wt_base => match ecoli_prefix {
-                Some(p) => format!("{}{}{} (E.coli: {}{})", self.wt_base as char, self.ref_pos + 1, b as char, p, b as char),
-                None    => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
+                Some(p) => format!(
+                    "{}{}{} (E.coli: {}{})",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    p,
+                    b as char
+                ),
+                None => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
             },
             Some(b) if self.resistance_bases.contains_key(&b) => {
                 let (drugs, ecoli) = &self.resistance_bases[&b];
-                format!("{}{}{} ({}, E.coli: {})", self.wt_base as char, self.ref_pos + 1, b as char, drugs.join(", "), ecoli)
+                format!(
+                    "{}{}{} ({}, E.coli: {})",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    drugs.join(", "),
+                    ecoli
+                )
             }
             Some(b) => match ecoli_prefix {
-                Some(p) => format!("{}{}{} (E.coli: {}{})", self.wt_base as char, self.ref_pos + 1, b as char, p, b as char),
-                None    => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
+                Some(p) => format!(
+                    "{}{}{} (E.coli: {}{})",
+                    self.wt_base as char,
+                    self.ref_pos + 1,
+                    b as char,
+                    p,
+                    b as char
+                ),
+                None => format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, b as char),
             },
         }
     }
@@ -190,10 +225,10 @@ pub struct RrsSusceptibilityCalls3End {
 /// Returns `Some(false)` if any observed SNP base is a resistance-conferring alt, or `None` if
 /// no resistance alt is observed.
 pub fn is_susceptible_rrs_3end(snp_calls: &[RrsSnpCall3End]) -> Option<bool> {
-    if snp_calls
-        .iter()
-        .any(|c| c.query_base.is_some_and(|b| c.resistance_bases.contains_key(&b)))
-    {
+    if snp_calls.iter().any(|c| {
+        c.query_base
+            .is_some_and(|b| c.resistance_bases.contains_key(&b))
+    }) {
         Some(false)
     } else {
         None

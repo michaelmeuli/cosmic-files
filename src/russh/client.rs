@@ -215,29 +215,30 @@ async fn remote_sftp_list(
         // display layer can toggle without a rescan.
         let mut is_tbprofiler_groupable_raw_result_file = false;
         if file_type == FileType::File
-            && let Some((sample_id, suffix)) = name.split_once(".results.") {
-                let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
-                    json: None,
-                    csv: None,
-                    docx: None,
-                    mtime: info
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0),
-                    size: None,
-                });
+            && let Some((sample_id, suffix)) = name.split_once(".results.")
+        {
+            let entry = samples.entry(sample_id.to_string()).or_insert(SampleFiles {
+                json: None,
+                csv: None,
+                docx: None,
+                mtime: info
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                size: None,
+            });
 
-                match suffix {
-                    "json" => entry.json = Some(new_path.clone()),
-                    "csv" => entry.csv = Some(new_path.clone()),
-                    "docx" => entry.docx = Some(new_path.clone()),
-                    _ => {}
-                }
-
-                is_tbprofiler_groupable_raw_result_file = true;
+            match suffix {
+                "json" => entry.json = Some(new_path.clone()),
+                "csv" => entry.csv = Some(new_path.clone()),
+                "docx" => entry.docx = Some(new_path.clone()),
+                _ => {}
             }
+
+            is_tbprofiler_groupable_raw_result_file = true;
+        }
 
         let metadata = if !force_dir {
             let mtime = info
@@ -251,7 +252,10 @@ async fn remote_sftp_list(
             let mut children_opt = None;
             let is_tbprofiler_json =
                 MimeGuess::from_path(&new_path).first_or_octet_stream() == mime::APPLICATION_JSON;
-            let _is_ab1 = new_path.extension().map(|e| e.eq_ignore_ascii_case("ab1")).unwrap_or(false);
+            let _is_ab1 = new_path
+                .extension()
+                .map(|e| e.eq_ignore_ascii_case("ab1"))
+                .unwrap_or(false);
             let mut tbprofilerjson_opt = None;
             let mut is_susceptible = None;
             if is_tbprofiler_json {
@@ -366,8 +370,11 @@ async fn remote_sftp_list(
     let sample_susceptibility: HashMap<String, bool> = items
         .iter()
         .filter_map(|item| {
-            if let ItemMetadata::RusshPath { is_tbprofiler_groupable_raw_result_file: true, is_susceptible: Some(true), .. } =
-                &item.metadata
+            if let ItemMetadata::RusshPath {
+                is_tbprofiler_groupable_raw_result_file: true,
+                is_susceptible: Some(true),
+                ..
+            } = &item.metadata
             {
                 let id = item.name.find('.').map(|i| item.name[..i].to_string())?;
                 Some((id, true))
@@ -381,18 +388,22 @@ async fn remote_sftp_list(
     // and propagate susceptibility to non-JSON raw files
     for item in &mut items {
         let name = item.name.clone();
-        if let ItemMetadata::RusshPath { is_tbprofiler_groupable_raw_result_file, is_susceptible, .. } =
-            &mut item.metadata
-            && *is_tbprofiler_groupable_raw_result_file {
-                let sample_id = name.find('.').map(|i| &name[..i]);
-                if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none()))
-                {
-                    *is_tbprofiler_groupable_raw_result_file = false;
-                } else if let Some(id) = sample_id
-                    && let Some(&sus) = sample_susceptibility.get(id) {
-                        *is_susceptible = Some(sus);
-                    }
+        if let ItemMetadata::RusshPath {
+            is_tbprofiler_groupable_raw_result_file,
+            is_susceptible,
+            ..
+        } = &mut item.metadata
+            && *is_tbprofiler_groupable_raw_result_file
+        {
+            let sample_id = name.find('.').map(|i| &name[..i]);
+            if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none())) {
+                *is_tbprofiler_groupable_raw_result_file = false;
+            } else if let Some(id) = sample_id
+                && let Some(&sus) = sample_susceptibility.get(id)
+            {
+                *is_susceptible = Some(sus);
             }
+        }
     }
 
     // ------------------------------------------------------------
@@ -940,10 +951,7 @@ pub async fn run_tbprofiler(
     Ok(job_id)
 }
 
-async fn poll_running_tasks(
-    client: &Client,
-    array_id: usize,
-) -> Result<usize, anyhow::Error> {
+async fn poll_running_tasks(client: &Client, array_id: usize) -> Result<usize, anyhow::Error> {
     let cmd = format!(
         "squeue -j {} -r -h -o \"%T\" 2>/dev/null | grep -c RUNNING || true",
         array_id
@@ -1864,17 +1872,32 @@ impl Connector for Russh {
         )
     }
 
-    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> cosmic::Task<super::DownloadEvent> {
+    fn download_file(
+        &self,
+        paths: Box<[PathBuf]>,
+        uris: Vec<String>,
+        to: PathBuf,
+        zip_output: Option<PathBuf>,
+    ) -> cosmic::Task<super::DownloadEvent> {
         let command_tx = self.command_tx.clone();
         cosmic::Task::stream(cosmic::iced::stream::channel(
             16,
-            move |mut event_tx: cosmic::iced::futures::channel::mpsc::Sender<super::DownloadEvent>| async move {
+            move |mut event_tx: cosmic::iced::futures::channel::mpsc::Sender<
+                super::DownloadEvent,
+            >| async move {
                 use cosmic::iced::futures::SinkExt;
                 let (res_tx, mut res_rx) = tokio::sync::oneshot::channel();
                 let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
                 command_tx
-                    .send(Cmd::Download(paths, uris, to, zip_output, res_tx, progress_tx))
+                    .send(Cmd::Download(
+                        paths,
+                        uris,
+                        to,
+                        zip_output,
+                        res_tx,
+                        progress_tx,
+                    ))
                     .unwrap();
 
                 let result = loop {
@@ -1899,18 +1922,13 @@ impl Connector for Russh {
         ))
     }
 
-    fn remote_scan(
-        &self,
-        uri: &str,
-        sizes: IconSizes,
-    ) -> Option<Result<Vec<tab::Item>, String>> {
+    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
 
-        if let Err(e) = self.command_tx.send(Cmd::RemoteScan(
-            uri.to_string(),
-            sizes,
-            items_tx,
-        )) {
+        if let Err(e) = self
+            .command_tx
+            .send(Cmd::RemoteScan(uri.to_string(), sizes, items_tx))
+        {
             log::error!(
                 "remote_scan: failed to send Cmd::RemoteScan for uri {}: {}",
                 uri,
@@ -1973,7 +1991,11 @@ impl Connector for Russh {
                 res_rx.await
             },
             |x| match x {
-                Ok(Ok(job)) => log::info!("TBProfiler started: job_id={}, tasks={}", job.array_id, job.tasks),
+                Ok(Ok(job)) => log::info!(
+                    "TBProfiler started: job_id={}, tasks={}",
+                    job.array_id,
+                    job.tasks
+                ),
                 Ok(Err(err)) => log::error!("TBProfiler failed: {err}"),
                 Err(err) => log::error!("Channel error: {err}"),
             },
@@ -2083,7 +2105,11 @@ impl Connector for Russh {
                                     .await
                                     .unwrap(),
                                 Event::JobStatusUpdate(uri, array_id, running_tasks) => output
-                                    .send(ClientMessage::JobStatusUpdate(uri, array_id, running_tasks))
+                                    .send(ClientMessage::JobStatusUpdate(
+                                        uri,
+                                        array_id,
+                                        running_tasks,
+                                    ))
                                     .await
                                     .unwrap(),
                             }

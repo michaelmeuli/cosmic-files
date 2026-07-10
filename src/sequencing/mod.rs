@@ -7,9 +7,9 @@
 //! Type material ties formal species names to physical specimens (culture collections for prokaryotes,
 //! museum or herbarium specimens for eukaryotes), as annotated in the
 //! [NCBI Taxonomy Database](http://www.ncbi.nlm.nih.gov/taxonomy).
-//! 
+//!
 //! See fn fetch_myco_sequences() in build.rs for details on how the sequences were fetched from NCBI at build time.
-//! 
+//!
 //! `myco_erm41.fasta` is generated at build time but unused; erm41 identification uses
 //! per-subspecies references (`erm41_abscessus_ATCC_19977.fasta`, `erm41_bolletii_CIP_108541.fasta`, `erm41_massiliense_CCUG_48898.fasta`) instead.
 
@@ -20,9 +20,9 @@ pub mod hsp65;
 pub mod ntfy_notify;
 pub mod pnca;
 pub mod rpob;
+pub mod rrl;
 pub mod rrs;
 pub mod rrs3end;
-pub mod rrl;
 pub mod serde_helpers;
 pub mod tb_data;
 
@@ -35,7 +35,7 @@ use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 use pnca::{PncaSnpCall, PncaSusceptibilityCalls};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
-use rrs3end::{RrsSnpCall3End, Rrs3EndPosition1248, RrsSusceptibilityCalls3End};
+use rrs3end::{Rrs3EndPosition1248, RrsSnpCall3End, RrsSusceptibilityCalls3End};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
@@ -102,7 +102,6 @@ const REF_PNCA: &str = concat!(
     include_str!("../../res/sequences/pnca/pnca_canettii_CIPT_140010059.fasta"),
 );
 
-
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SusceptibilityCalls {
@@ -128,7 +127,7 @@ impl std::fmt::Display for SusceptibilityCalls {
             }
         }
         if !erm.is_empty() {
-            parts.push(format!("{}", erm.join(", ")));
+            parts.push(erm.join(", ").to_string());
         }
 
         let mut rrl: Vec<String> = Vec::new();
@@ -139,17 +138,19 @@ impl std::fmt::Display for SusceptibilityCalls {
             rrl.push(c.call_tag());
         }
         if !rrl.is_empty() {
-            parts.push(format!("{}", rrl.join(", ")));
+            parts.push(rrl.join(", ").to_string());
         }
 
-        let rrs: Vec<String> = self.rrs.snp_calls.iter()
+        let rrs: Vec<String> = self
+            .rrs
+            .snp_calls
+            .iter()
             .map(|c| c.call_tag())
             .filter(|t| !t.is_empty())
             .collect();
         if !rrs.is_empty() {
-            parts.push(format!("{}", rrs.join(", ")));
+            parts.push(rrs.join(", ").to_string());
         }
-
 
         let mut rrs3end: Vec<String> = Vec::new();
         if let Some(pos) = &self.rrs3end.position_1248 {
@@ -162,7 +163,7 @@ impl std::fmt::Display for SusceptibilityCalls {
             }
         }
         if !rrs3end.is_empty() {
-            parts.push(format!("{}", rrs3end.join(", ")));
+            parts.push(rrs3end.join(", ").to_string());
         }
 
         let pnca: Vec<String> = self
@@ -173,7 +174,7 @@ impl std::fmt::Display for SusceptibilityCalls {
             .map(|c| format!("{} {}", c.site_label(), c.call_tag()))
             .collect();
         if !pnca.is_empty() {
-            parts.push(format!("{}", pnca.join(", ")));
+            parts.push(pnca.join(", ").to_string());
         }
 
         write!(f, "{}", parts.join(" | "))
@@ -227,7 +228,6 @@ pub fn trim_start_end<'a>(seq: &'a [u8], fwd_start: &[u8], fwd_end: &[u8]) -> &'
     &seq[start..end.min(seq.len())]
 }
 
-
 /// Trim leading and trailing low-quality bases using a sliding-window average.
 ///
 /// Scans inward from each end with a window of [`WINDOW`] bases; the first
@@ -242,8 +242,16 @@ pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> Option<
     // Short read: single-base scan.
     if n < WINDOW {
         let start = (0..n).find(|&i| qual[i] >= min_q).unwrap_or(n);
-        let end = (0..n).rev().find(|&i| qual[i] >= min_q).map(|i| i + 1).unwrap_or(0);
-        return if start < end { Some(&seq[start..end]) } else { None };
+        let end = (0..n)
+            .rev()
+            .find(|&i| qual[i] >= min_q)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        return if start < end {
+            Some(&seq[start..end])
+        } else {
+            None
+        };
     }
 
     let threshold = min_q as u32 * WINDOW as u32;
@@ -259,7 +267,11 @@ pub fn trim_to_min_quality<'a>(seq: &'a [u8], qual: &[u8], min_q: u8) -> Option<
         .find(|&e| qual[e - WINDOW..e].iter().map(|&q| q as u32).sum::<u32>() >= threshold)
         .unwrap_or(0);
 
-    if start < end { Some(&seq[start..end]) } else { None }
+    if start < end {
+        Some(&seq[start..end])
+    } else {
+        None
+    }
 }
 
 /// Parse a FASTA string, returning just the sequence bytes (ignores header).
@@ -299,8 +311,7 @@ fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
             // e.g. the bovis pncA reference showing up indistinguishably as "Mycobacterium
             // tuberculosis", same as H37Rv — so fold the qualifier + its epithet in too.
             let mut qualifier_words = words.next().unwrap_or("").split_whitespace();
-            if let Some(qualifier @ ("variant" | "subsp." | "subspecies")) =
-                qualifier_words.next()
+            if let Some(qualifier @ ("variant" | "subsp." | "subspecies")) = qualifier_words.next()
                 && let Some(epithet) = qualifier_words.next()
             {
                 cur_desc = format!("{cur_desc} {qualifier} {epithet}");
@@ -438,9 +449,7 @@ pub fn align_to_ref(query: &[u8], reference: &[u8]) -> GappedAlignment {
         };
     }
 
-    let score_fn = |a: u8, b: u8| -> i32 {
-        if a.to_ascii_uppercase() == b.to_ascii_uppercase() { 1 } else { -1 }
-    };
+    let score_fn = |a: u8, b: u8| -> i32 { if a.eq_ignore_ascii_case(&b) { 1 } else { -1 } };
     let mut aligner = Aligner::new(-5, -1, &score_fn);
     let alignment = aligner.semiglobal(query, reference);
 
@@ -467,8 +476,12 @@ pub fn align_to_ref(query: &[u8], reference: &[u8]) -> GappedAlignment {
                 gapped_ref.push(b'-');
                 qi += 1;
             }
-            Xclip(k) => { qi += k; }
-            Yclip(k) => { ri += k; }
+            Xclip(k) => {
+                qi += k;
+            }
+            Yclip(k) => {
+                ri += k;
+            }
         }
     }
 
@@ -629,7 +642,11 @@ pub fn base_at_ref_pos(
     for (&q, &r) in gapped_query.iter().zip(gapped_ref.iter()) {
         if r != b'-' {
             if current == ref_pos {
-                return if q == b'-' { None } else { Some(q.to_ascii_uppercase()) };
+                return if q == b'-' {
+                    None
+                } else {
+                    Some(q.to_ascii_uppercase())
+                };
             }
             current += 1;
         }
@@ -637,12 +654,7 @@ pub fn base_at_ref_pos(
     None
 }
 
-fn scan_window(
-    center: usize,
-    left: usize,
-    right: usize,
-    peak_locs: &[u16],
-) -> Option<(u16, u16)> {
+fn scan_window(center: usize, left: usize, right: usize, peak_locs: &[u16]) -> Option<(u16, u16)> {
     let base_start = center.checked_sub(left)?;
     let base_end = center + right;
     if base_end >= peak_locs.len() {
@@ -1043,7 +1055,6 @@ impl SeqIdHit {
     }
 }
 
-
 /// Top-level result for a processed AB1 read.
 ///
 /// Owns the raw chromatogram and read-quality statistics, plus all
@@ -1072,7 +1083,12 @@ const PDF_ROW_H: f32 = 5.5;
 const PDF_COL_X: [f32; 6] = [0.0, 24.0, 39.0, 110.0, 130.0, 200.0];
 const PDF_TABLE_W: f32 = 270.0; // right edge of last column relative to PDF_MARGIN_L
 const PDF_COL_HEADERS: [&str; 6] = [
-    "Sample ID", "Gene", "Species", "Susceptible", "Calls", "Filename",
+    "Sample ID",
+    "Gene",
+    "Species",
+    "Susceptible",
+    "Calls",
+    "Filename",
 ];
 
 /// Build a landscape A4 PDF report from AB1 scan records. Filtered to gene-identified
@@ -1416,18 +1432,10 @@ ACGT
     #[test]
     fn test_trim_alignment_ends_never_decreases_identity() {
         let fixtures: Vec<GappedAlignment> = vec![
-            make_ga(
-                &[vec![b'A'; 20], vec![b'T'; 15]].concat(),
-                &vec![b'A'; 35],
-                0,
-            ),
-            make_ga(
-                &[vec![b'T'; 15], vec![b'A'; 20]].concat(),
-                &vec![b'A'; 35],
-                0,
-            ),
-            make_ga(&vec![b'A'; 30], &vec![b'A'; 30], 0),
-            make_ga(&vec![b'T'; 30], &vec![b'A'; 30], 0),
+            make_ga(&[vec![b'A'; 20], vec![b'T'; 15]].concat(), &[b'A'; 35], 0),
+            make_ga(&[vec![b'T'; 15], vec![b'A'; 20]].concat(), &[b'A'; 35], 0),
+            make_ga(&[b'A'; 30], &[b'A'; 30], 0),
+            make_ga(&[b'T'; 30], &[b'A'; 30], 0),
         ];
         for ga in fixtures {
             let original_identity = ga.identity;

@@ -118,11 +118,16 @@ fn parse_pnca_resistance_snps(csv: &str) -> (PncaNtSnpMap, PncaAaSnpMap) {
         // Keep the strongest (lowest-rank) confidence seen for a given alt, since the same
         // mutation can appear once under "who_confidence" and once under "drug_resistance".
         if let Some(caps) = NT_SNP_RE.captures(m) {
-            let Ok(c_pos) = caps[1].parse::<isize>() else { continue };
+            let Ok(c_pos) = caps[1].parse::<isize>() else {
+                continue;
+            };
             let wt = caps[2].as_bytes()[0];
             let alt = caps[3].as_bytes()[0];
             let entry = nt_map.entry(c_pos).or_insert_with(|| (wt, BTreeMap::new()));
-            let variant = entry.1.entry(alt).or_insert_with(|| (Vec::new(), confidence.clone()));
+            let variant = entry
+                .1
+                .entry(alt)
+                .or_insert_with(|| (Vec::new(), confidence.clone()));
             if !variant.0.contains(&drug) {
                 variant.0.push(drug);
             }
@@ -136,9 +141,16 @@ fn parse_pnca_resistance_snps(csv: &str) -> (PncaNtSnpMap, PncaAaSnpMap) {
             {
                 continue;
             }
-            let Ok(codon) = caps[2].parse::<usize>() else { continue };
-            let entry = aa_map.entry(codon).or_insert_with(|| (wt_aa.clone(), BTreeMap::new()));
-            let variant = entry.1.entry(alt_aa).or_insert_with(|| (Vec::new(), confidence.clone()));
+            let Ok(codon) = caps[2].parse::<usize>() else {
+                continue;
+            };
+            let entry = aa_map
+                .entry(codon)
+                .or_insert_with(|| (wt_aa.clone(), BTreeMap::new()));
+            let variant = entry
+                .1
+                .entry(alt_aa)
+                .or_insert_with(|| (Vec::new(), confidence.clone()));
             if !variant.0.contains(&drug) {
                 variant.0.push(drug);
             }
@@ -183,24 +195,44 @@ impl PncaSnpCall {
     /// When the query didn't cover the site (`query_base`/`query_aa` is `None`), the alt is `"?"`.
     pub fn site_label(&self) -> String {
         match &self.kind {
-            PncaCallKind::Nucleotide { wt_base, query_base } => {
+            PncaCallKind::Nucleotide {
+                wt_base,
+                query_base,
+            } => {
                 // Recover the signed c. position from ref_pos for display.
                 let offset = self.ref_pos as isize - UPSTREAM_FLANK;
                 if offset >= 0 {
-                    format!("c.{}{}>{}", offset + 1, *wt_base as char, query_base.map(|b| b as char).unwrap_or('?'))
+                    format!(
+                        "c.{}{}>{}",
+                        offset + 1,
+                        *wt_base as char,
+                        query_base.map(|b| b as char).unwrap_or('?')
+                    )
                 } else {
-                    format!("c.{}{}>{}", offset, *wt_base as char, query_base.map(|b| b as char).unwrap_or('?'))
+                    format!(
+                        "c.{}{}>{}",
+                        offset,
+                        *wt_base as char,
+                        query_base.map(|b| b as char).unwrap_or('?')
+                    )
                 }
             }
-            PncaCallKind::Codon { codon, wt_aa, query_aa } => format!("p.{}{}{}", wt_aa, codon, query_aa.as_deref().unwrap_or("?")),
+            PncaCallKind::Codon {
+                codon,
+                wt_aa,
+                query_aa,
+            } => format!("p.{}{}{}", wt_aa, codon, query_aa.as_deref().unwrap_or("?")),
         }
     }
 
     pub fn call_tag(&self) -> String {
         match &self.kind {
-            PncaCallKind::Nucleotide { wt_base, query_base } => match query_base {
+            PncaCallKind::Nucleotide {
+                wt_base,
+                query_base,
+            } => match query_base {
                 None => String::new(),
-                Some(b) if b == wt_base => format!(""),
+                Some(b) if b == wt_base => String::new(),
                 Some(b) => {
                     let key = (*b as char).to_string();
                     match self.resistance_alts.get(&key) {
@@ -211,9 +243,11 @@ impl PncaSnpCall {
                     }
                 }
             },
-            PncaCallKind::Codon { wt_aa, query_aa, .. } => match query_aa {
+            PncaCallKind::Codon {
+                wt_aa, query_aa, ..
+            } => match query_aa {
                 None => String::new(),
-                Some(aa) if aa == wt_aa => format!(""),
+                Some(aa) if aa == wt_aa => String::new(),
                 Some(aa) => match self.resistance_alts.get(aa) {
                     Some((drugs, confidence)) => {
                         format!("({}, {})", drugs.join(", "), confidence)
@@ -228,10 +262,15 @@ impl PncaSnpCall {
     /// at all (as opposed to covering it and finding wildtype — those are not the same thing).
     fn evidence(&self) -> Option<PncaEvidence> {
         let (observed, wt) = match &self.kind {
-            PncaCallKind::Nucleotide { wt_base, query_base: Some(b) } => {
-                ((*b as char).to_string(), *b == *wt_base)
-            }
-            PncaCallKind::Codon { wt_aa, query_aa: Some(aa), .. } => (aa.clone(), aa == wt_aa),
+            PncaCallKind::Nucleotide {
+                wt_base,
+                query_base: Some(b),
+            } => ((*b as char).to_string(), *b == *wt_base),
+            PncaCallKind::Codon {
+                wt_aa,
+                query_aa: Some(aa),
+                ..
+            } => (aa.clone(), aa == wt_aa),
             _ => return None,
         };
         if wt {
@@ -343,7 +382,10 @@ fn call_pnca_nt_snps(map: &PncaNtSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCal
                 .collect();
             Some(PncaSnpCall {
                 ref_pos,
-                kind: PncaCallKind::Nucleotide { wt_base: *wt_base, query_base },
+                kind: PncaCallKind::Nucleotide {
+                    wt_base: *wt_base,
+                    query_base,
+                },
                 resistance_alts,
             })
         })
@@ -359,7 +401,11 @@ fn call_pnca_aa_snps(map: &PncaAaSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCal
                     .and_then(|bases| translate_codon(&bases).map(str::to_string));
             Some(PncaSnpCall {
                 ref_pos,
-                kind: PncaCallKind::Codon { codon, wt_aa: wt_aa.clone(), query_aa },
+                kind: PncaCallKind::Codon {
+                    codon,
+                    wt_aa: wt_aa.clone(),
+                    query_aa,
+                },
                 resistance_alts: alts.clone(),
             })
         })
@@ -453,14 +499,20 @@ mod tests {
 
         let nt_call = PncaSnpCall {
             ref_pos: nt_pos_to_ref_idx(-11).unwrap(),
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: None },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: None,
+            },
             resistance_alts: BTreeMap::new(),
         };
         assert_eq!(nt_call.site_label(), "c.-11A>?");
 
         let nt_call = PncaSnpCall {
             ref_pos: nt_pos_to_ref_idx(103).unwrap(),
-            kind: PncaCallKind::Nucleotide { wt_base: b'C', query_base: None },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'C',
+                query_base: None,
+            },
             resistance_alts: BTreeMap::new(),
         };
         assert_eq!(nt_call.site_label(), "c.103C>?");
@@ -468,7 +520,10 @@ mod tests {
         // With a known alt base.
         let nt_call = PncaSnpCall {
             ref_pos: nt_pos_to_ref_idx(-11).unwrap(),
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'C') },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: Some(b'C'),
+            },
             resistance_alts: BTreeMap::new(),
         };
         assert_eq!(nt_call.site_label(), "c.-11A>C");
@@ -533,7 +588,10 @@ mod tests {
         // A site that the read simply didn't cover → unknown, same as no calls at all.
         let uncovered_call = PncaSnpCall {
             ref_pos: 0,
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: None },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: None,
+            },
             resistance_alts: resistance_alts(),
         };
         assert_eq!(is_susceptible_pnca(&[uncovered_call]), None);
@@ -542,16 +600,25 @@ mod tests {
         // susceptibility, not an absence of information.
         let wt_call = PncaSnpCall {
             ref_pos: 0,
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'A') },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: Some(b'A'),
+            },
             resistance_alts: resistance_alts(),
         };
-        assert_eq!(is_susceptible_pnca(&[wt_call.clone()]), Some(true));
+        assert_eq!(
+            is_susceptible_pnca(std::slice::from_ref(&wt_call)),
+            Some(true)
+        );
 
         // Strong resistance evidence observed → resistant, even alongside wildtype calls
         // elsewhere (the strongest evidence wins).
         let resistant_call = PncaSnpCall {
             ref_pos: 0,
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'C') },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: Some(b'C'),
+            },
             resistance_alts: resistance_alts(),
         };
         assert_eq!(
@@ -562,10 +629,16 @@ mod tests {
         // Weak/uncertain catalogue entry → unknown (not enough to call susceptible or resistant).
         let uncertain_call = PncaSnpCall {
             ref_pos: 0,
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'G') },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: Some(b'G'),
+            },
             resistance_alts: BTreeMap::from([(
                 "G".to_string(),
-                (vec!["pyrazinamide".to_string()], "Uncertain significance".to_string()),
+                (
+                    vec!["pyrazinamide".to_string()],
+                    "Uncertain significance".to_string(),
+                ),
             )]),
         };
         assert_eq!(is_susceptible_pnca(&[uncertain_call]), None);
@@ -573,7 +646,10 @@ mod tests {
         // A non-wildtype allele with no catalogue entry at all → uncatalogued, unknown.
         let uncatalogued_call = PncaSnpCall {
             ref_pos: 0,
-            kind: PncaCallKind::Nucleotide { wt_base: b'A', query_base: Some(b'T') },
+            kind: PncaCallKind::Nucleotide {
+                wt_base: b'A',
+                query_base: Some(b'T'),
+            },
             resistance_alts: resistance_alts(),
         };
         assert_eq!(is_susceptible_pnca(&[uncatalogued_call]), None);

@@ -210,7 +210,6 @@ impl Default for TBConfig {
     }
 }
 
-
 #[derive(Clone, CosmicConfigEntry, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct Config {
@@ -270,7 +269,7 @@ impl Config {
         }
     }
 
-        /// Construct tab config for dialog
+    /// Construct tab config for dialog
     pub fn tb_config(&self) -> TBConfig {
         self.tb_config.clone()
     }

@@ -153,15 +153,17 @@ pub trait Connector: Send + Sync {
     fn items(&self, sizes: IconSizes) -> Option<ClientItems>;
     fn connect(&self, item: ClientItem) -> Task<()>;
     fn remote_drive(&self, uri: String) -> Task<()>;
-    fn remote_scan(
-        &self,
-        uri: &str,
-        sizes: IconSizes,
-    ) -> Option<Result<Vec<tab::Item>, String>>;
+    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>>;
     fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>>;
     fn dir_info(&self, uri: &str) -> Option<(String, String, Option<PathBuf>)>;
     fn disconnect(&self, item: ClientItem) -> Task<()>;
-    fn download_file(&self, paths: Box<[PathBuf]>, uris: Vec<String>, to: PathBuf, zip_output: Option<PathBuf>) -> Task<DownloadEvent>;
+    fn download_file(
+        &self,
+        paths: Box<[PathBuf]>,
+        uris: Vec<String>,
+        to: PathBuf,
+        zip_output: Option<PathBuf>,
+    ) -> Task<DownloadEvent>;
     fn run_tb_profiler(
         &self,
         paths: Box<[PathBuf]>,

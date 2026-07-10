@@ -1,4 +1,4 @@
-#[cfg(feature = "desktop")]
+﻿#[cfg(feature = "desktop")]
 use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use cosmic::iced::advanced::graphics;
 use cosmic::iced::advanced::text::{self, Paragraph};
@@ -44,7 +44,6 @@ use std::sync::{Arc, LazyLock, RwLock, atomic};
 use std::time::{Duration, Instant, SystemTime};
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
-use tracing_subscriber::fmt::writer::EitherWriter::A;
 use trash::{TrashItem, TrashItemMetadata, TrashItemSize};
 use walkdir::WalkDir;
 
@@ -2171,7 +2170,7 @@ pub enum Command {
     Action(Action),
     AddNetworkDrive,
     AddRemoteDrive,
-    DeleteTbProfilerResults(String, TBConfig),
+    DeleteTbProfilerResults(String, Box<TBConfig>),
     AddToSidebar(PathBuf),
     AutoScroll(Option<f32>),
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
@@ -2205,7 +2204,7 @@ pub enum Command {
 pub enum Message {
     AddNetworkDrive,
     AddRemoteDrive,
-    DeleteTbProfilerResults(String, TBConfig),
+    DeleteTbProfilerResults(String, Box<TBConfig>),
     AutoScroll(Option<f32>),
     Click(Option<usize>),
     DoubleClick(Option<usize>),
@@ -4283,7 +4282,7 @@ impl Item {
                     env!("NTM_DB_COMMIT")
                 )));
                 for snp in &snp_hit.rrs_snp_calls {
-                    details = details.push(widget::text::body(format!("{}", snp.call_tag())));
+                    details = details.push(widget::text::body(snp.call_tag().to_string()));
                 }
             }
         }
@@ -4390,7 +4389,7 @@ impl Item {
                     env!("NTM_DB_COMMIT")
                 )));
                 for snp in &snp_hit.rrs_snp_calls {
-                    details = details.push(widget::text::body(format!("{}", snp.call_tag())));
+                    details = details.push(widget::text::body(snp.call_tag().to_string()));
                 }
             }
             if let Some(chrom) = self
@@ -4578,7 +4577,7 @@ impl Item {
                     env!("NTM_DB_COMMIT")
                 )));
                 for snp in &snp_hit.rrl_snp_calls {
-                    details = details.push(widget::text::body(format!("{}", snp.call_tag())));
+                    details = details.push(widget::text::body(snp.call_tag().to_string()));
                 }
             }
             if let Some(chrom) = self
@@ -4836,7 +4835,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
 
         // Standard Sanger palette: colour by the base the dye represents.
         // For a reverse read the channel physically contains the complement base,
-        // so we complement the channel's base before looking up the colour —
+        // so we complement the channel's base before looking up the colour â€”
         // that way the displayed colour always matches the plus-strand base.
         let dna_complement = |b: u8| -> u8 {
             match b.to_ascii_uppercase() {
@@ -4904,7 +4903,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         let plot_w = bounds.width;
 
         // Map scan index to canvas x.
-        // For reverse reads we flip the x-axis so the plus-strand 5′→3′ direction
+        // For reverse reads we flip the x-axis so the plus-strand 5â€²â†’3â€² direction
         // always runs left to right, identical to a forward read.
         let scan_to_x = |scan: usize| -> f32 {
             let t = (scan.saturating_sub(scan_start as usize)) as f32
@@ -5330,7 +5329,7 @@ impl Tab {
     }
 
     /// Returns the actual file paths to delete for selected items.
-    /// TB result items are virtual groupings — expand them to their component files.
+    /// TB result items are virtual groupings â€” expand them to their component files.
     pub fn selected_delete_paths(&self) -> Vec<PathBuf> {
         let Some(ref items) = self.items_opt else {
             return Vec::new();
@@ -7533,7 +7532,7 @@ impl Tab {
                         if let Some(error_msg) = error_msg_opt {
                             widget::column::with_capacity(2)
                                 .push(widget::image(image_handle))
-                                .push(widget::text(format!("⚠ {}", error_msg)).size(13))
+                                .push(widget::text(format!("âš  {}", error_msg)).size(13))
                                 .padding(space_xs)
                                 .align_x(cosmic::iced::Alignment::Center)
                                 .into()
@@ -9182,7 +9181,7 @@ impl Tab {
                         widget::button::standard(fl!("delete-tb-profiler-results"))
                             .on_press(Message::DeleteTbProfilerResults(
                                 uri.to_string(),
-                                self.tb_config.clone(),
+                                Box::new(self.tb_config.clone()),
                             ))
                             .into(),
                     ]))

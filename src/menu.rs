@@ -10,7 +10,6 @@ use cosmic::widget::{
     self, Row, button, column, container, divider, responsive_menu_bar, space, text,
 };
 use cosmic::{Element, theme};
-use i18n_embed::LanguageLoader;
 use mime_guess::Mime;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -231,7 +230,7 @@ pub fn context_menu<'a>(
                 if !Trash::is_empty() {
                     children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash).into());
                 }
-            } else if let Some(entry) = selected_desktop_entry {
+            } else if let Some(_entry) = selected_desktop_entry {
                 children.push(menu_item(fl!("open"), Action::Open).into());
                 #[cfg(feature = "desktop")]
                 {
@@ -282,7 +281,7 @@ pub fn context_menu<'a>(
                     children.extend(action_items);
                 }
                 children.push(divider::horizontal::light().into());
-                if selected_mount_point == 0 {
+                if selected_mount_point == 0 && selected_client_point == 0 {
                     children.push(menu_item(fl!("rename"), Action::Rename).into());
                     children.push(menu_item(fl!("cut"), Action::Cut).into());
                 }
@@ -328,7 +327,7 @@ pub fn context_menu<'a>(
                         );
                         children.push(divider::horizontal::light().into());
                     }
-                    if selected_mount_point == 0 {
+                    if selected_mount_point == 0 && selected_client_point == 0 {
                         if modifiers.shift() && !modifiers.control() {
                             children.push(
                                 menu_item(fl!("delete-permanently"), Action::PermanentlyDelete)
@@ -444,8 +443,7 @@ pub fn context_menu<'a>(
                 if selected == selected_remote_paths.len() && selected_dir == 0 {
                     if config.pair1_suffix.is_empty() || config.pair2_suffix.is_empty() {
                         children.push(
-                            menu_item(fl!("run-tb-profiler"), Action::TbProfilerConfigError)
-                                .into(),
+                            menu_item(fl!("run-tb-profiler"), Action::TbProfilerConfigError).into(),
                         );
                     } else if is_valid_fastq_selection(&selected_remote_paths, config) {
                         children

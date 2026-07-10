@@ -9,13 +9,13 @@ use notify_debouncer_full::notify;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock, atomic};
 #[cfg(feature = "desktop")]
 use std::time::{self, Instant};
 #[cfg(feature = "desktop")]
 use std::{fs, io};
-use std::process;
 
 #[cfg(feature = "desktop")]
 pub async fn watch(mut emitter: impl FnMut() + 'static + Send) {
@@ -107,7 +107,8 @@ pub fn exec_to_command(
                         Some('c') => new_argument.push_str(entry_name),
                         Some('k') => {
                             if let Some(path) = entry_path {
-                                new_argument.push_str(path.as_os_str().to_string_lossy().as_bytes());
+                                new_argument
+                                    .push_str(path.as_os_str().to_string_lossy().as_bytes());
                             }
                         }
 
@@ -128,7 +129,9 @@ pub fn exec_to_command(
                             if !field_code_used && new_argument.is_empty() {
                                 field_code_used = true;
                                 for path in path_opt.iter().map(AsRef::as_ref) {
-                                    args.push(BString::new(path.to_string_lossy().into_owned().into_bytes()));
+                                    args.push(BString::new(
+                                        path.to_string_lossy().into_owned().into_bytes(),
+                                    ));
                                 }
                             }
                         }
