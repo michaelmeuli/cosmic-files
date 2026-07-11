@@ -42,6 +42,18 @@ use super::{
 pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
 
+/// Sample-id → 16S seq_id_hits, populated by [`scan_ab1_directory`]. Unlike `AB1_SEQ_CACHE`
+/// (keyed by path), this lets a sibling gene file look up its sample's 16S species even when the
+/// 16S AB1 lives in a different directory than the file being previewed.
+pub(crate) static SIXTEEN_S_HITS_CACHE: LazyLock<RwLock<HashMap<String, Vec<SeqIdHit>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::default()));
+
+/// Looks up the 16S seq_id_hits previously computed by a background [`scan_ab1_directory`] run
+/// for `sample_id`, regardless of which directory the 16S AB1 file lives in.
+pub(crate) fn sixteen_s_hits_for_sample(sample_id: &str) -> Option<Vec<SeqIdHit>> {
+    SIXTEEN_S_HITS_CACHE.read().ok()?.get(sample_id).cloned()
+}
+
 /// Per-sample susceptibility result produced by the batch AB1 directory scan.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SampleSusceptibilityRecord {
@@ -290,6 +302,14 @@ pub fn scan_ab1_directory(
                 if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
                     guard.insert(canonical_path, cached_record.seq_id_hits.clone());
                 }
+                if cached_record.gene.as_deref() == Some("16S")
+                    && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
+                {
+                    guard.insert(
+                        cached_record.sample_id.clone(),
+                        cached_record.seq_id_hits.clone(),
+                    );
+                }
                 records.push(cached_record.clone());
                 continue;
             } else {
@@ -368,6 +388,9 @@ pub fn scan_ab1_directory(
         );
         if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
             guard.insert(canonical_path, seq_id_hits.clone());
+        }
+        if is_16s && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write() {
+            guard.insert(sample_id.clone(), seq_id_hits.clone());
         }
 
         let is_susceptible = seq_id_hits.first().and_then(|hit| {

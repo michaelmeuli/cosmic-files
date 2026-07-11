@@ -3176,18 +3176,27 @@ impl Item {
         !self.is_fasta() && lower.contains("1098s") || lower.contains("1525a")
     }
 
-    fn sibling_16s<'a>(&self, items: &'a [Item]) -> Option<&'a Item> {
+    /// Returns the sample's 16S seq_id_hits, first by looking for a sibling 16S AB1 in the
+    /// currently listed `items`, then falling back to the project-wide
+    /// [`SIXTEEN_S_HITS_CACHE`](crate::sequencing::batch::SIXTEEN_S_HITS_CACHE) populated by
+    /// background `scan_ab1_directory` runs — so the sibling is found even when it lives in a
+    /// different directory than the file being previewed.
+    fn sibling_16s_hits(&self, items: &[Item]) -> Option<Vec<SeqIdHit>> {
         let (sample_id, _) = parse_ab1_filename(&self.name);
-        items
+        if let Some(sibling) = items
             .iter()
             .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
+        {
+            return Some(sibling.seq_id_hits_cached());
+        }
+        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id)
     }
 
     pub fn is_chelonae(&self, items: &[Item]) -> bool {
         let chelonae_abscessus_complex = self
-            .sibling_16s(items)
-            .and_then(|sibling| {
-                sibling.seq_id_hits_cached().first().map(|top| {
+            .sibling_16s_hits(items)
+            .and_then(|hits| {
+                hits.first().map(|top| {
                     top.description.contains("chelonae") || top.description.contains("abscessus")
                 })
             })
@@ -3201,9 +3210,9 @@ impl Item {
 
     pub fn is_marinum(&self, items: &[Item]) -> bool {
         let marinum_ulcerans = self
-            .sibling_16s(items)
-            .and_then(|sibling| {
-                sibling.seq_id_hits_cached().first().map(|top| {
+            .sibling_16s_hits(items)
+            .and_then(|hits| {
+                hits.first().map(|top| {
                     top.description.contains("marinum") || top.description.contains("ulcerans")
                 })
             })
@@ -3213,9 +3222,9 @@ impl Item {
 
     pub fn is_ulcerans(&self, items: &[Item]) -> bool {
         let marinum_ulcerans = self
-            .sibling_16s(items)
-            .and_then(|sibling| {
-                sibling.seq_id_hits_cached().first().map(|top| {
+            .sibling_16s_hits(items)
+            .and_then(|hits| {
+                hits.first().map(|top| {
                     top.description.contains("ulcerans") || top.description.contains("marinum")
                 })
             })
@@ -3224,9 +3233,8 @@ impl Item {
     }
 
     pub fn species_from_16s_sibling(&self, items: &[Item]) -> Option<String> {
-        self.sibling_16s(items).and_then(|sibling| {
-            crate::sequencing::batch::species_from_16s_hits(&sibling.seq_id_hits_cached())
-        })
+        self.sibling_16s_hits(items)
+            .and_then(|hits| crate::sequencing::batch::species_from_16s_hits(&hits))
     }
 
     pub fn species_from_rpob_hits(&self) -> Option<String> {
