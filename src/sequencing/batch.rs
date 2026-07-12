@@ -43,7 +43,7 @@ pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>
     LazyLock::new(|| RwLock::new(HashMap::default()));
 
 /// Sample-id → 16S seq_id_hits, populated by [`scan_ab1_directory`]. Unlike `AB1_SEQ_CACHE`
-/// (keyed by path), this lets a sibling gene file look up its sample's 16S species even when the
+/// (keyed by path), this lets a sibling file look up its sample's 16S species even when the
 /// 16S AB1 lives in a different directory than the file being previewed.
 pub(crate) static SIXTEEN_S_HITS_CACHE: LazyLock<RwLock<HashMap<String, Vec<SeqIdHit>>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
@@ -764,9 +764,9 @@ fn fmt_susceptible(v: Option<bool>) -> String {
 /// `"pos 2059: A2059G (clarithromycin, E.coli: A2059G)"`.
 fn snp_calls_str(calls: impl Iterator<Item = (usize, String)>) -> String {
     calls
-        .map(|(pos, tag)| format!("pos {}: {}", pos + 1, tag))
+        .map(|(_, tag)| format!("{}", tag))
         .collect::<Vec<_>>()
-        .join("; ")
+        .join(", ")
 }
 
 /// Joins pncA calls with a non-empty [`call_tag`](super::pnca::PncaSnpCall::call_tag) into a
