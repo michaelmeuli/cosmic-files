@@ -513,13 +513,22 @@ pub fn scan_ab1_directory(
 
 /// Write `records` to a CSV file at `out_path`.
 ///
+/// Filters the same way [`super::build_report_pdf`] does: `gene` must be known, `identity` must
+/// meet [`MIN_SEQ_ID_IDENTITY`], and `file_created` (when known) must fall within
+/// `report_max_age_days`.
+///
 /// Columns: `file_name, sample_id, gene, overall_susceptible, species, identity_pct,
 /// erm41_position_28, erm41_lof_snp_calls, erm41_susceptible, rrl_position_2058_2059,
-/// rrl_snp_calls, rrl_susceptible, rrs_snp_calls, rrs_susceptible, file_created`
+/// rrl_snp_calls, rrl_susceptible, rrs_snp_calls, rrs_susceptible, rrs3end_position_1248,
+/// rrs3end_snp_calls, rrs3end_susceptible, pnca_snp_calls, pnca_susceptible, file_created`
 pub fn write_ab1_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
+    report_max_age_days: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let max_age = Duration::from_secs(u64::from(report_max_age_days) * 24 * 60 * 60);
+    let now = SystemTime::now();
+
     let file = std::fs::File::create(out_path)?;
     let mut wtr = csv::Writer::from_writer(file);
 
@@ -538,6 +547,9 @@ pub fn write_ab1_csv(
         "rrl_susceptible",
         "rrs_snp_calls",
         "rrs_susceptible",
+        "rrs3end_position_1248",
+        "rrs3end_snp_calls",
+        "rrs3end_susceptible",
         "pnca_snp_calls",
         "pnca_susceptible",
         "file_created",
@@ -548,6 +560,12 @@ pub fn write_ab1_csv(
             continue;
         }
         if rec.identity.is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
+            continue;
+        }
+        if !rec
+            .file_created
+            .is_none_or(|created| now.duration_since(created).is_ok_and(|age| age <= max_age))
+        {
             continue;
         }
 
@@ -595,6 +613,21 @@ pub fn write_ab1_csv(
                 .map(|s| (s.ref_pos, s.call_tag())),
         );
 
+        let rrs3end_pos = rec
+            .susceptibility_calls
+            .rrs3end
+            .position_1248
+            .map(|p| p.to_string())
+            .unwrap_or_default();
+        let rrs3end_sus = fmt_susceptible(rec.susceptibility_calls.rrs3end.is_susceptible);
+        let rrs3end_snps = snp_calls_str(
+            rec.susceptibility_calls
+                .rrs3end
+                .snp_calls
+                .iter()
+                .map(|s| (s.ref_pos, s.call_tag())),
+        );
+
         let pnca_sus = fmt_susceptible(rec.susceptibility_calls.pnca.is_susceptible);
         let pnca_snps = pnca_snp_calls_str(&rec.susceptibility_calls.pnca.snp_calls);
 
@@ -617,6 +650,9 @@ pub fn write_ab1_csv(
             rrl_sus.as_str(),
             rrs_snps.as_str(),
             rrs_sus.as_str(),
+            rrs3end_pos.as_str(),
+            rrs3end_snps.as_str(),
+            rrs3end_sus.as_str(),
             pnca_snps.as_str(),
             pnca_sus.as_str(),
             file_created.as_str(),

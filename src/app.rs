@@ -6612,7 +6612,11 @@ impl Application for App {
                 } else {
                     std::path::PathBuf::from(&scan_path).join("ab1_susceptibility_report.csv")
                 };
-                if let Err(e) = crate::sequencing::batch::write_ab1_csv(&records, &out_path) {
+                if let Err(e) = crate::sequencing::batch::write_ab1_csv(
+                    &records,
+                    &out_path,
+                    self.config.tb_config.report_max_age_days,
+                ) {
                     log::warn!("AB1 CSV write failed: {e}");
                 } else {
                     log::info!(
@@ -6710,7 +6714,11 @@ impl Application for App {
                 } else {
                     std::path::PathBuf::from(&scan_path).join("ab1_susceptibility_report_2.csv")
                 };
-                if let Err(e) = crate::sequencing::batch::write_ab1_csv(&records, &out_path) {
+                if let Err(e) = crate::sequencing::batch::write_ab1_csv(
+                    &records,
+                    &out_path,
+                    self.config.tb_config.report_max_age_days,
+                ) {
                     log::warn!("AB1 CSV write failed: {e}");
                 } else {
                     log::info!(
