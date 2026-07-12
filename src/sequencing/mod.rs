@@ -1071,6 +1071,22 @@ impl SeqIdHit {
     }
 }
 
+/// Finds the hit, among those sharing the top hit's (`hits[0]`) species description, that
+/// actually carries SNP data for a given target — the top hit by identity may itself be an
+/// NCBI partial-sequence hit for the winning species, which never carries SNP calls (rrl/rrs/
+/// rrs3end only compute them for the ntm-db full-gene hit, accession containing `':'`, since SNP
+/// positions are anchored to that reference's coordinates, not the NCBI one's).
+/// Each identify_sequence_* function gates whether it computes SNP calls at all:
+/// let *_snp_calls = if accession.contains(':') ...
+pub(crate) fn best_snp_hit<'a>(
+    hits: &'a [SeqIdHit],
+    has_calls: impl Fn(&SeqIdHit) -> bool,
+) -> Option<&'a SeqIdHit> {
+    let best = hits.first()?;
+    hits.iter()
+        .find(|h| h.description == best.description && has_calls(h))
+}
+
 /// Top-level result for a processed AB1 read.
 ///
 /// Owns the raw chromatogram and read-quality statistics, plus all

@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
 use super::{
-    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls,
+    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
@@ -402,12 +402,16 @@ pub fn scan_ab1_directory(
             if erm41_result.is_some() {
                 return erm41_result;
             }
+            let rrl_hit =
+                best_snp_hit(&seq_id_hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
             let rrl_result =
-                is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
+                is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &rrl_hit.rrl_snp_calls);
             if rrl_result.is_some() {
                 return rrl_result;
             }
-            let rrs_result = is_susceptible_rrs(&hit.rrs_snp_calls);
+            let rrs_hit =
+                best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+            let rrs_result = is_susceptible_rrs(&rrs_hit.rrs_snp_calls);
             if rrs_result.is_some() {
                 return rrs_result;
             }
@@ -416,48 +420,58 @@ pub fn scan_ab1_directory(
 
         let susceptibility_calls = seq_id_hits
             .first()
-            .map(|hit| SusceptibilityCalls {
-                erm41: Erm41SusceptibilityCalls {
-                    position_28: hit.erm41_position_28_opt,
-                    lof_snp_calls: hit.erm41_snp_calls.clone(),
-                    is_susceptible: if hit.description == DESC_MASSILIENSE {
-                        Some(true)
-                    } else {
-                        is_susceptible_erm41(
-                            hit.erm41_position_28_opt.as_ref(),
-                            &hit.erm41_snp_calls,
-                        )
+            .map(|hit| {
+                let rrl_hit =
+                    best_snp_hit(&seq_id_hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
+                let rrs_hit =
+                    best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+                let rrs3end_hit = best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls_3end.is_empty())
+                    .unwrap_or(hit);
+                SusceptibilityCalls {
+                    erm41: Erm41SusceptibilityCalls {
+                        position_28: hit.erm41_position_28_opt,
+                        lof_snp_calls: hit.erm41_snp_calls.clone(),
+                        is_susceptible: if hit.description == DESC_MASSILIENSE {
+                            Some(true)
+                        } else {
+                            is_susceptible_erm41(
+                                hit.erm41_position_28_opt.as_ref(),
+                                &hit.erm41_snp_calls,
+                            )
+                        },
                     },
-                },
-                rrl: RrlSusceptibilityCalls {
-                    position_2058_2059: hit.rrl_position_2058_2059_opt,
-                    snp_calls: hit.rrl_snp_calls.clone(),
-                    is_susceptible: is_susceptible_rrl(
-                        hit.rrl_position_2058_2059_opt.as_ref(),
-                        &hit.rrl_snp_calls,
-                    ),
-                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
-                        hit.rrl_position_2058_2059_opt.as_ref(),
-                        &hit.rrl_snp_calls,
-                    ),
-                },
-                rrs: RrsSusceptibilityCalls {
-                    snp_calls: hit.rrs_snp_calls.clone(),
-                    is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
-                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
-                },
-                rrs3end: RrsSusceptibilityCalls3End {
-                    position_1248: hit.rrs3end_position_1248_opt,
-                    snp_calls: hit.rrs_snp_calls_3end.clone(),
-                    is_susceptible: is_susceptible_rrs_3end(&hit.rrs_snp_calls_3end),
-                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
-                        &hit.rrs_snp_calls_3end,
-                    ),
-                },
-                pnca: PncaSusceptibilityCalls {
-                    snp_calls: hit.pnca_snp_calls.clone(),
-                    is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
-                },
+                    rrl: RrlSusceptibilityCalls {
+                        position_2058_2059: hit.rrl_position_2058_2059_opt,
+                        snp_calls: rrl_hit.rrl_snp_calls.clone(),
+                        is_susceptible: is_susceptible_rrl(
+                            hit.rrl_position_2058_2059_opt.as_ref(),
+                            &rrl_hit.rrl_snp_calls,
+                        ),
+                        is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
+                            hit.rrl_position_2058_2059_opt.as_ref(),
+                            &rrl_hit.rrl_snp_calls,
+                        ),
+                    },
+                    rrs: RrsSusceptibilityCalls {
+                        snp_calls: rrs_hit.rrs_snp_calls.clone(),
+                        is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
+                        is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(
+                            &rrs_hit.rrs_snp_calls,
+                        ),
+                    },
+                    rrs3end: RrsSusceptibilityCalls3End {
+                        position_1248: hit.rrs3end_position_1248_opt,
+                        snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
+                        is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
+                        is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
+                            &rrs3end_hit.rrs_snp_calls_3end,
+                        ),
+                    },
+                    pnca: PncaSusceptibilityCalls {
+                        snp_calls: hit.pnca_snp_calls.clone(),
+                        is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
+                    },
+                }
             })
             .unwrap_or_default();
 

@@ -76,7 +76,7 @@ use crate::sequencing::rrs3end::{
     is_susceptible_rrs_by_snp_calls_rare_3end,
 };
 use crate::sequencing::{
-    Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls,
+    Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41Position28, Erm41SusceptibilityCalls, is_susceptible_erm41},
     parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
@@ -973,18 +973,21 @@ pub fn item_from_entry(
     };
 
     let is_susceptible = sequence_opt.as_ref().and_then(|s| {
-        let hit = s.seq_id_hits.first()?;
+        let hits = &s.seq_id_hits;
+        let hit = hits.first()?;
         let erm41_result =
             is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls);
         if erm41_result.is_some() {
             return erm41_result;
         }
+        let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
         let rrl_result =
-            is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &hit.rrl_snp_calls);
+            is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &rrl_hit.rrl_snp_calls);
         if rrl_result.is_some() {
             return rrl_result;
         }
-        let rrs_result = is_susceptible_rrs(&hit.rrs_snp_calls);
+        let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+        let rrs_result = is_susceptible_rrs(&rrs_hit.rrs_snp_calls);
         if rrs_result.is_some() {
             return rrs_result;
         }
@@ -993,45 +996,53 @@ pub fn item_from_entry(
 
     let susceptibility_calls = sequence_opt
         .as_ref()
-        .and_then(|s| s.seq_id_hits.first())
-        .map(|hit| SusceptibilityCalls {
-            erm41: Erm41SusceptibilityCalls {
-                position_28: hit.erm41_position_28_opt,
-                lof_snp_calls: hit.erm41_snp_calls.clone(),
-                is_susceptible: is_susceptible_erm41(
-                    hit.erm41_position_28_opt.as_ref(),
-                    &hit.erm41_snp_calls,
-                ),
-            },
-            rrl: RrlSusceptibilityCalls {
-                position_2058_2059: hit.rrl_position_2058_2059_opt,
-                snp_calls: hit.rrl_snp_calls.clone(),
-                is_susceptible: is_susceptible_rrl(
-                    hit.rrl_position_2058_2059_opt.as_ref(),
-                    &hit.rrl_snp_calls,
-                ),
-                is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
-                    hit.rrl_position_2058_2059_opt.as_ref(),
-                    &hit.rrl_snp_calls,
-                ),
-            },
-            rrs: RrsSusceptibilityCalls {
-                snp_calls: hit.rrs_snp_calls.clone(),
-                is_susceptible: is_susceptible_rrs(&hit.rrs_snp_calls),
-                is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&hit.rrs_snp_calls),
-            },
-            rrs3end: RrsSusceptibilityCalls3End {
-                position_1248: hit.rrs3end_position_1248_opt,
-                snp_calls: hit.rrs_snp_calls_3end.clone(),
-                is_susceptible: is_susceptible_rrs_3end(&hit.rrs_snp_calls_3end),
-                is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
-                    &hit.rrs_snp_calls_3end,
-                ),
-            },
-            pnca: PncaSusceptibilityCalls {
-                snp_calls: hit.pnca_snp_calls.clone(),
-                is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
-            },
+        .and_then(|s| s.seq_id_hits.first().map(|hit| (hit, &s.seq_id_hits)))
+        .map(|(hit, hits)| {
+            let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
+            let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+            let rrs3end_hit =
+                best_snp_hit(hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
+            SusceptibilityCalls {
+                erm41: Erm41SusceptibilityCalls {
+                    position_28: hit.erm41_position_28_opt,
+                    lof_snp_calls: hit.erm41_snp_calls.clone(),
+                    is_susceptible: is_susceptible_erm41(
+                        hit.erm41_position_28_opt.as_ref(),
+                        &hit.erm41_snp_calls,
+                    ),
+                },
+                rrl: RrlSusceptibilityCalls {
+                    position_2058_2059: hit.rrl_position_2058_2059_opt,
+                    snp_calls: rrl_hit.rrl_snp_calls.clone(),
+                    is_susceptible: is_susceptible_rrl(
+                        hit.rrl_position_2058_2059_opt.as_ref(),
+                        &rrl_hit.rrl_snp_calls,
+                    ),
+                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
+                        hit.rrl_position_2058_2059_opt.as_ref(),
+                        &rrl_hit.rrl_snp_calls,
+                    ),
+                },
+                rrs: RrsSusceptibilityCalls {
+                    snp_calls: rrs_hit.rrs_snp_calls.clone(),
+                    is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(
+                        &rrs_hit.rrs_snp_calls,
+                    ),
+                },
+                rrs3end: RrsSusceptibilityCalls3End {
+                    position_1248: hit.rrs3end_position_1248_opt,
+                    snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
+                    is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
+                        &rrs3end_hit.rrs_snp_calls_3end,
+                    ),
+                },
+                pnca: PncaSusceptibilityCalls {
+                    snp_calls: hit.pnca_snp_calls.clone(),
+                    is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
+                },
+            }
         })
         .unwrap_or_default();
 
@@ -4197,6 +4208,9 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
+        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
+        // for the winning species, since SNP positions are anchored to the gene start
+        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
         let best_snp_hit = hits.first().and_then(|best| {
             hits.iter()
                 .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
@@ -4307,11 +4321,14 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
+        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
+        // for the winning species, since SNP positions are anchored to the gene start
+        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
         let best_snp_hit = hits.first().and_then(|best| {
             hits.iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
+                .find(|h| h.description == best.description && !h.rrs_snp_calls_3end.is_empty())
         });
-        let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls.len());
+        let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls_3end.len());
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(29 + rrs_snp_count).spacing(space_xxxs);
@@ -4396,7 +4413,7 @@ impl Item {
                     "(Using commit: {} of ntm-db repository)",
                     env!("NTM_DB_COMMIT")
                 )));
-                for snp in &snp_hit.rrs_snp_calls {
+                for snp in &snp_hit.rrs_snp_calls_3end {
                     details = details.push(widget::text::body(snp.call_tag().to_string()));
                 }
             }
