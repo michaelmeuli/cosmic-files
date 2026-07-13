@@ -149,6 +149,7 @@ pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
         || first.description.starts_with("Mycobacterium ostraviense")
         || first.description.starts_with("Mycobacterium innocens")
         || first.description.starts_with("Mycobacterium attenuatum")
+        || first.description.starts_with("Mycobacterium gastri")
     {
         return Some("M. kansasii complex".to_string());
     }
