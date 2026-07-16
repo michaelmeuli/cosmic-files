@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-files"
-version = "1.2.0"
+version = "1.3.0"
 authors = ["Jeremy Soller <jeremy@system76.com>"]
 edition = "2024"
 license = "GPL-3.0-only"
@@ -166,13 +166,8 @@ tokio = { version = "1", features = ["rt", "macros"] }
 # [patch.'https://github.com/pop-os/cosmic-text']
 # cosmic-text = { path = "../cosmic-text" }
 
-# Pinned to a local branch (windows-nav-click-fix) that reverts the
-# upstream regression in commit e3a4e73, which wrapped segmented_button's
-# mouse-click activation in a Wayland/Linux-only cfg with no fallback,
-# breaking nav bar and tab strip clicks on Windows. Remove this patch
-# once upstream fixes it.
-[patch.'https://github.com/pop-os/libcosmic']
-libcosmic = { git = "https://github.com/michaelmeuli/libcosmic.git", branch = "windows-nav-click-fix" }
+# [patch.'https://github.com/pop-os/libcosmic']
+# libcosmic = { path = "../libcosmic" }
 # cosmic-config = { path = "../libcosmic/cosmic-config" }
 # cosmic-theme = { path = "../libcosmic/cosmic-theme" }
 # libcosmic = { git = "https://github.com/pop-os/libcosmic//", branch = "theme-v2" }
