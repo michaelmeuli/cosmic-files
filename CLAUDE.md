@@ -55,7 +55,12 @@ The core unique feature of this fork. Parses AB1 capillary sequencer files and i
 - **`hsp65.rs`** — hsp65/groEL2 SNP calls for *M. kansasii/gastri* and *M. marinum/ulcerans* discrimination.
 - **`bed.rs`** — BED file format utilities.
 
-Reference FASTA sequences are fetched from NCBI **at build time** (`build.rs` using ESearch/EFetch API) and embedded in the binary. The sequence database config lives in `res/sequences.toml`.
+Reference FASTA sequences (`res/sequences/myco_*.fasta`) are assembled **at build time** by `build.rs` from three sources:
+- Single-gene NCBI ESearch/EFetch fetches driven by `res/sequences/sequences.toml` (`[[genome]]`/`[[append]]` entries, via `locus_tag` or explicit `seq_start`/`seq_stop` coordinates).
+- The vendored [`pathogen-profiler/ntm-db`](https://github.com/pathogen-profiler/ntm-db) git submodule at `res/sequences/ntm-db`, whose per-species `db/<Genus>_<species>/{genome.fasta,genome.gff}` pairs are parsed (`parse_gff`/`gff_feature_matches`) and matched genes appended into the pooled FASTAs.
+- `res/sequences/kansasii-complex/` — a hand-curated, non-submodule directory mirroring ntm-db's own per-species layout, covering the seven *M. kansasii*-complex species (kansasii, gastri, persicum, pseudokansasii, ostraviense, innocens, attenuatum) that ntm-db doesn't have; see its `README.md` for source accessions. Structured so it can be upstreamed to ntm-db later.
+
+Both GFF-backed directories are walked by the same `build.rs::extract_species_gff_sequences()`.
 
 Key types:
 ```rust

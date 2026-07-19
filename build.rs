@@ -547,11 +547,41 @@ fn gff_feature_matches(f: &GffFeature, gene: &str) -> bool {
         "rrl" => name == "rrl" || (f.ftype == "rRNA" && product.contains("23S ribosomal RNA")),
         "rpoB" => name == "rpoB" || gene_kv == "rpoB",
         "erm" => !name.is_empty() && name.to_ascii_lowercase().contains("erm"),
+        // PGAP annotates both mycobacterial GroEL paralogs identically as gene=groL /
+        // product="chaperonin GroEL" — this only narrows to *candidates*; is_hsp65_paralog2()
+        // below picks the standalone one (hsp65/groEL2), discarding the groES-operonic one
+        // (groEL1).
+        "hsp65" => {
+            gene_kv.eq_ignore_ascii_case("groL")
+                || gene_kv.eq_ignore_ascii_case("groEL2")
+                || gene_kv.eq_ignore_ascii_case("hsp65")
+                || product.to_ascii_lowercase().contains("chaperonin groel")
+        }
         _ => false,
     }
 }
 
-fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
+/// Mycobacteria carry two GroEL paralogs: groEL1, co-transcribed in an operon immediately
+/// downstream/upstream of groES, and groEL2 (a.k.a. "hsp65", the gene used diagnostically for
+/// mycobacterial species ID) standing alone elsewhere in the genome. PGAP gives both the same
+/// gene=groL / product="chaperonin GroEL" annotation, so gff_feature_matches() alone can't tell
+/// them apart — this rejects any groL candidate sitting near a groES gene on the same contig.
+fn is_hsp65_paralog2(features: &[GffFeature], candidate: &GffFeature) -> bool {
+    const OPERON_WINDOW: usize = 5000;
+    !features.iter().any(|g| {
+        let gene_kv = g.attrs.get("gene").map(String::as_str).unwrap_or("");
+        let name = g.attrs.get("Name").map(String::as_str).unwrap_or("");
+        g.seqname == candidate.seqname
+            && (gene_kv.eq_ignore_ascii_case("groES") || name.eq_ignore_ascii_case("groES"))
+            && candidate.start.abs_diff(g.start) < OPERON_WINDOW
+    })
+}
+
+/// Walks `db_dir` for per-species `<Genus>_<species>/{genome.gff,genome.fasta}` pairs (the
+/// layout used by both the vendored ntm-db submodule and the hand-curated
+/// `res/sequences/kansasii-complex` directory) and appends matched gene sequences into the
+/// pooled `myco_*.fasta` reference files under `seq_dir`.
+fn extract_species_gff_sequences(seq_dir: &std::path::Path, db_dir: &std::path::Path, log_tag: &str) {
     use std::collections::HashSet;
 
     struct Target {
@@ -581,8 +611,7 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
         },
     ];
 
-    let db_dir = seq_dir.join("ntm-db/db");
-    let entries = match fs::read_dir(&db_dir) {
+    let entries = match fs::read_dir(db_dir) {
         Ok(e) => e,
         Err(_) => return,
     };
@@ -598,7 +627,8 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
         let gff_path = species_path.join("genome.gff");
         let fasta_path = species_path.join("genome.fasta");
         println!(
-            "cargo:rerun-if-changed=res/sequences/ntm-db/db/{}/genome.gff",
+            "cargo:rerun-if-changed={}/{}/genome.gff",
+            db_dir.display(),
             dir_name
         );
         if !gff_path.exists() || !fasta_path.exists() {
@@ -621,6 +651,9 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
                 if !gff_feature_matches(feature, target.gene) {
                     continue;
                 }
+                if target.gene == "hsp65" && !is_hsp65_paralog2(&features, feature) {
+                    continue;
+                }
                 let coord_key = (feature.seqname.clone(), feature.start, feature.stop);
                 if !seen.insert(coord_key) {
                     continue;
@@ -635,16 +668,16 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
                     Some(c) => c,
                     None => {
                         println!(
-                            "cargo:warning=ntm-db: contig {} not found in {}",
-                            feature.seqname, dir_name
+                            "cargo:warning={}: contig {} not found in {}",
+                            log_tag, feature.seqname, dir_name
                         );
                         continue;
                     }
                 };
                 if feature.start == 0 || feature.stop > contig.len() {
                     println!(
-                        "cargo:warning=ntm-db: coords out of range {} in {}",
-                        coord_str, dir_name
+                        "cargo:warning={}: coords out of range {} in {}",
+                        log_tag, coord_str, dir_name
                     );
                     continue;
                 }
@@ -669,14 +702,14 @@ fn extract_ntm_db_sequences(seq_dir: &std::path::Path) {
                 {
                     Ok(mut f) => match f.write_all(&fasta_entry) {
                         Ok(_) => println!(
-                            "cargo:warning=ntm-db: {} {} → {}",
-                            species_name, target.gene, target.fasta
+                            "cargo:warning={}: {} {} → {}",
+                            log_tag, species_name, target.gene, target.fasta
                         ),
                         Err(e) => {
-                            println!("cargo:warning=ntm-db: write error {}: {e}", target.fasta)
+                            println!("cargo:warning={}: write error {}: {e}", log_tag, target.fasta)
                         }
                     },
-                    Err(e) => println!("cargo:warning=ntm-db: open error {}: {e}", target.fasta),
+                    Err(e) => println!("cargo:warning={}: open error {}: {e}", log_tag, target.fasta),
                 }
             }
         }
@@ -789,7 +822,8 @@ fn main() {
 
     fetch_myco_sequences(&seq_dir, Some(api_key.as_str()));
     fetch_sequences_from_toml(&seq_dir, Some(api_key.as_str()));
-    extract_ntm_db_sequences(&seq_dir);
+    extract_species_gff_sequences(&seq_dir, &seq_dir.join("ntm-db/db"), "ntm-db");
+    extract_species_gff_sequences(&seq_dir, &seq_dir.join("kansasii-complex"), "kansasii-complex");
     check_hsp65_integrity(&seq_dir);
     check_rrl_integrity(&seq_dir);
     check_rrs_integrity(&seq_dir);
