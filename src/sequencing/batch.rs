@@ -37,8 +37,9 @@ use super::{
     trim_to_min_quality,
 };
 
-/// In-memory cache: maps each AB1 file path to the seq_id_hits computed by the last background
-/// scan. `item_from_entry()` reads from this cache instead of running alignment on the UI thread.
+/// In-memory cache: maps each AB1 file path to the top 10 seq_id_hits (by identity) computed by
+/// the last background scan. `item_from_entry()` reads from this cache instead of running
+/// alignment on the UI thread.
 pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
 
@@ -353,7 +354,7 @@ pub fn scan_ab1_directory(
         let ab1_seq = parse_ab1_sequence(&bytes);
         let ab1_qual = parse_ab1_quality(&bytes);
 
-        let seq_id_hits = if let Some(seq) = ab1_seq.as_ref() {
+        let mut seq_id_hits = if let Some(seq) = ab1_seq.as_ref() {
             let trimmed: &[u8] = match &ab1_qual {
                 Some(qual) => trim_to_min_quality(seq, qual, 20).unwrap_or(seq.as_slice()),
                 None => seq.as_slice(),
@@ -378,6 +379,11 @@ pub fn scan_ab1_directory(
         } else {
             Vec::new()
         };
+        // Each identify_sequence_* function returns hits already sorted descending by identity;
+        // keep only the top 10 before cloning into the long-lived caches below, since scanning
+        // directories with many AB1 files otherwise accumulates one full (unbounded) hit list
+        // per file for the life of the process.
+        seq_id_hits.truncate(10);
 
         // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
         log::debug!(

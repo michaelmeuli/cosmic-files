@@ -20,7 +20,7 @@ The top 5 `SeqIdHit`s are stored in the record (`batch.rs:294`) — alignment st
 
 A static `LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>>` (`batch.rs:22-23`).
 
-Populated **both** on a disk-cache hit (`batch.rs:165-166`) and after a fresh alignment (`batch.rs:230-231`).
+Populated **both** on a disk-cache hit (`batch.rs:165-166`) and after a fresh alignment (`batch.rs:230-231`). In both cases only the top 10 `SeqIdHit`s (already sorted descending by identity by each `identify_sequence_*` function) are kept — the full alignment result set for every reference in the FASTA database is never retained, since scanning directories with many AB1 files would otherwise accumulate one unbounded hit list per file for the life of the process.
 
 The key is the **canonical path** (with `\\?\` prefix on Windows) so it matches what `item_from_entry` in `tab.rs:944` looks up when building file list items on the UI thread.
 
