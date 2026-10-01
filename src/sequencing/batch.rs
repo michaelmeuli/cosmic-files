@@ -118,7 +118,7 @@ pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
         Some("hsp65".to_string())
     } else if lower_name.contains("rpob") || lower_name.contains("rpo") {
         Some("rpoB".to_string())
-    } else if lower_name.contains("mbak14") {
+    } else if lower_name.contains("mbak14") || lower_name.contains("mbak-14") {
         Some("16S".to_string())
     } else if lower_name.contains("1098s") || lower_name.contains("1525a") {
         Some("16S 3'-End".to_string())
@@ -346,7 +346,7 @@ pub fn scan_ab1_directory(
         let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
         let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
         let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
-        let is_16s = lower_name.contains("mbak14");
+        let is_16s = lower_name.contains("mbak14") || lower_name.contains("mbak-14");
         let is_16s3end = lower_name.contains("1098s") || lower_name.contains("1525a");
         let is_23s_ntm = lower_name.contains("rrl") || lower_name.contains("mclr");
         let is_pnca = lower_name.contains("pnca");

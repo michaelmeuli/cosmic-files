@@ -3217,7 +3217,7 @@ impl Item {
 
     pub fn is_16s(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("mbak14")
+        !self.is_fasta() && lower.contains("mbak14") || lower.contains("mbak-14")
     }
 
     pub fn is_16s3end(&self) -> bool {
