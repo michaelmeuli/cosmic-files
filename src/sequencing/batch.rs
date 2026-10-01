@@ -6,12 +6,14 @@
 //! [`SampleSusceptibilityRecord`] per file — with both an in-memory cache
 //! ([`AB1_SEQ_CACHE`], shared with the interactive single-file view) and an optional on-disk
 //! JSON cache keyed by file mtime, so re-scanning an unchanged directory is cheap.
+//! [`analyse_ab1_for_preview`] runs the same per-file pipeline on demand for files outside the
+//! scan directories, with its own disk cache (`ab1_preview_cache.json`).
 //! [`write_ab1_csv`] and [`write_rare_mutations_csv`] export the results.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{LazyLock, RwLock};
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, PoisonError, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -48,6 +50,18 @@ pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>
 /// 16S AB1 lives in a different directory than the file being previewed.
 pub(crate) static SIXTEEN_S_HITS_CACHE: LazyLock<RwLock<HashMap<String, Vec<SeqIdHit>>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
+
+/// On-disk JSON cache of analysed AB1 files: path string → (mtime secs, record).
+type DiskCache = HashMap<String, (u64, SampleSusceptibilityRecord)>;
+
+/// File name of the on-disk cache for AB1 files aligned on demand by the preview panel, kept
+/// separate from the scan caches so they only ever hold files from their own scan directory.
+const PREVIEW_CACHE_FILE_NAME: &str = "ab1_preview_cache.json";
+
+/// The preview disk cache, loaded on first use and tagged with the file it was read from so a
+/// changed `ab1_cache_path` setting triggers a reload.
+static PREVIEW_DISK_CACHE: LazyLock<Mutex<Option<(PathBuf, DiskCache)>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// Looks up the 16S seq_id_hits previously computed by a background [`scan_ab1_directory`] run
 /// for `sample_id`, regardless of which directory the 16S AB1 file lives in.
@@ -241,8 +255,6 @@ pub fn scan_ab1_directory(
         cache_path
     );
 
-    // Load disk cache: HashMap<path_string, (mtime_secs, record)>
-    type DiskCache = HashMap<String, (u64, SampleSusceptibilityRecord)>;
     let mut disk_cache: DiskCache = cache_path
         .as_ref()
         .and_then(|p| std::fs::read_to_string(p).ok())
@@ -301,17 +313,7 @@ pub fn scan_ab1_directory(
                     cached_record.seq_id_hits.len(),
                     canonical_path.display()
                 );
-                if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
-                    guard.insert(canonical_path, cached_record.seq_id_hits.clone());
-                }
-                if cached_record.gene.as_deref() == Some("16S")
-                    && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
-                {
-                    guard.insert(
-                        cached_record.sample_id.clone(),
-                        cached_record.seq_id_hits.clone(),
-                    );
-                }
+                insert_cached_record(canonical_path, cached_record);
                 records.push(cached_record.clone());
                 continue;
             } else {
@@ -327,180 +329,8 @@ pub fn scan_ab1_directory(
         }
 
         // Cache miss — run full alignment pipeline.
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        let lower_name = file_name.to_ascii_lowercase();
-        let (sample_id, gene) = parse_ab1_filename(&file_name);
-
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!("ab1 batch scan: failed to read {}: {e}", path.display());
-                continue;
-            }
-        };
-
-        let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
-        let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
-        let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
-        let is_16s = lower_name.contains("mbak14") || lower_name.contains("mbak-14");
-        let is_16s3end = lower_name.contains("1098s") || lower_name.contains("1525a");
-        let is_23s_ntm = lower_name.contains("rrl") || lower_name.contains("mclr");
-        let is_pnca = lower_name.contains("pnca");
-
-        let ab1_seq = parse_ab1_sequence(&bytes);
-        let ab1_qual = parse_ab1_quality(&bytes);
-
-        let mut seq_id_hits = if let Some(seq) = ab1_seq.as_ref() {
-            let trimmed: &[u8] = match &ab1_qual {
-                Some(qual) => trim_to_min_quality(seq, qual, 20).unwrap_or(seq.as_slice()),
-                None => seq.as_slice(),
-            };
-            if is_erm41 {
-                identify_sequence_erm41(trimmed)
-            } else if is_hsp65 {
-                identify_sequence_hsp65(trimmed)
-            } else if is_rpob {
-                identify_sequence_rpob(trimmed)
-            } else if is_23s_ntm {
-                identify_sequence_rrl_ntm(trimmed)
-            } else if is_16s {
-                identify_sequence_16s(trimmed)
-            } else if is_16s3end {
-                identify_sequence_16s3end(trimmed)
-            } else if is_pnca {
-                identify_sequence_pnca(trimmed)
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
-        // Each identify_sequence_* function returns hits already sorted descending by identity;
-        // keep only the top 10 before cloning into the long-lived caches below, since scanning
-        // directories with many AB1 files otherwise accumulates one full (unbounded) hit list
-        // per file for the life of the process.
-        seq_id_hits.truncate(10);
-
-        // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
-        log::debug!(
-            "ab1_scan: alignment done for {} → {} hits (top: {:?}, canonical={})",
-            path.display(),
-            seq_id_hits.len(),
-            seq_id_hits.first().map(|h| (&h.description, h.identity)),
-            canonical_path.display()
-        );
-        if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
-            guard.insert(canonical_path, seq_id_hits.clone());
-        }
-        if is_16s && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write() {
-            guard.insert(sample_id.clone(), seq_id_hits.clone());
-        }
-
-        let is_susceptible = seq_id_hits.first().and_then(|hit| {
-            let erm41_result = if hit.description == DESC_MASSILIENSE {
-                Some(true)
-            } else {
-                is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
-            };
-            if erm41_result.is_some() {
-                return erm41_result;
-            }
-            let rrl_hit =
-                best_snp_hit(&seq_id_hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
-            let rrl_result =
-                is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &rrl_hit.rrl_snp_calls);
-            if rrl_result.is_some() {
-                return rrl_result;
-            }
-            let rrs_hit =
-                best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
-            let rrs_result = is_susceptible_rrs(&rrs_hit.rrs_snp_calls);
-            if rrs_result.is_some() {
-                return rrs_result;
-            }
-            is_susceptible_pnca(&hit.pnca_snp_calls)
-        });
-
-        let susceptibility_calls = seq_id_hits
-            .first()
-            .map(|hit| {
-                let rrl_hit =
-                    best_snp_hit(&seq_id_hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
-                let rrs_hit =
-                    best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
-                let rrs3end_hit = best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls_3end.is_empty())
-                    .unwrap_or(hit);
-                SusceptibilityCalls {
-                    erm41: Erm41SusceptibilityCalls {
-                        position_28: hit.erm41_position_28_opt,
-                        lof_snp_calls: hit.erm41_snp_calls.clone(),
-                        is_susceptible: if hit.description == DESC_MASSILIENSE {
-                            Some(true)
-                        } else {
-                            is_susceptible_erm41(
-                                hit.erm41_position_28_opt.as_ref(),
-                                &hit.erm41_snp_calls,
-                            )
-                        },
-                    },
-                    rrl: RrlSusceptibilityCalls {
-                        position_2058_2059: hit.rrl_position_2058_2059_opt,
-                        snp_calls: rrl_hit.rrl_snp_calls.clone(),
-                        is_susceptible: is_susceptible_rrl(
-                            hit.rrl_position_2058_2059_opt.as_ref(),
-                            &rrl_hit.rrl_snp_calls,
-                        ),
-                        is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
-                            hit.rrl_position_2058_2059_opt.as_ref(),
-                            &rrl_hit.rrl_snp_calls,
-                        ),
-                    },
-                    rrs: RrsSusceptibilityCalls {
-                        snp_calls: rrs_hit.rrs_snp_calls.clone(),
-                        is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
-                        is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(
-                            &rrs_hit.rrs_snp_calls,
-                        ),
-                    },
-                    rrs3end: RrsSusceptibilityCalls3End {
-                        position_1248: hit.rrs3end_position_1248_opt,
-                        snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
-                        is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
-                        is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
-                            &rrs3end_hit.rrs_snp_calls_3end,
-                        ),
-                    },
-                    pnca: PncaSusceptibilityCalls {
-                        snp_calls: hit.pnca_snp_calls.clone(),
-                        is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
-                    },
-                }
-            })
-            .unwrap_or_default();
-
-        let record = SampleSusceptibilityRecord {
-            sample_id,
-            gene,
-            file_name,
-            file_path: path.to_path_buf(),
-            file_created,
-            susceptibility_calls,
-            species: if is_16s {
-                species_from_16s_hits(&seq_id_hits)
-            } else if is_16s3end {
-                species_from_16s3end(&seq_id_hits)
-            } else if is_rpob {
-                species_from_rpob_hits(&seq_id_hits)
-            } else {
-                seq_id_hits.first().map(|h| h.description.clone())
-            },
-            identity: seq_id_hits.first().map(|h| h.identity),
-            is_susceptible,
-            seq_id_hits: seq_id_hits.iter().take(5).cloned().collect(),
+        let Some((_, record)) = analyse_ab1_file(path, file_created) else {
+            continue;
         };
 
         disk_cache.insert(path_key, (mtime_secs, record.clone()));
@@ -530,6 +360,303 @@ pub fn scan_ab1_directory(
     // Reverse-alphabetical by sample_id (highest first)
     records.sort_by(|a, b| b.sample_id.cmp(&a.sample_id));
     records
+}
+
+/// Run the full alignment pipeline on one AB1 file: infer the gene from the filename, align the
+/// quality-trimmed read against that gene's references, and derive the susceptibility calls.
+///
+/// Populates [`AB1_SEQ_CACHE`] (and [`SIXTEEN_S_HITS_CACHE`] for 16S reads) as a side effect.
+/// Returns the top 10 hits alongside the record, whose `seq_id_hits` keeps only the top 5.
+/// Returns `None` if the file can't be read.
+fn analyse_ab1_file(
+    path: &Path,
+    file_created: Option<SystemTime>,
+) -> Option<(Vec<SeqIdHit>, SampleSusceptibilityRecord)> {
+    // Canonicalize so the key matches the \\?\ -prefixed paths the file manager uses.
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    let lower_name = file_name.to_ascii_lowercase();
+    let (sample_id, gene) = parse_ab1_filename(&file_name);
+
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("ab1 analysis: failed to read {}: {e}", path.display());
+            return None;
+        }
+    };
+
+    let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
+    let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
+    let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
+    let is_16s = lower_name.contains("mbak14") || lower_name.contains("mbak-14");
+    let is_16s3end = lower_name.contains("1098s") || lower_name.contains("1525a");
+    let is_23s_ntm = lower_name.contains("rrl") || lower_name.contains("mclr");
+    let is_pnca = lower_name.contains("pnca");
+
+    let ab1_seq = parse_ab1_sequence(&bytes);
+    let ab1_qual = parse_ab1_quality(&bytes);
+
+    let mut seq_id_hits = if let Some(seq) = ab1_seq.as_ref() {
+        let trimmed: &[u8] = match &ab1_qual {
+            Some(qual) => trim_to_min_quality(seq, qual, 20).unwrap_or(seq.as_slice()),
+            None => seq.as_slice(),
+        };
+        if is_erm41 {
+            identify_sequence_erm41(trimmed)
+        } else if is_hsp65 {
+            identify_sequence_hsp65(trimmed)
+        } else if is_rpob {
+            identify_sequence_rpob(trimmed)
+        } else if is_23s_ntm {
+            identify_sequence_rrl_ntm(trimmed)
+        } else if is_16s {
+            identify_sequence_16s(trimmed)
+        } else if is_16s3end {
+            identify_sequence_16s3end(trimmed)
+        } else if is_pnca {
+            identify_sequence_pnca(trimmed)
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    // Each identify_sequence_* function returns hits already sorted descending by identity;
+    // keep only the top 10 before cloning into the long-lived caches below, since scanning
+    // directories with many AB1 files otherwise accumulates one full (unbounded) hit list
+    // per file for the life of the process.
+    seq_id_hits.truncate(10);
+
+    // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
+    log::debug!(
+        "ab1_scan: alignment done for {} → {} hits (top: {:?}, canonical={})",
+        path.display(),
+        seq_id_hits.len(),
+        seq_id_hits.first().map(|h| (&h.description, h.identity)),
+        canonical_path.display()
+    );
+    if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
+        guard.insert(canonical_path, seq_id_hits.clone());
+    }
+    if is_16s && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write() {
+        guard.insert(sample_id.clone(), seq_id_hits.clone());
+    }
+
+    let is_susceptible = seq_id_hits.first().and_then(|hit| {
+        let erm41_result = if hit.description == DESC_MASSILIENSE {
+            Some(true)
+        } else {
+            is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
+        };
+        if erm41_result.is_some() {
+            return erm41_result;
+        }
+        let rrl_hit = best_snp_hit(&seq_id_hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
+        let rrl_result = is_susceptible_rrl(
+            hit.rrl_position_2058_2059_opt.as_ref(),
+            &rrl_hit.rrl_snp_calls,
+        );
+        if rrl_result.is_some() {
+            return rrl_result;
+        }
+        let rrs_hit = best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+        let rrs_result = is_susceptible_rrs(&rrs_hit.rrs_snp_calls);
+        if rrs_result.is_some() {
+            return rrs_result;
+        }
+        is_susceptible_pnca(&hit.pnca_snp_calls)
+    });
+
+    let susceptibility_calls = seq_id_hits
+        .first()
+        .map(|hit| {
+            let rrl_hit =
+                best_snp_hit(&seq_id_hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
+            let rrs_hit =
+                best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+            let rrs3end_hit =
+                best_snp_hit(&seq_id_hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
+            SusceptibilityCalls {
+                erm41: Erm41SusceptibilityCalls {
+                    position_28: hit.erm41_position_28_opt,
+                    lof_snp_calls: hit.erm41_snp_calls.clone(),
+                    is_susceptible: if hit.description == DESC_MASSILIENSE {
+                        Some(true)
+                    } else {
+                        is_susceptible_erm41(
+                            hit.erm41_position_28_opt.as_ref(),
+                            &hit.erm41_snp_calls,
+                        )
+                    },
+                },
+                rrl: RrlSusceptibilityCalls {
+                    position_2058_2059: hit.rrl_position_2058_2059_opt,
+                    snp_calls: rrl_hit.rrl_snp_calls.clone(),
+                    is_susceptible: is_susceptible_rrl(
+                        hit.rrl_position_2058_2059_opt.as_ref(),
+                        &rrl_hit.rrl_snp_calls,
+                    ),
+                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
+                        hit.rrl_position_2058_2059_opt.as_ref(),
+                        &rrl_hit.rrl_snp_calls,
+                    ),
+                },
+                rrs: RrsSusceptibilityCalls {
+                    snp_calls: rrs_hit.rrs_snp_calls.clone(),
+                    is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(
+                        &rrs_hit.rrs_snp_calls,
+                    ),
+                },
+                rrs3end: RrsSusceptibilityCalls3End {
+                    position_1248: hit.rrs3end_position_1248_opt,
+                    snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
+                    is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
+                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
+                        &rrs3end_hit.rrs_snp_calls_3end,
+                    ),
+                },
+                pnca: PncaSusceptibilityCalls {
+                    snp_calls: hit.pnca_snp_calls.clone(),
+                    is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
+                },
+            }
+        })
+        .unwrap_or_default();
+
+    let record = SampleSusceptibilityRecord {
+        sample_id,
+        gene,
+        file_name,
+        file_path: path.to_path_buf(),
+        file_created,
+        susceptibility_calls,
+        species: if is_16s {
+            species_from_16s_hits(&seq_id_hits)
+        } else if is_16s3end {
+            species_from_16s3end(&seq_id_hits)
+        } else if is_rpob {
+            species_from_rpob_hits(&seq_id_hits)
+        } else {
+            seq_id_hits.first().map(|h| h.description.clone())
+        },
+        identity: seq_id_hits.first().map(|h| h.identity),
+        is_susceptible,
+        seq_id_hits: seq_id_hits.iter().take(5).cloned().collect(),
+    };
+
+    Some((seq_id_hits, record))
+}
+
+/// Put a disk-cached record's hits into the in-memory caches the preview reads from.
+fn insert_cached_record(canonical_path: PathBuf, record: &SampleSusceptibilityRecord) {
+    if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
+        guard.insert(canonical_path, record.seq_id_hits.clone());
+    }
+    if record.gene.as_deref() == Some("16S")
+        && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
+    {
+        guard.insert(record.sample_id.clone(), record.seq_id_hits.clone());
+    }
+}
+
+/// Location of the preview disk cache for the `ab1_cache_path` setting, which (as for the scan)
+/// may name either a directory or a cache file; in the latter case its directory is used.
+/// Falls back to the user cache directory when the setting is empty.
+pub(crate) fn preview_cache_file(ab1_cache_path: &str) -> PathBuf {
+    if ab1_cache_path.is_empty() {
+        return dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("cosmic-files")
+            .join(PREVIEW_CACHE_FILE_NAME);
+    }
+    let p = PathBuf::from(ab1_cache_path);
+    if p.is_dir() {
+        p.join(PREVIEW_CACHE_FILE_NAME)
+    } else {
+        p.with_file_name(PREVIEW_CACHE_FILE_NAME)
+    }
+}
+
+/// Align one AB1 file on demand for the preview panel, for files the background scan doesn't
+/// cover. Reuses the result stored in `cache_file` while the file's mtime is unchanged;
+/// otherwise runs [`analyse_ab1_file`] and stores all of its hits there. Either way the hits end
+/// up in [`AB1_SEQ_CACHE`], keyed by canonical path. Blocking: call from a worker thread.
+pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<SeqIdHit> {
+    let meta = std::fs::metadata(path).ok();
+    let file_created = meta.as_ref().and_then(|m| m.created().ok());
+    let mtime_secs: u64 = meta
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path_key = path.to_string_lossy().into_owned();
+
+    {
+        let mut guard = PREVIEW_DISK_CACHE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if guard.as_ref().is_none_or(|(p, _)| p != cache_file) {
+            let disk_cache: DiskCache = std::fs::read_to_string(cache_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+            log::debug!(
+                "ab1_preview: loaded {} disk cache entries from {}",
+                disk_cache.len(),
+                cache_file.display()
+            );
+            *guard = Some((cache_file.to_path_buf(), disk_cache));
+        }
+        if let Some((_, disk_cache)) = guard.as_ref()
+            && let Some((cached_mtime, record)) = disk_cache.get(&path_key)
+            && *cached_mtime == mtime_secs
+        {
+            log::debug!("ab1_preview: disk cache hit for {}", path.display());
+            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            insert_cached_record(canonical_path, record);
+            return record.seq_id_hits.clone();
+        }
+    }
+
+    // Not cached: align without holding the lock, so other previews' cache hits aren't blocked.
+    let Some((seq_id_hits, mut record)) = analyse_ab1_file(path, file_created) else {
+        return Vec::new();
+    };
+    // Unlike the scan record (top 5, for the report), keep every hit the preview displays.
+    record.seq_id_hits.clone_from(&seq_id_hits);
+
+    let mut guard = PREVIEW_DISK_CACHE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some((loaded_from, disk_cache)) = guard.as_mut()
+        && loaded_from == cache_file
+    {
+        disk_cache.insert(path_key, (mtime_secs, record));
+        if let Some(parent) = cache_file.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            log::warn!("ab1_preview: failed to create {}: {e}", parent.display());
+        }
+        match serde_json::to_string(disk_cache) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(cache_file, json) {
+                    log::warn!(
+                        "ab1_preview: failed to write disk cache {}: {e}",
+                        cache_file.display()
+                    );
+                }
+            }
+            Err(e) => log::warn!("ab1_preview: failed to serialise disk cache: {e}"),
+        }
+    }
+    seq_id_hits
 }
 
 /// Write `records` to a CSV file at `out_path`.

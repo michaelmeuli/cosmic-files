@@ -1,4 +1,4 @@
-﻿#[cfg(feature = "desktop")]
+#[cfg(feature = "desktop")]
 use cosmic::desktop::fde::{DesktopEntry, get_languages_from_env};
 use cosmic::iced::advanced::graphics;
 use cosmic::iced::advanced::text::{self, Paragraph};
@@ -832,6 +832,70 @@ pub fn item_from_search_item(search_item: SearchItem, sizes: IconSizes) -> Item 
     }
 }
 
+/// Combined susceptibility verdict and per-gene calls for an AB1 file's alignment hits.
+///
+/// The verdict takes the first gene that yields one, in the order erm41 → rrl → rrs → pncA.
+fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCalls) {
+    let Some(hit) = hits.first() else {
+        return (None, SusceptibilityCalls::default());
+    };
+    let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
+    let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
+    let rrs3end_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
+
+    let is_susceptible =
+        is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
+            .or_else(|| {
+                is_susceptible_rrl(
+                    hit.rrl_position_2058_2059_opt.as_ref(),
+                    &rrl_hit.rrl_snp_calls,
+                )
+            })
+            .or_else(|| is_susceptible_rrs(&rrs_hit.rrs_snp_calls))
+            .or_else(|| is_susceptible_pnca(&hit.pnca_snp_calls));
+
+    let susceptibility_calls = SusceptibilityCalls {
+        erm41: Erm41SusceptibilityCalls {
+            position_28: hit.erm41_position_28_opt,
+            lof_snp_calls: hit.erm41_snp_calls.clone(),
+            is_susceptible: is_susceptible_erm41(
+                hit.erm41_position_28_opt.as_ref(),
+                &hit.erm41_snp_calls,
+            ),
+        },
+        rrl: RrlSusceptibilityCalls {
+            position_2058_2059: hit.rrl_position_2058_2059_opt,
+            snp_calls: rrl_hit.rrl_snp_calls.clone(),
+            is_susceptible: is_susceptible_rrl(
+                hit.rrl_position_2058_2059_opt.as_ref(),
+                &rrl_hit.rrl_snp_calls,
+            ),
+            is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
+                hit.rrl_position_2058_2059_opt.as_ref(),
+                &rrl_hit.rrl_snp_calls,
+            ),
+        },
+        rrs: RrsSusceptibilityCalls {
+            snp_calls: rrs_hit.rrs_snp_calls.clone(),
+            is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
+            is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&rrs_hit.rrs_snp_calls),
+        },
+        rrs3end: RrsSusceptibilityCalls3End {
+            position_1248: hit.rrs3end_position_1248_opt,
+            snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
+            is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
+            is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
+                &rrs3end_hit.rrs_snp_calls_3end,
+            ),
+        },
+        pnca: PncaSusceptibilityCalls {
+            snp_calls: hit.pnca_snp_calls.clone(),
+            is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
+        },
+    };
+    (is_susceptible, susceptibility_calls)
+}
+
 pub fn item_from_entry(
     path: PathBuf,
     name: String,
@@ -994,78 +1058,9 @@ pub fn item_from_entry(
         None
     };
 
-    let is_susceptible = sequence_opt.as_ref().and_then(|s| {
-        let hits = &s.seq_id_hits;
-        let hit = hits.first()?;
-        let erm41_result =
-            is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls);
-        if erm41_result.is_some() {
-            return erm41_result;
-        }
-        let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
-        let rrl_result =
-            is_susceptible_rrl(hit.rrl_position_2058_2059_opt.as_ref(), &rrl_hit.rrl_snp_calls);
-        if rrl_result.is_some() {
-            return rrl_result;
-        }
-        let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
-        let rrs_result = is_susceptible_rrs(&rrs_hit.rrs_snp_calls);
-        if rrs_result.is_some() {
-            return rrs_result;
-        }
-        is_susceptible_pnca(&hit.pnca_snp_calls)
-    });
-
-    let susceptibility_calls = sequence_opt
+    let (is_susceptible, susceptibility_calls) = sequence_opt
         .as_ref()
-        .and_then(|s| s.seq_id_hits.first().map(|hit| (hit, &s.seq_id_hits)))
-        .map(|(hit, hits)| {
-            let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
-            let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
-            let rrs3end_hit =
-                best_snp_hit(hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
-            SusceptibilityCalls {
-                erm41: Erm41SusceptibilityCalls {
-                    position_28: hit.erm41_position_28_opt,
-                    lof_snp_calls: hit.erm41_snp_calls.clone(),
-                    is_susceptible: is_susceptible_erm41(
-                        hit.erm41_position_28_opt.as_ref(),
-                        &hit.erm41_snp_calls,
-                    ),
-                },
-                rrl: RrlSusceptibilityCalls {
-                    position_2058_2059: hit.rrl_position_2058_2059_opt,
-                    snp_calls: rrl_hit.rrl_snp_calls.clone(),
-                    is_susceptible: is_susceptible_rrl(
-                        hit.rrl_position_2058_2059_opt.as_ref(),
-                        &rrl_hit.rrl_snp_calls,
-                    ),
-                    is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
-                        hit.rrl_position_2058_2059_opt.as_ref(),
-                        &rrl_hit.rrl_snp_calls,
-                    ),
-                },
-                rrs: RrsSusceptibilityCalls {
-                    snp_calls: rrs_hit.rrs_snp_calls.clone(),
-                    is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
-                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(
-                        &rrs_hit.rrs_snp_calls,
-                    ),
-                },
-                rrs3end: RrsSusceptibilityCalls3End {
-                    position_1248: hit.rrs3end_position_1248_opt,
-                    snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
-                    is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
-                    is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
-                        &rrs3end_hit.rrs_snp_calls_3end,
-                    ),
-                },
-                pnca: PncaSusceptibilityCalls {
-                    snp_calls: hit.pnca_snp_calls.clone(),
-                    is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
-                },
-            }
-        })
+        .map(|s| ab1_susceptibility(&s.seq_id_hits))
         .unwrap_or_default();
 
     let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
@@ -2322,6 +2317,9 @@ pub enum Message {
     DirectorySize(PathBuf, DirSize),
     #[cfg(feature = "gvfs")]
     DirectoryChildren(PathBuf, usize),
+    /// Alignment hits for an AB1 file the background scan didn't cover, computed on demand
+    /// for the preview.
+    Ab1Analysed(PathBuf, Vec<SeqIdHit>),
     Checksums(PathBuf, ChecksumState),
     CalculateChecksums(PathBuf),
     CopyChecksum(String),
@@ -7223,6 +7221,23 @@ impl Tab {
                     }
                 }
             }
+            Message::Ab1Analysed(path, hits) => {
+                let location = Location::Path(path);
+                if let Some(ref mut items) = self.items_opt
+                    && let Some(item) = items
+                        .iter_mut()
+                        .find(|item| item.location_opt.as_ref() == Some(&location))
+                    && let ItemMetadata::Path {
+                        sequence_opt: Some(sequence),
+                        is_susceptible,
+                        susceptibility_calls,
+                        ..
+                    } = &mut item.metadata
+                {
+                    (*is_susceptible, *susceptibility_calls) = ab1_susceptibility(&hits);
+                    sequence.seq_id_hits = hits;
+                }
+            }
             Message::OpenSeqAlignment(hit) => {
                 commands.push(Command::OpenSeqAlignment(hit));
             }
@@ -8807,17 +8822,17 @@ impl Tab {
                                 .into(),
                             widget::column::with_children([
                                 Item::list_display_name(item.display_name.clone())
-                                .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
-                                    1,
-                                )))
-                                .into(),
+                                    .ellipsize(text::Ellipsize::Middle(
+                                        text::EllipsizeHeightLimit::Lines(1),
+                                    ))
+                                    .into(),
                                 widget::text::caption(match item.path_opt() {
                                     Some(path) => path.display().to_string(),
                                     None => String::new(),
                                 })
-                                .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
-                                    1,
-                                )))
+                                .ellipsize(text::Ellipsize::Middle(
+                                    text::EllipsizeHeightLimit::Lines(1),
+                                ))
                                 .into(),
                             ])
                             .width(Length::Fill)
@@ -8920,17 +8935,17 @@ impl Tab {
                                     .into(),
                                 widget::column::with_children([
                                     Item::list_display_name(item.display_name.clone())
-                                    .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
-                                        1,
-                                    )))
-                                    .into(),
+                                        .ellipsize(text::Ellipsize::Middle(
+                                            text::EllipsizeHeightLimit::Lines(1),
+                                        ))
+                                        .into(),
                                     widget::text::caption(match item.path_opt() {
                                         Some(path) => path.display().to_string(),
                                         None => String::new(),
                                     })
-                                    .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
-                                        1,
-                                    )))
+                                    .ellipsize(text::Ellipsize::Middle(
+                                        text::EllipsizeHeightLimit::Lines(1),
+                                    ))
                                     .into(),
                                 ])
                                 .width(Length::Fill)
@@ -9870,6 +9885,73 @@ impl Tab {
                 if subscriptions.len() >= jobs {
                     break;
                 }
+            }
+
+            // Align a previewed AB1 file on demand when no background scan has covered it. The
+            // subscription is keyed by path, so a file is never aligned twice concurrently, and
+            // it drops once the hits arrive (or the selection changes).
+            let mut selected = items.iter().filter(|item| item.selected);
+            if preview
+                && let (Some(item), None) = (selected.next(), selected.next())
+                && item.metadata.is_ab1()
+                && item.metadata.seq_id_hits().is_empty()
+                && let Some(path) = item.path_opt().cloned()
+                && !crate::sequencing::batch::AB1_SEQ_CACHE
+                    .read()
+                    .is_ok_and(|guard| guard.contains_key(&path))
+            {
+                struct Wrapper {
+                    path: PathBuf,
+                    cache_file: PathBuf,
+                }
+                impl Hash for Wrapper {
+                    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                        self.path.hash(state);
+                    }
+                }
+                let cache_file =
+                    crate::sequencing::batch::preview_cache_file(&self.tb_config.ab1_cache_path);
+                subscriptions.push(Subscription::run_with(
+                    Wrapper { path, cache_file },
+                    |Wrapper { path, cache_file }| {
+                        let path = path.clone();
+                        let cache_file = cache_file.clone();
+                        stream::channel(
+                            1,
+                            move |mut output: futures::channel::mpsc::Sender<_>| async move {
+                                let message = {
+                                    let path = path.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        let start = Instant::now();
+                                        let hits =
+                                            crate::sequencing::batch::analyse_ab1_for_preview(
+                                                &path,
+                                                &cache_file,
+                                            );
+                                        log::debug!(
+                                            "analysed {} for preview in {:?}",
+                                            path.display(),
+                                            start.elapsed()
+                                        );
+                                        Message::Ab1Analysed(path, hits)
+                                    })
+                                    .await
+                                    .unwrap()
+                                };
+
+                                if let Err(err) = output.send(message).await {
+                                    log::warn!(
+                                        "failed to send AB1 analysis for {}: {}",
+                                        path.display(),
+                                        err
+                                    );
+                                }
+
+                                std::future::pending().await
+                            },
+                        )
+                    },
+                ));
             }
 
             if preview {
