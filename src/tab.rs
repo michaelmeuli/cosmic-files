@@ -5934,17 +5934,17 @@ impl Tab {
                     }
                 }
 
-                if click_i_opt != self.clicked.take() {
-                    if let Some(ref mut items) = self.items_opt {
-                        for (i, item) in items.iter_mut().enumerate() {
-                            if mod_ctrl {
-                                if Some(i) == click_i_opt && item.selected {
-                                    item.selected = false;
-                                    self.select_range = None;
-                                }
-                            } else if Some(i) != click_i_opt {
+                if click_i_opt != self.clicked.take()
+                    && let Some(ref mut items) = self.items_opt
+                {
+                    for (i, item) in items.iter_mut().enumerate() {
+                        if mod_ctrl {
+                            if Some(i) == click_i_opt && item.selected {
                                 item.selected = false;
+                                self.select_range = None;
                             }
+                        } else if Some(i) != click_i_opt {
+                            item.selected = false;
                         }
                     }
                 }
@@ -10674,7 +10674,7 @@ mod tests {
             .map(|base| path.join(std::iter::repeat_n(base, 255).collect::<String>()))
             .collect();
 
-        for (file, base) in paths.iter().zip(base_nums.into_iter()) {
+        for (file, base) in paths.iter().zip(base_nums) {
             trace!("Creating long file name for {base}");
             fs::File::create(file)?;
         }
