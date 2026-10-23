@@ -37,7 +37,11 @@
       "Bash(curl -s \"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id=1032813423&retmode=json\")",
       "Bash(cargo fmt *)",
       "Bash(cargo build *)",
-      "Bash(cargo check *)"
+      "Bash(cargo check *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)"
     ]
   }
 }
