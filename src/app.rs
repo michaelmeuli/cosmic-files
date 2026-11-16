@@ -1,6 +1,8 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::scan::has_recents;
+use crate::trash::TrashItem;
 use cosmic::app::{self, Core, Task, context_drawer};
 use cosmic::core::Auto;
 use cosmic::cosmic_config::{self, ConfigSet};
@@ -51,7 +53,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::{self, Duration, Instant};
 use std::{env, fmt, fs, io, process};
 use tokio::sync::mpsc;
-use trash::TrashItem;
 #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
 use wayland_client::{Proxy, protocol::wl_output::WlOutput};
 
@@ -64,8 +65,10 @@ use crate::config::{
     TabConfig, TimeConfig, TypeToSearch,
 };
 use crate::dialog::{Dialog, DialogKind, DialogMessage, DialogResult, DialogSettings};
+use crate::item::{FsKind, Item, ItemMetadata, folder_icon_symbolic, item_from_path};
 use crate::key_bind::key_binds;
 use crate::localize::LANGUAGE_SORTER;
+use crate::location::{Location, SearchLocation};
 #[cfg(feature = "desktop")]
 use crate::mime_app;
 use crate::mime_app::{MimeApp, MimeAppCache, MimeAppMatch};
@@ -80,10 +83,7 @@ use crate::russh::{
     CLIENTS, ClientAuth, ClientItem, ClientItems, ClientKey, ClientMessage, SlurmJobId, same_uri,
 };
 use crate::spawn_detached::spawn_detached;
-use crate::tab::{
-    self, HOVER_DURATION, HeadingOptions, ItemMetadata, Location, SORT_OPTION_FALLBACK,
-    SearchLocation, Tab,
-};
+use crate::tab::{self, HOVER_DURATION, HeadingOptions, SORT_OPTION_FALLBACK, Tab};
 use crate::trash::{Trash, TrashExt};
 use crate::zoom::{zoom_in_view, zoom_out_view, zoom_to_default};
 use crate::{FxOrderMap, context_action, fl, home_dir, menu, mime_icon};
@@ -313,7 +313,7 @@ impl MenuAction for Action {
 }
 
 #[derive(Clone, Debug)]
-pub struct PreviewItem(pub Box<tab::Item>);
+pub struct PreviewItem(pub Box<Item>);
 
 impl PartialEq for PreviewItem {
     fn eq(&self, other: &Self) -> bool {
@@ -414,7 +414,7 @@ pub enum Message {
     NetworkResult(MounterKey, String, Result<bool, String>),
     NewItem(Option<Entity>, bool),
     #[cfg(feature = "notify")]
-    Notification(Arc<Mutex<notify_rust::NotificationHandle>>),
+    Notification(Arc<std::sync::Mutex<notify_rust::NotificationHandle>>),
     NotifyEvents(Vec<DebouncedEvent>),
     NotifyWatcher(WatcherWrapper),
     OpenTerminal(Option<Entity>),
@@ -491,8 +491,8 @@ pub enum Message {
     TabRescan(
         Entity,
         Location,
-        Option<Box<tab::Item>>,
-        Vec<tab::Item>,
+        Option<Box<Item>>,
+        Vec<Item>,
         Option<Vec<PathBuf>>,
     ),
     TabView(Option<Entity>, tab::View),
@@ -688,8 +688,8 @@ pub enum DialogPage {
         dir: bool,
     },
     Replace {
-        from: Box<tab::Item>,
-        to: Box<tab::Item>,
+        from: Box<Item>,
+        to: Box<Item>,
         multiple: bool,
         apply_to_all: bool,
         conflict_count: usize,
@@ -847,7 +847,7 @@ pub struct App {
     remote_drive_connecting: Option<(ClientKey, String)>,
     remote_drive_input: String,
     #[cfg(feature = "notify")]
-    notification_opt: Option<Arc<Mutex<notify_rust::NotificationHandle>>>,
+    notification_opt: Option<Arc<std::sync::Mutex<notify_rust::NotificationHandle>>>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     overlap: FxHashMap<String, (window::Id, Rectangle)>,
     pending_operation_id: u64,
@@ -1199,7 +1199,7 @@ impl App {
                 .map(|items| {
                     items
                         .iter()
-                        .filter(|item| item.selected && item.metadata.is_dir())
+                        .filter(|item| item.state.selected && item.metadata.is_dir())
                         .count()
                 })
                 .unwrap_or(0);
@@ -1260,7 +1260,7 @@ impl App {
             .sort_by(|a, b| (b.1.width * b.1.height).total_cmp(&(a.1.width * b.1.height)));
 
         for (w_id, overlap) in sorted_overlaps {
-            let Some((bl, br, tl, tr, mut size)) = self.layer_sizes.get(w_id).map(|s| {
+            let Some((bl, br, tl, tr, size)) = self.layer_sizes.get(w_id).map(|s| {
                 (
                     Rectangle::new(
                         Point::new(0., s.height / 2.),
@@ -1310,30 +1310,18 @@ impl App {
             if tl && !(tr || bl) {
                 *top += min_dim.1;
                 *left += min_dim.0;
-
-                size.height -= min_dim.1;
-                size.width -= min_dim.0;
             }
             if tr && !(tl || br) {
                 *top += min_dim.1;
                 *right += min_dim.0;
-
-                size.height -= min_dim.1;
-                size.width -= min_dim.0;
             }
             if bl && !(br || tl) {
                 *bottom += min_dim.1;
                 *left += min_dim.0;
-
-                size.height -= min_dim.1;
-                size.width -= min_dim.0;
             }
             if br && !(bl || tr) {
                 *bottom += min_dim.1;
                 *right += min_dim.0;
-
-                size.height -= min_dim.1;
-                size.width -= min_dim.0;
             }
         }
         self.margin = overlaps;
@@ -1411,7 +1399,7 @@ impl App {
         for path in paths {
             //TODO: is there a smarter way to check this? (like checking for trash folders)
             let can_trash = match path.metadata() {
-                Ok(metadata) => matches!(tab::fs_kind(&metadata), tab::FsKind::Local),
+                Ok(metadata) => matches!(FsKind::new(&metadata), FsKind::Local),
                 Err(err) => {
                     log::warn!("failed to get metadata for {}: {}", path.display(), err);
                     false
@@ -1578,8 +1566,6 @@ impl App {
         commands.push(self.update_notification());
         // Rescan and select based on operation
         commands.push(self.rescan_operation_selection(op_sel));
-        // Manually rescan any trash tabs after any operation is completed
-        commands.push(self.rescan_trash());
 
         Task::batch(commands)
     }
@@ -1624,8 +1610,6 @@ impl App {
         {
             self.progress_operations.clear();
         }
-        // Manually rescan any trash tabs after any operation is completed
-        tasks.push(self.rescan_trash());
         Task::batch(tasks)
     }
 
@@ -1648,7 +1632,7 @@ impl App {
             return Task::none();
         };
         for item in items {
-            if item.selected {
+            if item.state.selected {
                 if let Some(path) = item.path_opt()
                     && (op_sel.selected.contains(path) || op_sel.ignored.contains(path))
                 {
@@ -1968,7 +1952,7 @@ impl App {
                     b.text(name.clone())
                         .icon(
                             icon::icon(if path.is_dir() {
-                                tab::folder_icon_symbolic(&path, 16)
+                                folder_icon_symbolic(&path, 16)
                             } else {
                                 icon::from_name("text-x-generic-symbolic").size(16).handle()
                             })
@@ -2452,7 +2436,8 @@ impl App {
                 {
                     let preview_opt =
                         {
-                            let mut selected = items.iter().filter(|item| item.selected);
+                            let mut selected = items.iter().filter(|item| item.state.selected);
+
                             match (selected.next(), selected.next()) {
                                 // At least two selected items
                                 (Some(_), Some(_)) => {
@@ -3069,7 +3054,7 @@ impl Application for App {
                 ));
             }
 
-            if matches!(location_opt, Some(Location::Recents)) && tab::has_recents() {
+            if matches!(location_opt, Some(Location::Recents)) && has_recents() {
                 items.push(cosmic::widget::menu::Item::Button(
                     fl!("clear-recents-history"),
                     None,
@@ -3549,7 +3534,7 @@ impl Application for App {
                         if let Some(items) = tab.items_opt() {
                             let mut trash_items = Vec::new();
                             for item in items {
-                                if item.selected {
+                                if item.state.selected {
                                     if let ItemMetadata::Trash { entry, .. } = &item.metadata {
                                         trash_items.push(entry.clone());
                                     } else {
@@ -4645,11 +4630,13 @@ impl Application for App {
                         if let Some(items) = tab.items_opt() {
                             paths = items
                                 .iter()
-                                .filter_map(
-                                    |item| {
-                                        if item.selected { item.path_opt() } else { None }
-                                    },
-                                )
+                                .filter_map(|item| {
+                                    if item.state.selected {
+                                        item.path_opt()
+                                    } else {
+                                        None
+                                    }
+                                })
                                 .collect();
                         }
                         if paths.is_empty() {
@@ -4747,7 +4734,7 @@ impl Application for App {
                     && let Some(items) = tab.items_opt()
                 {
                     for item in items {
-                        if !item.selected {
+                        if !item.state.selected {
                             continue;
                         }
                         let Some(path) = item.path_opt() else {
@@ -5161,7 +5148,7 @@ impl Application for App {
                     let selected: Box<[_]> = items
                         .iter()
                         .filter_map(|item| {
-                            if item.selected {
+                            if item.state.selected {
                                 item.path_opt().cloned()
                             } else {
                                 None
@@ -5221,7 +5208,7 @@ impl Application for App {
                     && let Some(items) = tab.items_opt()
                 {
                     for item in items {
-                        if item.selected {
+                        if item.state.selected {
                             if let ItemMetadata::Trash { entry, .. } = &item.metadata {
                                 trash_items.push(entry.clone());
                             } else {
@@ -5758,11 +5745,10 @@ impl Application for App {
                         Ok((_parent_item_opt, items)) => {
                             for path in &*recently_trashed {
                                 for item in &items {
-                                    if let ItemMetadata::Trash { ref entry, .. } = item.metadata {
-                                        let original_path = entry.original_path();
-                                        if &original_path == path {
-                                            paths.push(entry.clone());
-                                        }
+                                    if let ItemMetadata::Trash { ref entry, .. } = item.metadata
+                                        && &entry.original_path == path
+                                    {
+                                        paths.push(entry.clone());
                                     }
                                 }
                             }
@@ -6028,7 +6014,7 @@ impl Application for App {
                         .and_then(Location::path_opt)
                         .cloned()
                     {
-                        match tab::item_from_path(&path, IconSizes::default()) {
+                        match item_from_path(&path, IconSizes::default()) {
                             Ok(item) => {
                                 return self.push_dialog(
                                     DialogPage::OpenWith {
@@ -6156,7 +6142,7 @@ impl Application for App {
                         .data::<Location>(entity)
                         .and_then(Location::path_opt)
                     {
-                        match tab::item_from_path(path, IconSizes::default()) {
+                        match item_from_path(path, IconSizes::default()) {
                             Ok(item) => {
                                 self.context_page = ContextPage::Preview(
                                     None,
@@ -6791,7 +6777,8 @@ impl Application for App {
                     .tab_model
                     .data::<Tab>(entity)
                     .and_then(|tab| {
-                        let mut selected = tab.items_opt()?.iter().filter(|item| item.selected);
+                        let mut selected =
+                            tab.items_opt()?.iter().filter(|item| item.state.selected);
 
                         match (selected.next(), selected.next()) {
                             // Exactly one item
@@ -8259,7 +8246,6 @@ impl Application for App {
 
     fn subscription(&self) -> Subscription<Self::Message> {
         struct WatcherSubscription;
-        struct TrashWatcherSubscription;
         struct TimeSubscription;
         #[cfg(all(
             not(feature = "desktop-applet"),
@@ -8432,73 +8418,6 @@ impl Application for App {
                     },
                 )
             }),
-            Subscription::run_with(TypeId::of::<TrashWatcherSubscription>(), |_| {
-                stream::channel(
-                    1,
-                    |mut output: futures::channel::mpsc::Sender<Message>| async move {
-                        let watcher_res = new_debouncer(
-                            time::Duration::from_millis(250),
-                            Some(time::Duration::from_millis(250)),
-                            move |event_res: notify_debouncer_full::DebounceEventResult| {
-                                match event_res {
-                                    Ok(events) => {
-                                        // Rescan on any event. We don't need to evaluate each event
-                                        // because as long as the trash changed in any way we need to
-                                        // rescan.
-                                        let should_rescan =
-                                            events.iter().any(|event| !event.kind.is_access());
-
-                                        if should_rescan
-                                            && let Err(e) = futures::executor::block_on(async {
-                                                output.send(Message::RescanTrash).await
-                                            })
-                                        {
-                                            log::warn!(
-                                                "trash needs to be rescanned but sending message failed: {e:?}"
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log::warn!("failed to watch trash bin for changes: {e:?}");
-                                    }
-                                }
-                            },
-                        );
-
-                        match (watcher_res, Trash::folders()) {
-                            (Ok(mut watcher), Ok(trash_bins)) => {
-                                // Watch the "bins" themselves as well as the files folder where
-                                // trashed items are placed. This allows us to avoid recursively
-                                // watching the trash which is slow but also properly get events.
-                                let trash_paths = trash_bins
-                                    .into_iter()
-                                    .flat_map(|path| [path.join("files"), path]);
-                                for path in trash_paths {
-                                    if let Err(e) =
-                                        watcher.watch(&path, notify::RecursiveMode::NonRecursive)
-                                    {
-                                        log::warn!(
-                                            "failed to add trash bin `{}` to watcher: {e:?}",
-                                            path.display()
-                                        );
-                                    }
-                                }
-
-                                // Don't drop the watcher
-                                std::future::pending().await
-                            }
-                            (Err(e), _) => {
-                                log::warn!("failed to create new watcher for trash bin: {e:?}");
-                            }
-                            (_, Err(e)) => {
-                                log::warn!("could not find any valid trash bins to watch: {e:?}");
-                            }
-                        }
-
-                        std::future::pending().await
-                    },
-                )
-            }),
             #[cfg(all(
                 not(feature = "desktop-applet"),
                 not(target_os = "ios"),
@@ -8607,6 +8526,7 @@ impl Application for App {
                     MounterMessage::NetworkResult(uri, res) => {
                         Message::NetworkResult(key, uri, res)
                     }
+                    MounterMessage::TrashChanged => Message::RescanTrash,
                 })
         }));
 
@@ -8675,7 +8595,7 @@ impl Application for App {
                                                 let _ = futures::executor::block_on(async {
                                                     msg_tx
                                                         .send(Message::Notification(Arc::new(
-                                                            Mutex::new(notification),
+                                                            std::sync::Mutex::new(notification),
                                                         )))
                                                         .await
                                                 });
@@ -8754,7 +8674,7 @@ pub(crate) mod test_utils {
     use tempfile::{TempDir, tempdir};
 
     use crate::config::{IconSizes, TabConfig, ThumbCfg};
-    use crate::tab::Item;
+    use crate::item::Item;
 
     use super::*;
 

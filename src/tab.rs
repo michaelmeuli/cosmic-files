@@ -18,75 +18,51 @@ use cosmic::widget::menu::action::MenuAction;
 use cosmic::widget::menu::key_bind::KeyBind;
 use cosmic::widget::{self, DndDestination, DndSource, Id, RcElementWrapper, Widget, space};
 use cosmic::{Apply, Element, cosmic_theme, font, theme};
-use icu::datetime::input::DateTime;
-use icu::datetime::options::TimePrecision;
-use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences, fieldsets};
-use icu::locale::preferences::extensions::unicode::keywords::HourCycle;
-use image::{DynamicImage, ImageReader};
-use jiff_icu::ConvertFrom;
+use i18n_embed::LanguageLoader;
+use icu::datetime::{DateTimeFormatter, fieldsets};
 use mime_guess::{Mime, mime};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::error::Error;
-use std::fmt::{self, Display};
-use std::fs::{self, File, Metadata};
+use std::fmt;
+use std::fs::{self, File};
 use std::hash::Hash;
-use std::io::{BufRead, BufReader, Read};
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{self, Path, PathBuf};
 use std::sync::{Arc, LazyLock, RwLock, atomic};
 use std::time::{Duration, Instant, SystemTime};
-use tempfile::NamedTempFile;
 use tokio::sync::mpsc;
-use trash::{TrashItem, TrashItemMetadata, TrashItemSize};
 use walkdir::WalkDir;
 
 use crate::app::{Action, PreviewItem, PreviewKind};
 use crate::clipboard::{ClipboardCopy, ClipboardKind, ClipboardPaste};
 use crate::config::{
-    ContextActionPreset, DesktopConfig, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig,
-    TabConfig, ThumbCfg,
+    ContextActionPreset, ICON_SCALE_MAX, ICON_SIZE_GRID, IconSizes, TBConfig, TabConfig, ThumbCfg,
 };
 use crate::dialog::DialogKind;
+use crate::format_time::{FormatTime, date_time_formatter, format_time, time_formatter};
+use crate::item::ab1_susceptibility;
+use crate::item::{
+    ChecksumState, DirSize, FileChecksums, Item, ItemMetadata, ItemThumbnail, SearchItem,
+    folder_name, item_from_path, item_from_search_item,
+};
 use crate::large_image::{
-    LargeImageManager, decode_large_image, exceeds_memory_limit, should_use_dedicated_worker,
-    should_use_tiling,
+    LargeImageManager, decode_large_image, should_use_dedicated_worker, should_use_tiling,
 };
-use crate::localize::{LANGUAGE_SORTER, LOCALE};
-use crate::mime_icon::{mime_for_path, mime_icon};
-use crate::mounter::MOUNTERS;
+use crate::localize::LANGUAGE_SORTER;
+use crate::location::{EditLocation, Location, SearchLocation};
 use crate::operation::{Controller, OperationError};
-use crate::russh::CLIENTS;
-use crate::sequencing::batch::parse_ab1_filename;
-use crate::sequencing::rrl::{
-    RrlPosition2058_2059, RrlSusceptibilityCalls, is_susceptible_rrl,
-    is_susceptible_rrl_by_snp_calls_rare,
-};
-use crate::sequencing::rrs::{
-    RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare,
-};
-use crate::sequencing::rrs3end::{
-    Rrs3EndPosition1248, RrsSusceptibilityCalls3End, is_susceptible_rrs_3end,
-    is_susceptible_rrs_by_snp_calls_rare_3end,
-};
-use crate::sequencing::{
-    Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
-    erm41::{Erm41Position28, Erm41SusceptibilityCalls, is_susceptible_erm41},
-    parse_ab1_quality, parse_ab1_sequence,
-    pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
-    tb_data::{DrVariant, TB_ECOLI_MAPPING, TbProfilerJson},
-    trim_to_min_quality,
-};
-use crate::thumbnail_cacher::{CachedThumbnail, ThumbnailCacher, ThumbnailSize};
-use crate::thumbnailer::thumbnailer;
-use crate::trash::{Trash, TrashExt};
-use crate::{FxOrderMap, fl, menu, mime_app, mouse_area};
+use crate::scan::scan_search;
+use crate::sequencing::SeqIdHit;
+use crate::trash::TrashItemSize;
+use crate::{FxOrderMap, fl, format_size, menu, mime_app, mouse_area};
 
 pub const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
 pub const HOVER_DURATION: Duration = Duration::from_millis(1600);
@@ -95,12 +71,7 @@ pub const TYPE_SELECT_TIMEOUT: Duration = Duration::from_millis(1000);
 const MAX_SEARCH_LATENCY: Duration = Duration::from_millis(20);
 const MAX_SEARCH_RESULTS: usize = 200;
 //TODO: configurable thumbnail size?
-const THUMBNAIL_SIZE: u32 = (ICON_SIZE_GRID as u32) * (ICON_SCALE_MAX as u32);
-/// Maximum bytes of text to pass to the editor for preview; caps shaping work to avoid blocking.
-/// Files larger than this get a truncated preview (first N bytes only).
-const TEXT_PREVIEW_MAX_BYTES: usize = 256 * 1024; // 256 KiB
-/// Maximum file size (bytes) to attempt text preview; files larger than this are skipped entirely.
-const TEXT_PREVIEW_MAX_FILE_BYTES: u64 = 8 * 1000 * 1000; // 8 MiB
+pub const THUMBNAIL_SIZE: u32 = (ICON_SIZE_GRID as u32) * (ICON_SCALE_MAX as u32);
 
 // Thumbnail generation semaphore - limits parallel thumbnail workers
 // Uses 4 workers for balanced throughput and memory usage
@@ -116,60 +87,6 @@ pub(crate) static SORT_OPTION_FALLBACK: LazyLock<FxHashMap<String, (HeadingOptio
             )
         }))
     });
-
-#[cfg_attr(not(unix), allow(dead_code))]
-static MODE_NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
-    vec![
-        // Mode 0
-        fl!("none"),
-        // Mode 1
-        fl!("execute-only"),
-        // Mode 2
-        fl!("write-only"),
-        // Mode 3
-        fl!("write-execute"),
-        // Mode 4
-        fl!("read-only"),
-        // Mode 5
-        fl!("read-execute"),
-        // Mode 6
-        fl!("read-write"),
-        // Mode 7
-        fl!("read-write-execute"),
-    ]
-});
-
-static SPECIAL_DIRS: LazyLock<FxHashMap<PathBuf, &'static str>> = LazyLock::new(|| {
-    let mut special_dirs = FxHashMap::default();
-    if let Some(dir) = dirs::document_dir() {
-        special_dirs.insert(dir, "folder-documents");
-    }
-    if let Some(dir) = dirs::download_dir() {
-        special_dirs.insert(dir, "folder-download");
-    }
-    if let Some(dir) = dirs::audio_dir() {
-        special_dirs.insert(dir, "folder-music");
-    }
-    if let Some(dir) = dirs::picture_dir() {
-        special_dirs.insert(dir, "folder-pictures");
-    }
-    if let Some(dir) = dirs::public_dir() {
-        special_dirs.insert(dir, "folder-publicshare");
-    }
-    if let Some(dir) = dirs::template_dir() {
-        special_dirs.insert(dir, "folder-templates");
-    }
-    if let Some(dir) = dirs::video_dir() {
-        special_dirs.insert(dir, "folder-videos");
-    }
-    if let Some(dir) = dirs::desktop_dir() {
-        special_dirs.insert(dir, "user-desktop");
-    }
-    if let Some(dir) = dirs::home_dir() {
-        special_dirs.insert(dir, "user-home");
-    }
-    special_dirs
-});
 
 #[allow(clippy::too_many_arguments)]
 fn button_appearance(
@@ -301,20 +218,38 @@ fn button_style(
     }
 }
 
-pub fn folder_icon(path: &PathBuf, icon_size: u16) -> widget::icon::Handle {
-    widget::icon::from_name(SPECIAL_DIRS.get(path).map_or("folder", |x| *x))
-        .prefer_svg(true)
-        .size(icon_size)
-        .handle()
+pub static MODE_NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
+    vec![
+        // Mode 0
+        fl!("none"),
+        // Mode 1
+        fl!("execute-only"),
+        // Mode 2
+        fl!("write-only"),
+        // Mode 3
+        fl!("write-execute"),
+        // Mode 4
+        fl!("read-only"),
+        // Mode 5
+        fl!("read-execute"),
+        // Mode 6
+        fl!("read-write"),
+        // Mode 7
+        fl!("read-write-execute"),
+    ]
+});
+
+pub const MODE_SHIFT_USER: u32 = 6;
+pub const MODE_SHIFT_GROUP: u32 = 3;
+pub const MODE_SHIFT_OTHER: u32 = 0;
+
+pub const fn get_mode_part(mode: u32, shift: u32) -> u32 {
+    (mode >> shift) & 0o7
 }
 
-pub fn folder_icon_symbolic(path: &PathBuf, icon_size: u16) -> widget::icon::Handle {
-    widget::icon::from_name(format!(
-        "{}-symbolic",
-        SPECIAL_DIRS.get(path).map_or("folder", |x| *x)
-    ))
-    .size(icon_size)
-    .handle()
+pub fn set_mode_part(mode: u32, shift: u32, bits: u32) -> u32 {
+    assert!(bits <= 0o7);
+    (mode & !(0o7 << shift)) | (bits << shift)
 }
 
 //TODO: replace with Path::has_trailing_sep when stable
@@ -367,275 +302,6 @@ fn tab_complete(path: &Path) -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
     Ok(completions)
 }
 
-//TODO: translate, add more levels?
-fn format_size(size: u64) -> String {
-    const KB: u64 = 1000;
-    const MB: u64 = 1000 * KB;
-    const GB: u64 = 1000 * MB;
-    const TB: u64 = 1000 * GB;
-
-    if size >= TB {
-        format!("{:.1} TB", size as f64 / TB as f64)
-    } else if size >= GB {
-        format!("{:.1} GB", size as f64 / GB as f64)
-    } else if size >= MB {
-        format!("{:.1} MB", size as f64 / MB as f64)
-    } else if size >= KB {
-        format!("{:.1} KB", size as f64 / KB as f64)
-    } else {
-        format!("{size} B")
-    }
-}
-
-#[cfg_attr(not(unix), allow(dead_code))]
-const MODE_SHIFT_USER: u32 = 6;
-#[cfg_attr(not(unix), allow(dead_code))]
-const MODE_SHIFT_GROUP: u32 = 3;
-#[cfg_attr(not(unix), allow(dead_code))]
-const MODE_SHIFT_OTHER: u32 = 0;
-
-#[cfg_attr(not(unix), allow(dead_code))]
-const fn get_mode_part(mode: u32, shift: u32) -> u32 {
-    (mode >> shift) & 0o7
-}
-
-fn set_mode_part(mode: u32, shift: u32, bits: u32) -> u32 {
-    assert!(bits <= 0o7);
-    (mode & !(0o7 << shift)) | (bits << shift)
-}
-
-fn date_time_formatter(military_time: bool) -> DateTimeFormatter<fieldsets::YMDT> {
-    let mut prefs = DateTimeFormatterPreferences::from(LOCALE.clone());
-    prefs.hour_cycle = Some(if military_time {
-        HourCycle::H23
-    } else {
-        HourCycle::H12
-    });
-
-    let mut fs = fieldsets::YMDT::medium();
-    fs = fs.with_time_precision(TimePrecision::Minute);
-
-    DateTimeFormatter::try_new(prefs, fs).expect("failed to create DateTimeFormatter")
-}
-
-fn time_formatter(military_time: bool) -> DateTimeFormatter<fieldsets::T> {
-    let mut prefs = DateTimeFormatterPreferences::from(LOCALE.clone());
-    prefs.hour_cycle = Some(if military_time {
-        HourCycle::H23
-    } else {
-        HourCycle::H12
-    });
-
-    let mut fs = fieldsets::T::medium();
-    fs = fs.with_time_precision(TimePrecision::Minute);
-
-    DateTimeFormatter::try_new(prefs, fs).expect("failed to create DateTimeFormatter")
-}
-
-struct FormatTime<'a> {
-    pub time: SystemTime,
-    pub date_time_formatter: &'a DateTimeFormatter<fieldsets::YMDT>,
-    pub time_formatter: &'a DateTimeFormatter<fieldsets::T>,
-}
-
-impl<'a> FormatTime<'a> {
-    fn from_secs(
-        secs: i64,
-        date_time_formatter: &'a DateTimeFormatter<fieldsets::YMDT>,
-        time_formatter: &'a DateTimeFormatter<fieldsets::T>,
-    ) -> Option<Self> {
-        // This looks convoluted because we need to ensure the units match up
-        let secs: u64 = secs.try_into().ok()?;
-        let now = SystemTime::now();
-        let filetime_diff = now
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|from_epoch| from_epoch.as_secs())
-            .ok()
-            .and_then(|now_secs| now_secs.checked_sub(secs))
-            .map(Duration::from_secs)?;
-        now.checked_sub(filetime_diff).map(|time| Self {
-            time,
-            date_time_formatter,
-            time_formatter,
-        })
-    }
-}
-
-impl Display for FormatTime<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Ok(zoned) = jiff::Zoned::try_from(self.time) else {
-            return Ok(());
-        };
-        let now = jiff::Zoned::now();
-        let icu_datetime = DateTime::convert_from(zoned.datetime());
-        if zoned.date() == now.date() {
-            f.write_str(fl!("today").as_str())?;
-            f.write_str(", ")?;
-            self.time_formatter.format(&icu_datetime).fmt(f)
-        } else {
-            self.date_time_formatter.format(&icu_datetime).fmt(f)
-        }
-    }
-}
-
-const fn format_time<'a>(
-    time: SystemTime,
-    date_time_formatter: &'a DateTimeFormatter<fieldsets::YMDT>,
-    time_formatter: &'a DateTimeFormatter<fieldsets::T>,
-) -> FormatTime<'a> {
-    FormatTime {
-        time,
-        date_time_formatter,
-        time_formatter,
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn hidden_attribute(_metadata: &Metadata) -> bool {
-    false
-}
-
-#[cfg(target_os = "windows")]
-fn hidden_attribute(metadata: &Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    // https://learn.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
-    const FILE_ATTRIBUTE_HIDDEN: u32 = 2;
-    metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN == FILE_ATTRIBUTE_HIDDEN
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FsKind {
-    Local,
-    Remote,
-    Gvfs,
-}
-
-#[cfg(target_os = "linux")]
-pub fn fs_kind(metadata: &Metadata) -> FsKind {
-    //TODO: method to reload remote filesystems dynamically
-    //TODO: fix for https://github.com/eminence/procfs/issues/262
-    static DEVICES: LazyLock<FxHashMap<u64, FsKind>> = LazyLock::new(|| {
-        let mut devices = FxHashMap::default();
-        match procfs::process::Process::myself() {
-            Ok(process) => match process.mountinfo() {
-                Ok(mount_infos) => {
-                    devices = FxHashMap::from_iter(mount_infos.iter().filter_map(|mount_info| {
-                        let mut parts = mount_info.majmin.split(':');
-                        let major_str = parts.next()?;
-                        let minor_str = parts.next()?;
-                        let major = major_str.parse::<libc::c_uint>().ok()?;
-                        let minor = minor_str.parse::<libc::c_uint>().ok()?;
-                        let dev = libc::makedev(major, minor);
-                        // Network and distributed filesystem types
-                        // Based on common remote filesystem types found in /proc/mounts
-                        let kind = match mount_info.fs_type.as_str() {
-                            // SMB/CIFS variants
-                            "cifs" | "smb" | "smb2" | "smbfs" => FsKind::Remote,
-
-                            // NFS variants
-                            "nfs" | "nfs4" => FsKind::Remote,
-
-                            // FUSE-based remote filesystems
-                            "fuse.rclone" | "fuse.sshfs" | "fuse.davfs2" | "fuse.ceph"
-                            | "fuse.glusterfs" | "fuse.s3fs" | "fuse.goofys" | "fuse.gcsfuse"
-                            | "fuse.afp" | "fuse.afpfs" => FsKind::Remote,
-
-                            // Other network protocols
-                            "afs" | "coda" | "ncpfs" | "davfs" | "davfs2" | "shfs" => {
-                                FsKind::Remote
-                            }
-
-                            // Cluster/distributed filesystems
-                            "ceph" | "glusterfs" | "lustre" | "gfs" | "gfs2" | "ocfs2" => {
-                                FsKind::Remote
-                            }
-
-                            // GVFS (GNOME Virtual File System)
-                            "fuse.gvfsd-fuse" => FsKind::Gvfs,
-
-                            // Everything else is local
-                            _ => FsKind::Local,
-                        };
-                        Some((dev, kind))
-                    }));
-                }
-                Err(err) => {
-                    log::warn!("failed to get mount info: {err}");
-                }
-            },
-            Err(err) => {
-                log::warn!("failed to get process info: {err}");
-            }
-        }
-        devices
-    });
-    DEVICES.get(&metadata.dev()).map_or(FsKind::Local, |x| *x)
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn fs_kind(_metadata: &Metadata) -> FsKind {
-    //TODO: support BSD, macOS, Windows?
-    FsKind::Local
-}
-
-#[cfg(not(feature = "desktop"))]
-fn get_desktop_file_display_name(_path: &Path) -> Option<String> {
-    None
-}
-
-#[cfg(feature = "desktop")]
-fn get_desktop_file_display_name(path: &Path) -> Option<String> {
-    let locales = get_languages_from_env();
-    let entry = match DesktopEntry::from_path(path, Some(&locales)) {
-        Ok(ok) => ok,
-        Err(err) => {
-            log::warn!("failed to parse {}: {}", path.display(), err);
-            return None;
-        }
-    };
-
-    entry.name(&locales).map(|s| s.into_owned())
-}
-
-#[cfg(not(windows))]
-#[cfg(not(feature = "desktop"))]
-fn get_desktop_file_icon(path: &Path) -> Option<String> {
-    None
-}
-
-#[cfg(feature = "desktop")]
-fn get_desktop_file_icon(path: &Path) -> Option<String> {
-    let entry = match DesktopEntry::from_path::<&str>(path, None) {
-        Ok(ok) => ok,
-        Err(err) => {
-            log::warn!("failed to parse {}: {}", path.display(), err);
-            return None;
-        }
-    };
-
-    entry.icon().map(str::to_string)
-}
-
-#[cfg(windows)]
-fn get_desktop_file_icon(_path: &Path) -> Option<String> {
-    // Windows does not support .desktop files
-    None
-}
-
-/// Creates an icon handle from a desktop file's Icon field value.
-/// Supports both icon names (looked up in theme) and absolute paths (used directly).
-fn desktop_icon_handle(icon: &str, size: u16) -> widget::icon::Handle {
-    let icon_path = Path::new(icon);
-    if icon_path.is_absolute() && icon_path.exists() {
-        widget::icon::from_path(icon_path.to_path_buf())
-    } else {
-        widget::icon::from_name(icon)
-            .prefer_svg(true)
-            .size(size)
-            .handle()
-    }
-}
-
 #[cfg(feature = "desktop")]
 pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
     let locales = get_languages_from_env();
@@ -650,1545 +316,6 @@ pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
         entry.name(&locales).map(|s| s.into_owned()),
         entry.icon().map(str::to_string),
     )
-}
-
-#[cfg(windows)]
-pub fn parse_desktop_file(path: &Path) -> (Option<String>, Option<String>) {
-    // Windows has no .desktop files, so fall back to filename
-    let name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_string());
-
-    (name, None)
-}
-
-fn display_name_for_file(path: &Path, name: &str, get_from_gvfs: bool, is_desktop: bool) -> String {
-    if is_desktop {
-        return get_desktop_file_display_name(path).map_or_else(
-            || Item::display_name(name),
-            |desktop_name| Item::display_name(desktop_name.as_str()),
-        );
-    } else if get_from_gvfs {
-        #[cfg(feature = "gvfs")]
-        {
-            let file = gio::File::for_path(path);
-            if let Ok(info) = gio::prelude::FileExt::query_info(
-                &file,
-                "standard::display-name",
-                gio::FileQueryInfoFlags::NONE,
-                gio::Cancellable::NONE,
-            ) {
-                return Item::display_name(info.display_name().as_str());
-            }
-        }
-    }
-    Item::display_name(name)
-}
-
-// Whether a dir lives on a remote filesystem, according to GIO.
-#[cfg(feature = "gvfs")]
-fn gvfs_dir_is_remote(dir: &Path) -> bool {
-    static REMOTE_CACHE: LazyLock<RwLock<FxHashMap<PathBuf, bool>>> =
-        LazyLock::new(|| RwLock::new(FxHashMap::default()));
-
-    if let Some(remote) = REMOTE_CACHE.read().unwrap().get(dir) {
-        return *remote;
-    }
-
-    let remote = match gio::prelude::FileExt::query_filesystem_info(
-        &gio::File::for_path(dir),
-        gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE,
-        gio::Cancellable::NONE,
-    ) {
-        Ok(info) => info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE),
-        Err(err) => {
-            log::warn!(
-                "failed to get GIO filesystem info for {}: {}",
-                dir.display(),
-                err
-            );
-
-            //Assume remote so that the "expensive tasks" are rather skipped then actually executed.
-            true
-        }
-    };
-
-    REMOTE_CACHE
-        .write()
-        .unwrap()
-        .insert(dir.to_path_buf(), remote);
-    remote
-}
-
-#[cfg(feature = "gvfs")]
-pub fn item_from_gvfs_info(path: PathBuf, file_info: gio::FileInfo, sizes: IconSizes) -> Item {
-    let file_name = file_info
-        .attribute_as_string(gio::FILE_ATTRIBUTE_STANDARD_NAME)
-        .unwrap_or_default();
-    let mtime = file_info.attribute_uint64(gio::FILE_ATTRIBUTE_TIME_MODIFIED);
-    let mut is_desktop = false;
-    let remote = path.parent().is_none_or(gvfs_dir_is_remote);
-    let is_dir = matches!(file_info.file_type(), gio::FileType::Directory);
-
-    let size_opt = (!is_dir).then_some(file_info.size() as u64);
-
-    let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = if is_dir {
-        (
-            //TODO: make this a static
-            "inode/directory".parse().unwrap(),
-            folder_icon(&path, sizes.grid()),
-            folder_icon(&path, sizes.list()),
-            folder_icon(&path, sizes.list_condensed()),
-        )
-    } else {
-        // ALWAYS assume we're remote for mime guessing here, since gvfs reading can be expensive
-        // @todo - expose this as a config option?
-        let mime = mime_for_path(&path, None, true);
-
-        //TODO: clean this up, implement for trash
-        let icon_name_opt = if mime == "application/x-desktop" {
-            is_desktop = true;
-            get_desktop_file_icon(&path)
-        } else {
-            None
-        };
-        if let Some(icon_name) = icon_name_opt {
-            (
-                mime,
-                desktop_icon_handle(&icon_name, sizes.grid()),
-                desktop_icon_handle(&icon_name, sizes.list()),
-                desktop_icon_handle(&icon_name, sizes.list_condensed()),
-            )
-        } else {
-            (
-                mime.clone(),
-                mime_icon(mime.clone(), sizes.grid()),
-                mime_icon(mime.clone(), sizes.list()),
-                mime_icon(mime, sizes.list_condensed()),
-            )
-        }
-    };
-
-    let mut children_opt = None;
-    let mut dir_size = DirSize::NotDirectory;
-    if is_dir && !remote {
-        dir_size = DirSize::Calculating(Controller::default());
-        //TODO: calculate children in the background (and make it cancellable?)
-        match fs::read_dir(&path) {
-            Ok(entries) => {
-                children_opt = Some(entries.count());
-            }
-            Err(err) => {
-                log::warn!("failed to read directory {}: {}", path.display(), err);
-            }
-        }
-    }
-
-    let display_name = display_name_for_file(&path, &file_info.display_name(), false, is_desktop);
-    let hidden = file_name.starts_with('.');
-
-    Item {
-        name: file_name.into(),
-        display_name,
-        is_mount_point: false,
-        is_client_point: false,
-        metadata: ItemMetadata::GvfsPath {
-            mtime,
-            size_opt,
-            children_opt,
-            is_dir,
-        },
-        hidden,
-        image_dimensions: (!remote && mime.type_() == mime::IMAGE)
-            .then(|| image::image_dimensions(&path).ok())
-            .flatten(),
-        location_opt: Some(Location::Path(path)),
-        mime,
-        icon_handle_grid,
-        icon_handle_list,
-        icon_handle_list_condensed,
-        thumbnail_opt: if remote {
-            Some(ItemThumbnail::NotImage)
-        } else {
-            None
-        },
-        button_id: widget::Id::unique(),
-        pos_opt: Cell::new(None),
-        rect_opt: Cell::new(None),
-        selected: false,
-        highlighted: false,
-        overlaps_drag_rect: false,
-        dir_size,
-        cut: false,
-        checksums: ChecksumState::default(),
-    }
-}
-
-pub fn item_from_search_item(search_item: SearchItem, sizes: IconSizes) -> Item {
-    match search_item {
-        SearchItem::Path(path, name, metadata) => item_from_entry(path, name, metadata, sizes),
-        SearchItem::Trash(entry, metadata) => item_from_trash_entry(entry, metadata, sizes),
-    }
-}
-
-/// Combined susceptibility verdict and per-gene calls for an AB1 file's alignment hits.
-///
-/// The verdict takes the first gene that yields one, in the order erm41 → rrl → rrs → pncA.
-fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCalls) {
-    let Some(hit) = hits.first() else {
-        return (None, SusceptibilityCalls::default());
-    };
-    let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
-    let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
-    let rrs3end_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
-
-    let is_susceptible =
-        is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
-            .or_else(|| {
-                is_susceptible_rrl(
-                    hit.rrl_position_2058_2059_opt.as_ref(),
-                    &rrl_hit.rrl_snp_calls,
-                )
-            })
-            .or_else(|| is_susceptible_rrs(&rrs_hit.rrs_snp_calls))
-            .or_else(|| is_susceptible_pnca(&hit.pnca_snp_calls));
-
-    let susceptibility_calls = SusceptibilityCalls {
-        erm41: Erm41SusceptibilityCalls {
-            position_28: hit.erm41_position_28_opt,
-            lof_snp_calls: hit.erm41_snp_calls.clone(),
-            is_susceptible: is_susceptible_erm41(
-                hit.erm41_position_28_opt.as_ref(),
-                &hit.erm41_snp_calls,
-            ),
-        },
-        rrl: RrlSusceptibilityCalls {
-            position_2058_2059: hit.rrl_position_2058_2059_opt,
-            snp_calls: rrl_hit.rrl_snp_calls.clone(),
-            is_susceptible: is_susceptible_rrl(
-                hit.rrl_position_2058_2059_opt.as_ref(),
-                &rrl_hit.rrl_snp_calls,
-            ),
-            is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
-                hit.rrl_position_2058_2059_opt.as_ref(),
-                &rrl_hit.rrl_snp_calls,
-            ),
-        },
-        rrs: RrsSusceptibilityCalls {
-            snp_calls: rrs_hit.rrs_snp_calls.clone(),
-            is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
-            is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&rrs_hit.rrs_snp_calls),
-        },
-        rrs3end: RrsSusceptibilityCalls3End {
-            position_1248: hit.rrs3end_position_1248_opt,
-            snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
-            is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
-            is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
-                &rrs3end_hit.rrs_snp_calls_3end,
-            ),
-        },
-        pnca: PncaSusceptibilityCalls {
-            snp_calls: hit.pnca_snp_calls.clone(),
-            is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
-        },
-    };
-    (is_susceptible, susceptibility_calls)
-}
-
-pub fn item_from_entry(
-    path: PathBuf,
-    name: String,
-    metadata: fs::Metadata,
-    sizes: IconSizes,
-) -> Item {
-    let mut is_desktop = false;
-    let is_gvfs = false;
-
-    let hidden = name.starts_with('.') || hidden_attribute(&metadata);
-
-    let remote = match fs_kind(&metadata) {
-        FsKind::Local => false,
-        FsKind::Remote => true,
-        #[cfg(feature = "gvfs")]
-        FsKind::Gvfs => {
-            is_gvfs = true;
-            path.parent().is_none_or(gvfs_dir_is_remote)
-        }
-        #[cfg(not(feature = "gvfs"))]
-        FsKind::Gvfs => {
-            log::info!(
-                "gvfs feature not enabled, info may be inaccurate for {}",
-                path.display()
-            );
-            true
-        }
-    };
-
-    let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) =
-        if metadata.is_dir() {
-            (
-                //TODO: make this a static
-                "inode/directory".parse().unwrap(),
-                folder_icon(&path, sizes.grid()),
-                folder_icon(&path, sizes.list()),
-                folder_icon(&path, sizes.list_condensed()),
-            )
-        } else {
-            let mime = mime_for_path(&path, Some(&metadata), remote);
-            //TODO: clean this up, implement for trash
-            let icon_name_opt = if mime == "application/x-desktop" {
-                is_desktop = true;
-                get_desktop_file_icon(&path)
-            } else {
-                None
-            };
-            if let Some(icon_name) = icon_name_opt {
-                (
-                    mime,
-                    desktop_icon_handle(&icon_name, sizes.grid()),
-                    desktop_icon_handle(&icon_name, sizes.list()),
-                    desktop_icon_handle(&icon_name, sizes.list_condensed()),
-                )
-            } else {
-                (
-                    mime.clone(),
-                    mime_icon(mime.clone(), sizes.grid()),
-                    mime_icon(mime.clone(), sizes.list()),
-                    mime_icon(mime, sizes.list_condensed()),
-                )
-            }
-        };
-
-    let mut children_opt = None;
-    let mut dir_size = DirSize::NotDirectory;
-    if metadata.is_dir() && !remote {
-        dir_size = DirSize::Calculating(Controller::default());
-        //TODO: calculate children in the background (and make it cancellable?)
-        match fs::read_dir(&path) {
-            Ok(entries) => {
-                children_opt = Some(entries.count());
-            }
-            Err(err) => {
-                log::warn!("failed to read directory {}: {}", path.display(), err);
-            }
-        }
-    }
-
-    let tbprofilerjson_opt = if !remote && !metadata.is_dir() && mime == mime::APPLICATION_JSON {
-        fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-    } else {
-        None
-    };
-    let is_ab1 = path
-        .extension()
-        .map(|e| e.eq_ignore_ascii_case("ab1"))
-        .unwrap_or(false);
-    let sequence_opt = if is_ab1 && !remote {
-        fs::read(&path).ok().map(|bytes| {
-            let ab1_seq = parse_ab1_sequence(&bytes);
-            let ab1_qual = parse_ab1_quality(&bytes);
-            let (length, trimmed_length, trimmed_avg_quality_opt) =
-                if let Some(seq) = ab1_seq.as_ref() {
-                    let length = seq.len();
-                    let trimmed: &[u8] = match &ab1_qual {
-                        Some(qual) => match trim_to_min_quality(seq, qual, 20) {
-                            Some(trimmed) => {
-                                let removed = seq.len() - trimmed.len();
-                                if removed > 0 {
-                                    log::info!(
-                                        "{}: quality trimming removed {} of {} bases",
-                                        path.display(),
-                                        removed,
-                                        seq.len()
-                                    );
-                                } else {
-                                    log::info!(
-                                        "{}: quality trimming removed no bases, using full sequence",
-                                        path.display()
-                                    );
-                                }
-                                trimmed
-                            }
-                            None => {
-                                log::warn!(
-                                    "{}: quality trimming found no bases above threshold, using full sequence",
-                                    path.display()
-                                );
-                                seq.as_slice()
-                            }
-                        },
-                        None => seq.as_slice(),
-                    };
-                    let trimmed_length = trimmed.len();
-                    let trimmed_avg_quality_opt = ab1_qual
-                        .as_ref()
-                        .filter(|_| trimmed_length > 0)
-                        .map(|qual| {
-                            let start = trimmed.as_ptr() as usize - seq.as_ptr() as usize;
-                            let sum: u32 = qual[start..start + trimmed_length]
-                                .iter()
-                                .map(|&q| q as u32)
-                                .sum();
-                            sum as f32 / trimmed_length as f32
-                        });
-                    (length, trimmed_length, trimmed_avg_quality_opt)
-                } else {
-                    (0, 0, None)
-                };
-            // Look up pre-computed alignment results from the background scan cache.
-            // This avoids running Smith-Waterman on the UI thread.
-            let seq_id_hits = crate::sequencing::batch::AB1_SEQ_CACHE
-                .read()
-                .ok()
-                .and_then(|guard| guard.get(&path).cloned())
-                .unwrap_or_default();
-            let chromatogram_opt = Ab1Channels::from_bytes(&bytes);
-            SeqData {
-                chromatogram_opt,
-                seq_id_hits,
-                length,
-                trimmed_length,
-                trimmed_avg_quality_opt,
-            }
-        })
-    } else {
-        None
-    };
-
-    let (is_susceptible, susceptibility_calls) = sequence_opt
-        .as_ref()
-        .map(|s| ab1_susceptibility(&s.seq_id_hits))
-        .unwrap_or_default();
-
-    let display_name = display_name_for_file(&path, &name, is_gvfs, is_desktop);
-
-    Item {
-        name,
-        display_name,
-        is_mount_point: false,
-        is_client_point: false,
-        metadata: ItemMetadata::Path {
-            metadata,
-            children_opt,
-            tbprofilerjson_opt,
-            is_ab1,
-            sequence_opt,
-            is_tbprofiler_result_as_sample: false,
-            is_tbprofiler_groupable_raw_result_file: false,
-            sample_json_path_opt: None,
-            sample_csv_path_opt: None,
-            sample_docx_path_opt: None,
-            is_susceptible,
-            susceptibility_calls,
-        },
-        hidden,
-        location_opt: Some(Location::Path(path)),
-        image_dimensions: None,
-        mime,
-        icon_handle_grid,
-        icon_handle_list,
-        icon_handle_list_condensed,
-        thumbnail_opt: remote.then_some(ItemThumbnail::NotImage),
-        button_id: widget::Id::unique(),
-        pos_opt: Cell::new(None),
-        rect_opt: Cell::new(None),
-        selected: false,
-        highlighted: false,
-        overlaps_drag_rect: false,
-        dir_size,
-        cut: false,
-        checksums: ChecksumState::default(),
-    }
-}
-
-pub fn item_from_trash_entry(
-    entry: TrashItem,
-    metadata: TrashItemMetadata,
-    sizes: IconSizes,
-) -> Item {
-    let original_path = entry.original_path();
-    let name = entry.name.to_string_lossy().into_owned();
-    let display_name = Item::display_name(&name);
-
-    let location = crate::trash::trash_item_path(&entry).map(Location::Path);
-
-    let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = match metadata.size
-    {
-        trash::TrashItemSize::Entries(_) => (
-            //TODO: make this a static
-            "inode/directory".parse().unwrap(),
-            folder_icon(&original_path, sizes.grid()),
-            folder_icon(&original_path, sizes.list()),
-            folder_icon(&original_path, sizes.list_condensed()),
-        ),
-        trash::TrashItemSize::Bytes(_) => {
-            // This passes remote = true so it does not read from the original path
-            let mime = mime_for_path(&original_path, None, true);
-            (
-                mime.clone(),
-                mime_icon(mime.clone(), sizes.grid()),
-                mime_icon(mime.clone(), sizes.list()),
-                mime_icon(mime, sizes.list_condensed()),
-            )
-        }
-    };
-
-    Item {
-        name,
-        display_name,
-        is_mount_point: false,
-        is_client_point: false,
-        metadata: ItemMetadata::Trash { metadata, entry },
-        hidden: false,
-        location_opt: location,
-        image_dimensions: (mime.type_() == mime::IMAGE)
-            .then(|| image::image_dimensions(&original_path).ok())
-            .flatten(),
-        mime,
-        icon_handle_grid,
-        icon_handle_list,
-        icon_handle_list_condensed,
-        thumbnail_opt: Some(ItemThumbnail::NotImage),
-        button_id: widget::Id::unique(),
-        pos_opt: Cell::new(None),
-        rect_opt: Cell::new(None),
-        selected: false,
-        highlighted: false,
-        overlaps_drag_rect: false,
-        dir_size: DirSize::NotDirectory,
-        cut: false,
-        checksums: ChecksumState::default(),
-    }
-}
-
-fn item_from_trash_child(
-    path: PathBuf,
-    name: String,
-    metadata: fs::Metadata,
-    sizes: IconSizes,
-) -> Option<Item> {
-    let Some(original_path) = crate::trash::original_path_for_trash_child(&path) else {
-        log::warn!(
-            "failed to resolve original path for trash item {}, skipping entry",
-            path.display()
-        );
-        return None;
-    };
-    let Some(original_parent) = original_path.parent() else {
-        log::warn!(
-            "trash item {} has no original parent, skipping entry",
-            path.display()
-        );
-        return None;
-    };
-    let entry = trash::TrashItem {
-        id: path.as_os_str().to_os_string(),
-        name: std::ffi::OsString::from(&name),
-        original_parent: original_parent.to_path_buf(),
-        time_deleted: 0,
-    };
-    let size = if metadata.is_dir() {
-        trash::TrashItemSize::Entries(0)
-    } else {
-        trash::TrashItemSize::Bytes(metadata.len())
-    };
-    Some(item_from_trash_entry(
-        entry,
-        trash::TrashItemMetadata { size },
-        sizes,
-    ))
-}
-
-fn get_filename_from_path(path: &Path) -> Result<String, String> {
-    Ok(match path.file_name() {
-        Some(name_os) => name_os
-            .to_str()
-            .ok_or_else(|| {
-                format!(
-                    "failed to parse file name for {}: {name_os:?} is not valid UTF-8",
-                    path.display()
-                )
-            })?
-            .to_string(),
-        None => fl!("filesystem"),
-    })
-}
-
-pub fn item_from_path<P: Into<PathBuf>>(path: P, sizes: IconSizes) -> Result<Item, String> {
-    let path = path.into();
-    let name = get_filename_from_path(&path)?;
-    let metadata = fs::metadata(&path)
-        .map_err(|err| format!("failed to read metadata for {}: {}", path.display(), err))?;
-    Ok(item_from_entry(path, name, metadata, sizes))
-}
-
-pub fn scan_path(tab_path: &PathBuf, sizes: IconSizes) -> Vec<Item> {
-    let mut items = Vec::new();
-    let mut hidden_files = Box::from([]);
-    let remote_scannable = false;
-
-    #[cfg(feature = "gvfs")]
-    {
-        if let Ok(path_meta) = fs::metadata(tab_path)
-            && fs_kind(&path_meta) == FsKind::Gvfs
-        {
-            let file = gio::File::for_path(tab_path);
-
-            // gio crate expects a comma delimited string
-            let attr_string = [
-                gio::FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME.as_str(),
-                gio::FILE_ATTRIBUTE_TIME_MODIFIED.as_str(),
-                gio::FILE_ATTRIBUTE_STANDARD_SIZE.as_str(),
-                gio::FILE_ATTRIBUTE_STANDARD_TYPE.as_str(),
-                gio::FILE_ATTRIBUTE_STANDARD_NAME.as_str(),
-            ]
-            .join(",");
-
-            match gio::prelude::FileExt::enumerate_children(
-                &file,
-                attr_string.as_str(),
-                gio::FileQueryInfoFlags::NONE,
-                gio::Cancellable::NONE,
-            ) {
-                Ok(res) => {
-                    remote_scannable = true;
-                    items = res
-                        .filter_map(|file| {
-                            let file = file.ok()?;
-                            Some(item_from_gvfs_info(tab_path.join(file.name()), file, sizes))
-                        })
-                        .collect();
-                }
-                Err(err) => {
-                    log::warn!(
-                        "could not enumerate {} via gio: {}",
-                        tab_path.display(),
-                        err
-                    );
-                }
-            }
-        }
-    }
-
-    if !remote_scannable {
-        match fs::read_dir(tab_path) {
-            Ok(entries) => {
-                let trash = crate::trash::is_trash_path(tab_path);
-                items = entries
-                    .filter_map(|entry_res| {
-                        let entry = entry_res
-                            .inspect_err(|err| {
-                                log::warn!(
-                                    "failed to read entry in {}: {}",
-                                    tab_path.display(),
-                                    err
-                                )
-                            })
-                            .ok()?;
-
-                        let path = entry.path();
-
-                        let name = entry
-                            .file_name()
-                            .into_string()
-                            .inspect_err(|name_os| {
-                                log::warn!(
-                                    "failed to parse entry at {}: {:?} is not valid UTF-8",
-                                    path.display(),
-                                    name_os
-                                )
-                            })
-                            .ok()?;
-
-                        if name == ".hidden" && path.is_file() {
-                            hidden_files = parse_hidden_file(&path);
-                        }
-
-                        let metadata = fs::metadata(&path)
-                            .inspect_err(|err| {
-                                log::warn!(
-                                    "failed to read metadata for entry at {}: {}",
-                                    path.display(),
-                                    err
-                                )
-                            })
-                            .ok()?;
-
-                        if trash {
-                            item_from_trash_child(path, name, metadata, sizes)
-                        } else {
-                            Some(item_from_entry(path, name, metadata, sizes))
-                        }
-                    })
-                    .collect();
-            }
-            Err(err) => {
-                log::warn!("failed to read directory {}: {}", tab_path.display(), err);
-            }
-        }
-    }
-    items.sort_unstable_by(|a, b| match (a.metadata.is_dir(), b.metadata.is_dir()) {
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        _ => LANGUAGE_SORTER.compare(&a.display_name, &b.display_name),
-    });
-    for item in &mut items {
-        if hidden_files.contains(&item.name) {
-            item.hidden = true;
-        }
-    }
-
-    // Two-pass grouping: collect .results.* files into virtual sample items,
-    // mirroring the remote scan behaviour so ToggleShowAsSamples works locally.
-    struct LocalSampleFiles {
-        json: Option<PathBuf>,
-        csv: Option<PathBuf>,
-        docx: Option<PathBuf>,
-    }
-
-    let mut samples: HashMap<String, LocalSampleFiles> = HashMap::new();
-    for item in &mut items {
-        let name = item.name.clone();
-        let path = item.path_opt().cloned();
-        if let ItemMetadata::Path {
-            is_tbprofiler_groupable_raw_result_file,
-            ..
-        } = &mut item.metadata
-            && let Some((sample_id, suffix)) = name.split_once(".results.")
-        {
-            let entry = samples
-                .entry(sample_id.to_string())
-                .or_insert(LocalSampleFiles {
-                    json: None,
-                    csv: None,
-                    docx: None,
-                });
-            match suffix {
-                "json" => entry.json = path,
-                "csv" => entry.csv = path,
-                "docx" => entry.docx = path,
-                _ => {}
-            }
-            *is_tbprofiler_groupable_raw_result_file = true;
-        }
-    }
-    for item in &mut items {
-        let name = item.name.clone();
-        if let ItemMetadata::Path {
-            is_tbprofiler_groupable_raw_result_file,
-            ..
-        } = &mut item.metadata
-            && *is_tbprofiler_groupable_raw_result_file
-        {
-            let sample_id = name.find('.').map(|i| &name[..i]);
-            if sample_id.is_none_or(|id| samples.get(id).is_none_or(|f| f.json.is_none())) {
-                *is_tbprofiler_groupable_raw_result_file = false;
-            }
-        }
-    }
-    // Propagate susceptibility to raw sample files so filtering works in file view too
-    let sample_susceptibility: HashMap<String, bool> = samples
-        .iter()
-        .filter_map(|(id, files)| {
-            let p = files.json.as_ref()?;
-            let json: TbProfilerJson = fs::read_to_string(p)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())?;
-            Some((
-                id.clone(),
-                json.dr_variants.iter().all(|v| v.is_susceptible()),
-            ))
-        })
-        .collect();
-    for item in &mut items {
-        let name = item.name.clone();
-        if let ItemMetadata::Path {
-            is_tbprofiler_groupable_raw_result_file,
-            is_susceptible,
-            ..
-        } = &mut item.metadata
-            && *is_tbprofiler_groupable_raw_result_file
-            && let Some(id) = name.find('.').map(|i| &name[..i])
-            && let Some(&sus) = sample_susceptibility.get(id)
-        {
-            *is_susceptible = Some(sus);
-        }
-    }
-
-    for (sample_id, files) in samples {
-        if files.json.is_none() {
-            continue;
-        }
-        let representative = files.json.as_deref().unwrap_or(tab_path);
-        let Ok(fs_meta) = fs::metadata(representative) else {
-            continue;
-        };
-        let tbprofilerjson_opt: Option<TbProfilerJson> = files.json.as_ref().and_then(|p| {
-            fs::read_to_string(p)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-        });
-        let is_susceptible = tbprofilerjson_opt
-            .as_ref()
-            .map(|j| j.dr_variants.iter().all(|v| v.is_susceptible()));
-        let location = Location::Path(tab_path.join(&sample_id));
-        let metadata = ItemMetadata::Path {
-            metadata: fs_meta,
-            children_opt: None,
-            tbprofilerjson_opt,
-            is_ab1: false,
-            sequence_opt: None,
-            is_tbprofiler_result_as_sample: true,
-            is_tbprofiler_groupable_raw_result_file: false,
-            sample_json_path_opt: files.json,
-            sample_csv_path_opt: files.csv,
-            sample_docx_path_opt: files.docx,
-            is_susceptible,
-            susceptibility_calls: SusceptibilityCalls::default(),
-        };
-        items.push(Item {
-            name: sample_id.clone(),
-            display_name: sample_id,
-            metadata,
-            hidden: false,
-            location_opt: Some(location),
-            image_dimensions: None,
-            mime: mime::APPLICATION_JSON,
-            icon_handle_grid: mime_icon(mime::APPLICATION_JSON, sizes.grid()),
-            icon_handle_list: mime_icon(mime::APPLICATION_JSON, sizes.list()),
-            icon_handle_list_condensed: mime_icon(mime::APPLICATION_JSON, sizes.list_condensed()),
-            thumbnail_opt: Some(ItemThumbnail::NotImage),
-            button_id: widget::Id::unique(),
-            pos_opt: Cell::new(None),
-            rect_opt: Cell::new(None),
-            selected: false,
-            highlighted: false,
-            overlaps_drag_rect: false,
-            dir_size: DirSize::NotDirectory,
-            cut: false,
-            is_mount_point: false,
-            is_client_point: false,
-            checksums: ChecksumState::default(),
-        });
-    }
-
-    items
-}
-
-pub fn scan_search<F: Fn(SearchItem) -> bool + Sync>(
-    search_location: &SearchLocation,
-    term: &str,
-    show_hidden: bool,
-    callback: F,
-) {
-    if term.is_empty() {
-        return;
-    }
-
-    let pattern = regex::escape(term);
-    let regex = match regex::RegexBuilder::new(&pattern)
-        .case_insensitive(true)
-        .build()
-    {
-        Ok(ok) => ok,
-        Err(err) => {
-            log::warn!("failed to parse regex {pattern:?}: {err}");
-            return;
-        }
-    };
-
-    match search_location {
-        SearchLocation::Path(tab_path) => {
-            ignore::WalkBuilder::new(tab_path)
-                .standard_filters(false)
-                .hidden(!show_hidden)
-                //TODO: only use this on supported targets
-                .same_file_system(true)
-                .build_parallel()
-                .run(|| {
-                    Box::new(|entry_res| {
-                        let Ok(entry) = entry_res else {
-                            // Skip invalid entries
-                            return ignore::WalkState::Skip;
-                        };
-
-                        let Some(file_name) = entry.file_name().to_str() else {
-                            // Skip anything with an invalid name
-                            return ignore::WalkState::Skip;
-                        };
-
-                        if regex.is_match(file_name) {
-                            let path = entry.path();
-
-                            let metadata = match entry.metadata() {
-                                Ok(ok) => ok,
-                                Err(err) => {
-                                    log::warn!(
-                                        "failed to read metadata for entry at {}: {}",
-                                        path.display(),
-                                        err
-                                    );
-                                    return ignore::WalkState::Continue;
-                                }
-                            };
-
-                            if !callback(SearchItem::Path(
-                                path.to_path_buf(),
-                                file_name.to_string(),
-                                metadata,
-                            )) {
-                                return ignore::WalkState::Quit;
-                            }
-                        }
-
-                        ignore::WalkState::Continue
-                    })
-                });
-        }
-        SearchLocation::Recents => {
-            let recent_files = match recently_used_xbel::parse_file() {
-                Ok(recent_files) => recent_files,
-                Err(err) => {
-                    log::warn!("Error reading recent files: {err:?}");
-                    return;
-                }
-            };
-
-            for bookmark in recent_files.bookmarks {
-                let path = uri_to_path(bookmark.href);
-                if let Some(path) = path
-                    && path.exists()
-                {
-                    let file_name = path.file_name();
-                    if let Some(file_name) = file_name {
-                        let file_name = file_name.to_string_lossy();
-                        if regex.is_match(&file_name) {
-                            match path.metadata() {
-                                Ok(metadata) => {
-                                    if !callback(SearchItem::Path(
-                                        path.to_path_buf(),
-                                        file_name.to_string(),
-                                        metadata,
-                                    )) {
-                                        break;
-                                    }
-                                }
-                                Err(err) => {
-                                    log::warn!(
-                                        "failed to read metadata for entry at {}: {}",
-                                        path.display(),
-                                        err
-                                    );
-                                }
-                            };
-                        }
-                    }
-                }
-            }
-        }
-        SearchLocation::Trash => {
-            Trash::scan_search(callback, &regex);
-        }
-    }
-}
-
-fn uri_to_path(uri: String) -> Option<PathBuf> {
-    uri.parse::<url::Url>().ok().and_then(|url| {
-        //TODO support for external drive or cloud?
-        if url.scheme() == "file" {
-            url.to_file_path().ok()
-        } else {
-            None
-        }
-    })
-}
-
-pub fn has_recents() -> bool {
-    match recently_used_xbel::parse_file() {
-        Ok(recent_files) => !recent_files.bookmarks.is_empty(),
-        Err(_) => false,
-    }
-}
-
-pub fn scan_recents(sizes: IconSizes) -> Vec<Item> {
-    let recent_files = match recently_used_xbel::parse_file() {
-        Ok(recent_files) => recent_files,
-        Err(err) => {
-            log::warn!("Error reading recent files: {err:?}");
-            return Vec::new();
-        }
-    };
-    let mut recents: Vec<_> = recent_files
-        .bookmarks
-        .into_iter()
-        .filter_map(|bookmark| {
-            let path = uri_to_path(bookmark.href)?;
-            let last_edit = bookmark.modified.parse::<jiff::Timestamp>().ok()?;
-            let last_visit = bookmark.visited.parse::<jiff::Timestamp>().ok()?;
-
-            if path.exists() {
-                let file_name = path.file_name()?;
-                let name = file_name.to_string_lossy().to_string();
-
-                let metadata = match path.metadata() {
-                    Ok(ok) => ok,
-                    Err(err) => {
-                        log::warn!(
-                            "failed to read metadata for entry at {}: {}",
-                            path.display(),
-                            err
-                        );
-                        return None;
-                    }
-                };
-
-                let item = item_from_entry(path, name, metadata, sizes);
-                Some((item, last_edit.min(last_visit)))
-            } else {
-                log::warn!("recent file path does not exist: {}", path.display());
-                None
-            }
-        })
-        .collect();
-
-    recents.sort_by_key(|recent| Reverse(recent.1));
-
-    recents.into_iter().take(50).map(|(item, _)| item).collect()
-}
-
-pub fn scan_network(uri: &str, sizes: IconSizes) -> Vec<Item> {
-    for mounter in MOUNTERS.values() {
-        match mounter.network_scan(uri, sizes) {
-            Some(Ok(items)) => return items,
-            Some(Err(err)) => {
-                log::warn!("failed to scan {uri:?}: {err}");
-            }
-            None => {}
-        }
-    }
-    Vec::new()
-}
-
-pub fn scan_remote(uri: &str, sizes: IconSizes) -> Vec<Item> {
-    for (_key, client) in CLIENTS.iter() {
-        match client.remote_scan(uri, sizes) {
-            Some(Ok(items)) => return items,
-            Some(Err(err)) => {
-                log::warn!("failed to scan remote {:?}: {}", uri, err);
-            }
-            None => {}
-        }
-    }
-    Vec::new()
-}
-
-pub fn item_from_remote(uri: &str, sizes: IconSizes) -> Result<Item, String> {
-    for (_key, client) in CLIENTS.iter() {
-        match client.remote_parent_item(uri, sizes) {
-            Some(Ok(item)) => return Ok(item),
-            Some(Err(err)) => {
-                log::warn!("failed to scan remote {:?}: {}", uri, err);
-            }
-            None => {}
-        }
-    }
-    Err(format!("no client found for remote uri: {}", uri))
-}
-
-//TODO: organize desktop items based on display
-pub fn scan_desktop(
-    tab_path: &PathBuf,
-    _display: &str,
-    desktop_config: DesktopConfig,
-    mut sizes: IconSizes,
-) -> Vec<Item> {
-    sizes.grid = desktop_config.icon_size;
-
-    let mut items = Vec::new();
-
-    if desktop_config.show_content {
-        items.extend(scan_path(tab_path, sizes));
-    }
-
-    if desktop_config.show_mounted_drives {
-        for mounter in MOUNTERS.values() {
-            let Some(mounter_items) = mounter.items(sizes) else {
-                continue;
-            };
-            items.extend(mounter_items.into_iter().filter_map(|mounter_item| {
-                let path = mounter_item.path()?;
-                // Get most item data from path
-                let mut item = match item_from_path(&path, sizes) {
-                    Ok(item) => item,
-                    Err(err) => {
-                        log::warn!(
-                            "failed to get item from mounter item {}: {}",
-                            path.display(),
-                            err
-                        );
-                        return None;
-                    }
-                };
-
-                //Override some data with mounter information
-                item.name = mounter_item.name();
-                item.display_name = Item::display_name(&item.name);
-
-                //TODO: use icon size for mounter item icon
-                if let Some(icon) = mounter_item.icon(false) {
-                    item.icon_handle_grid.clone_from(&icon);
-                    item.icon_handle_list.clone_from(&icon);
-                    item.icon_handle_list_condensed = icon;
-                }
-
-                Some(item)
-            }));
-        }
-    }
-
-    if desktop_config.show_connected_drives {
-        for client in CLIENTS.values() {
-            let Some(client_items) = client.items(sizes) else {
-                continue;
-            };
-            items.extend(client_items.into_iter().filter_map(|client_item| {
-                let path = client_item.path()?;
-                // Get most item data from path
-                let mut item = match item_from_path(&path, sizes) {
-                    Ok(item) => item,
-                    Err(err) => {
-                        log::warn!(
-                            "failed to get item from mounter item {}: {}",
-                            path.display(),
-                            err
-                        );
-                        return None;
-                    }
-                };
-
-                //Override some data with client information
-                item.name = client_item.name();
-                item.display_name = Item::display_name(&item.name);
-
-                //TODO: use icon size for client item icon
-                if let Some(icon) = client_item.icon(false) {
-                    item.icon_handle_grid.clone_from(&icon);
-                    item.icon_handle_list.clone_from(&icon);
-                    item.icon_handle_list_condensed = icon;
-                }
-
-                Some(item)
-            }));
-        }
-    }
-
-    if desktop_config.show_trash {
-        let name = fl!("trash");
-        let display_name = Item::display_name(&name);
-
-        let metadata = ItemMetadata::SimpleDir {
-            entries: Trash::entries() as u64,
-        };
-
-        let (mime, icon_handle_grid, icon_handle_list, icon_handle_list_condensed) = {
-            (
-                "inode/directory".parse().unwrap(),
-                Trash::icon(sizes.grid()),
-                Trash::icon(sizes.list()),
-                Trash::icon(sizes.list_condensed()),
-            )
-        };
-
-        items.push(Item {
-            name,
-            display_name,
-            is_mount_point: false,
-            is_client_point: false,
-            metadata,
-            hidden: false,
-            location_opt: Some(Location::Trash),
-            image_dimensions: None,
-            mime,
-            icon_handle_grid,
-            icon_handle_list,
-            icon_handle_list_condensed,
-            thumbnail_opt: Some(ItemThumbnail::NotImage),
-            button_id: widget::Id::unique(),
-            pos_opt: Cell::new(None),
-            rect_opt: Cell::new(None),
-            selected: false,
-            highlighted: false,
-            overlaps_drag_rect: false,
-            dir_size: DirSize::NotDirectory,
-            cut: false,
-            checksums: ChecksumState::default(),
-        });
-    }
-
-    items
-}
-
-#[derive(Clone, Debug)]
-pub struct EditLocation {
-    pub location: Location,
-    pub completions: Option<Vec<(String, PathBuf)>>,
-    pub selected: Option<usize>,
-}
-
-impl EditLocation {
-    pub fn resolve(&self) -> Option<Location> {
-        if let Location::Network(uri, ..) = &self.location {
-            MOUNTERS
-                .values()
-                .find_map(|mounter| mounter.dir_info(uri))
-                .map(|(uri, display_name, path_opt)| Location::Network(uri, display_name, path_opt))
-        } else if let Location::Remote(uri, ..) = &self.location {
-            CLIENTS
-                .values()
-                .find_map(|client| client.dir_info(uri))
-                .map(|(uri, display_name, path_opt)| Location::Remote(uri, display_name, path_opt))
-        } else {
-            let Some(selected) = self.selected else {
-                return Some(self.location.clone());
-            };
-            let completions = self.completions.as_ref()?;
-            let completion = completions.get(selected)?;
-            Some(self.location.with_path(completion.1.clone()).normalize())
-        }
-    }
-
-    pub fn select(&mut self, forwards: bool) {
-        if let Some(completions) = &self.completions {
-            if completions.is_empty() {
-                self.selected = None;
-            } else {
-                let mut selected = if forwards {
-                    self.selected.and_then(|x| x.checked_add(1)).unwrap_or(0)
-                } else {
-                    self.selected
-                        .and_then(|x| x.checked_sub(1))
-                        .unwrap_or(completions.len() - 1)
-                };
-                if selected >= completions.len() {
-                    selected = 0;
-                }
-                self.selected = Some(selected);
-
-                // Automatically resolve if there is only one completion
-                if completions.len() == 1
-                    && let Some(resolved) = self.resolve()
-                {
-                    self.location = resolved;
-                    self.selected = None;
-                }
-            }
-        } else {
-            self.selected = None;
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum SearchLocation {
-    Path(PathBuf),
-    Recents,
-    Trash,
-}
-
-impl std::fmt::Display for SearchLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Path(path) => write!(f, "{}", path.display()),
-            Self::Recents => write!(f, "recents"),
-            Self::Trash => write!(f, "trash"),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum SearchItem {
-    Path(PathBuf, String, fs::Metadata),
-    Trash(TrashItem, TrashItemMetadata),
-}
-
-impl From<Location> for EditLocation {
-    fn from(location: Location) -> Self {
-        Self {
-            location,
-            completions: None,
-            selected: None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Location {
-    Desktop(PathBuf, String, DesktopConfig),
-    Network(String, String, Option<PathBuf>),
-    Path(PathBuf),
-    Recents,
-    Remote(String, String, Option<PathBuf>),
-    Search(SearchLocation, String, bool, Instant),
-    Trash,
-}
-
-impl std::fmt::Display for Location {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Desktop(path, display, ..) => {
-                write!(f, "{} on display {display}", path.display())
-            }
-            Self::Network(uri, ..) => write!(f, "{uri}"),
-            Self::Path(path) => write!(f, "{}", path.display()),
-            Self::Recents => write!(f, "recents"),
-            Self::Remote(..) => write!(f, "remote"),
-            Self::Search(location, term, ..) => {
-                write!(f, "search {} for {}", location, term)
-            }
-            Self::Trash => write!(f, "trash"),
-        }
-    }
-}
-
-impl Location {
-    pub fn normalize(&self) -> Self {
-        if let Location::Network(uri, ..) = self {
-            if !uri.ends_with('/') {
-                let mut uri = uri.clone();
-                uri.push('/');
-                self.with_uri(uri)
-            } else {
-                self.clone()
-            }
-        } else if let Location::Remote(uri, ..) = self {
-            if !uri.ends_with('/') {
-                let mut uri = uri.clone();
-                uri.push('/');
-                self.with_uri(uri)
-            } else {
-                self.clone()
-            }
-        } else if let Some(mut path) = self.path_opt().cloned() {
-            // Canonicalize path, if possible
-            if let Ok(canonical) = fs::canonicalize(&path) {
-                path = canonical;
-            }
-            // Add trailing slash if location is a directory
-            if path.is_dir() {
-                path.push("");
-            }
-            self.with_path(path)
-        } else {
-            self.clone()
-        }
-    }
-
-    pub fn ancestors(&self) -> Vec<(Self, String)> {
-        self.path_opt().map_or_else(Default::default, |path| {
-            path.ancestors()
-                .scan(false, |found_home, ancestor| {
-                    (!*found_home).then(|| {
-                        let (name, is_home) = folder_name(ancestor);
-                        *found_home = is_home;
-                        (self.with_path(ancestor.to_path_buf()), name)
-                    })
-                })
-                .collect()
-        })
-    }
-
-    pub const fn path_opt(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Desktop(path, ..) => Some(path),
-            Self::Path(path) => Some(path),
-            Self::Search(SearchLocation::Path(path), ..) => Some(path),
-            Self::Network(_, _, path) => path.as_ref(),
-            Self::Remote(_, _, path) => path.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn into_path_opt(self) -> Option<PathBuf> {
-        match self {
-            Self::Desktop(path, ..) => Some(path),
-            Self::Path(path) => Some(path),
-            Self::Search(SearchLocation::Path(path), ..) => Some(path),
-            Self::Network(_, _, path) => path,
-            Self::Remote(_, _, path) => path,
-            _ => None,
-        }
-    }
-
-    pub(crate) fn into_uri_opt(self) -> Option<String> {
-        match self {
-            Self::Remote(uri, _, _) => Some(uri),
-            _ => None,
-        }
-    }
-
-    pub fn with_path(&self, path: PathBuf) -> Self {
-        let path = Self::expand_tilde(path);
-        match self {
-            Self::Desktop(_, display, desktop_config) => {
-                Self::Desktop(path, display.clone(), *desktop_config)
-            }
-            Self::Path(..) => Self::Path(path),
-            Self::Search(SearchLocation::Path(_), term, show_hidden, time) => Self::Search(
-                SearchLocation::Path(path),
-                term.clone(),
-                *show_hidden,
-                *time,
-            ),
-            Self::Remote(uri, ..) => {
-                if let Ok(mut url) = url::Url::parse(uri)
-                    && let Some(path_str) = path.to_str()
-                {
-                    url.set_path(path_str);
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("/")
-                        .to_string();
-                    return Self::Remote(url.to_string(), name, Some(path));
-                }
-                self.clone()
-            }
-
-            other => other.clone(),
-        }
-    }
-
-    pub fn with_uri(&self, uri: String) -> Self {
-        if let Self::Network(_, name, path) = self {
-            Self::Network(uri, name.clone(), path.clone())
-        } else if let Self::Remote(_, name, path) = self {
-            Self::Remote(uri, name.clone(), path.clone())
-        } else {
-            self.clone()
-        }
-    }
-
-    pub fn scan(&self, sizes: IconSizes) -> (Option<Box<Item>>, Vec<Item>) {
-        let items = match self {
-            Self::Desktop(path, display, desktop_config) => {
-                scan_desktop(path, display, *desktop_config, sizes)
-            }
-            Self::Path(path) => scan_path(path, sizes),
-            Self::Search(..) => {
-                // Search is done incrementally
-                Vec::new()
-            }
-            Self::Trash => Trash::scan(sizes),
-            Self::Recents => scan_recents(sizes),
-            Self::Network(uri, _, _) => scan_network(uri, sizes),
-            Self::Remote(uri, _, _) => scan_remote(uri, sizes),
-        };
-        let parent_item_opt = match self {
-            Self::Remote(uri, _, path_opt) => {
-                match path_opt {
-                    Some(path) => match item_from_remote(uri, sizes) {
-                        Ok(item) => Some(Box::new(item)),
-                        Err(err) => {
-                            log::warn!("failed to get item for {}: {}", path.display(), err);
-                            None
-                        }
-                    },
-                    // If no path, try to get item from remote
-                    None => None,
-                }
-            }
-            _ => {
-                match self.path_opt() {
-                    Some(path) => match item_from_path(path, sizes) {
-                        Ok(item) => Some(Box::new(item)),
-                        Err(err) => {
-                            log::warn!("failed to get item for {}: {}", path.display(), err);
-                            None
-                        }
-                    },
-                    //TODO: support other locations?
-                    None => None,
-                }
-            }
-        };
-        (parent_item_opt, items)
-    }
-
-    pub fn title(&self) -> String {
-        match self {
-            Self::Desktop(path, _, _) => {
-                let (name, _) = folder_name(path);
-                name
-            }
-            Self::Path(path) => {
-                let (name, _) = folder_name(path);
-                name
-            }
-            Self::Search(location, term, ..) => {
-                let name = match location {
-                    SearchLocation::Path(path) => folder_name(path).0,
-                    SearchLocation::Trash => fl!("trash"),
-                    SearchLocation::Recents => fl!("recents"),
-                };
-
-                //TODO: translate
-                format!("Search \"{term}\": {name}")
-            }
-            Self::Trash => {
-                fl!("trash")
-            }
-            Self::Recents => {
-                fl!("recents")
-            }
-            Self::Network(display_name, ..) => display_name.clone(),
-            Self::Remote(_, name, _) => name.clone(),
-        }
-    }
-
-    /// Expand a path that starts with "~" with the
-    /// user's home directory
-    pub fn expand_tilde(path: PathBuf) -> PathBuf {
-        let mut components = path.components();
-        match components.next() {
-            Some(path::Component::Normal(os_str)) if os_str == "~" => {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(components.as_path())
-                } else {
-                    path
-                }
-            }
-            _ => path,
-        }
-    }
-
-    pub fn is_trash(&self) -> bool {
-        matches!(
-            self,
-            Location::Trash | Location::Search(SearchLocation::Trash, ..)
-        )
-    }
-
-    pub fn is_recents(&self) -> bool {
-        matches!(
-            self,
-            Location::Recents | Location::Search(SearchLocation::Recents, ..)
-        )
-    }
-
-    /// Returns true if this location supports paste operations (not Trash)
-    pub fn supports_paste(&self) -> bool {
-        matches!(
-            self,
-            Self::Desktop(..)
-                | Self::Path(..)
-                | Self::Search(..)
-                | Self::Recents
-                | Self::Network(_, _, Some(_))
-        )
-    }
 }
 
 pub struct TaskWrapper(pub cosmic::Task<Message>);
@@ -2341,2709 +468,6 @@ impl MenuAction for LocationMenuAction {
 
     fn message(&self) -> Self::Message {
         Message::LocationMenuAction(*self)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum DirSize {
-    Calculating(Controller),
-    Directory(u64),
-    NotDirectory,
-    Error(String),
-}
-
-/// Checksums computed for a file. Only SHA256 is currently exposed; see
-/// [`calculate_checksums`] for how to add more.
-#[derive(Clone, Debug, Default)]
-pub struct FileChecksums {
-    pub sha256: String,
-}
-
-/// State of checksum computation for a file.
-#[derive(Clone, Debug, Default)]
-pub enum ChecksumState {
-    #[default]
-    NotCalculated,
-    Calculating,
-    Calculated(FileChecksums),
-    Error(String),
-}
-
-#[derive(Clone, Debug)]
-#[allow(clippy::large_enum_variant)]
-pub enum ItemMetadata {
-    Path {
-        metadata: Metadata,
-        children_opt: Option<usize>,
-        tbprofilerjson_opt: Option<TbProfilerJson>,
-        is_ab1: bool,
-        sequence_opt: Option<SeqData>,
-        is_tbprofiler_result_as_sample: bool,
-        is_tbprofiler_groupable_raw_result_file: bool,
-        sample_json_path_opt: Option<PathBuf>,
-        sample_csv_path_opt: Option<PathBuf>,
-        sample_docx_path_opt: Option<PathBuf>,
-        is_susceptible: Option<bool>,
-        susceptibility_calls: SusceptibilityCalls,
-    },
-    Trash {
-        metadata: trash::TrashItemMetadata,
-        entry: trash::TrashItem,
-    },
-    SimpleDir {
-        entries: u64,
-    },
-    SimpleFile {
-        size: u64,
-    },
-    #[cfg(feature = "gvfs")]
-    GvfsPath {
-        mtime: u64,
-        size_opt: Option<u64>,
-        children_opt: Option<usize>,
-        is_dir: bool,
-    },
-    #[cfg(feature = "russh")]
-    RusshPath {
-        mtime: u64,
-        size_opt: Option<u64>,
-        children_opt: Option<usize>,
-        is_tbprofiler_json: bool,
-        tbprofilerjson_opt: Option<TbProfilerJson>,
-        is_tbprofiler_result_as_sample: bool,
-        is_tbprofiler_groupable_raw_result_file: bool,
-        sample_json_path_opt: Option<PathBuf>,
-        sample_csv_path_opt: Option<PathBuf>,
-        sample_docx_path_opt: Option<PathBuf>,
-        is_susceptible: Option<bool>,
-    },
-}
-
-impl ItemMetadata {
-    pub fn is_dir(&self) -> bool {
-        match self {
-            Self::Path { metadata, .. } => metadata.is_dir(),
-            Self::Trash { metadata, .. } => match metadata.size {
-                trash::TrashItemSize::Entries(_) => true,
-                trash::TrashItemSize::Bytes(_) => false,
-            },
-            Self::SimpleDir { .. } => true,
-            Self::SimpleFile { .. } => false,
-            #[cfg(feature = "gvfs")]
-            Self::GvfsPath { is_dir, .. } => *is_dir,
-            #[cfg(feature = "russh")]
-            Self::RusshPath { children_opt, .. } => children_opt.is_some(),
-        }
-    }
-
-    pub fn modified(&self) -> Option<SystemTime> {
-        match self {
-            Self::Path { metadata, .. } => metadata.modified().ok(),
-            #[cfg(feature = "gvfs")]
-            Self::GvfsPath { mtime, .. } => {
-                SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(*mtime))
-            }
-            #[cfg(feature = "russh")]
-            Self::RusshPath { mtime, .. } => {
-                Some(SystemTime::UNIX_EPOCH + Duration::from_secs(*mtime))
-            }
-            _ => None,
-        }
-    }
-
-    pub fn file_size(&self) -> Option<u64> {
-        match self {
-            Self::Path { metadata, .. } => (!metadata.is_dir()).then_some(metadata.len()),
-            Self::Trash { metadata, .. } => match metadata.size {
-                TrashItemSize::Bytes(size) => Some(size),
-                TrashItemSize::Entries(_) => None,
-            },
-            #[cfg(feature = "gvfs")]
-            Self::GvfsPath { size_opt, .. } => *size_opt,
-            #[cfg(feature = "russh")]
-            Self::RusshPath { size_opt, .. } => *size_opt,
-            _ => None,
-        }
-    }
-
-    pub fn children_count(&self) -> Option<&usize> {
-        match &self {
-            ItemMetadata::Path { children_opt, .. } => children_opt.as_ref(),
-            #[cfg(feature = "gvfs")]
-            ItemMetadata::GvfsPath { children_opt, .. } => children_opt.as_ref(),
-            #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { children_opt, .. } => children_opt.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub fn is_tbprofiler_json(&self) -> bool {
-        match self {
-            Self::Path {
-                tbprofilerjson_opt, ..
-            } => tbprofilerjson_opt.is_some(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                is_tbprofiler_json, ..
-            } => *is_tbprofiler_json,
-            _ => false,
-        }
-    }
-
-    pub fn is_ab1(&self) -> bool {
-        match self {
-            Self::Path { is_ab1, .. } => *is_ab1,
-            _ => false,
-        }
-    }
-
-    pub fn erm41position28_call(&self) -> Erm41Position28 {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .and_then(|s| s.seq_id_hits.first()?.erm41_position_28_opt)
-                .unwrap_or(Erm41Position28::Undetermined),
-            _ => Erm41Position28::Undetermined,
-        }
-    }
-
-    pub fn is_erm41position28(&self) -> bool {
-        !matches!(self.erm41position28_call(), Erm41Position28::Undetermined)
-    }
-
-    pub fn ab1_chromatogram(&self) -> Option<&Ab1Channels> {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.chromatogram_opt.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub fn rrl_position_2058_2059_call(&self) -> RrlPosition2058_2059 {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .and_then(|s| s.seq_id_hits.first()?.rrl_position_2058_2059_opt)
-                .unwrap_or(RrlPosition2058_2059::Undetermined),
-            _ => RrlPosition2058_2059::Undetermined,
-        }
-    }
-
-    pub fn is_rrl_position_2058_2059(&self) -> bool {
-        !matches!(
-            self.rrl_position_2058_2059_call(),
-            RrlPosition2058_2059::Undetermined
-        )
-    }
-
-    pub fn rrs3endposition_call(&self) -> Rrs3EndPosition1248 {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .and_then(|s| s.seq_id_hits.first()?.rrs3end_position_1248_opt)
-                .unwrap_or(Rrs3EndPosition1248::Undetermined),
-            _ => Rrs3EndPosition1248::Undetermined,
-        }
-    }
-
-    pub fn is_rrs3endposition(&self) -> bool {
-        !matches!(
-            self.rrs3endposition_call(),
-            Rrs3EndPosition1248::Undetermined
-        )
-    }
-
-    pub fn seq_id_hits(&self) -> &[SeqIdHit] {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .map(|s| s.seq_id_hits.as_slice())
-                .unwrap_or(&[]),
-            _ => &[],
-        }
-    }
-
-    pub fn is_seq_id(&self) -> bool {
-        self.seq_id_hits()
-            .first()
-            .is_some_and(|h| h.identity >= crate::sequencing::MIN_SEQ_ID_IDENTITY)
-    }
-
-    pub fn sequence_length(&self) -> Option<usize> {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.length),
-            _ => None,
-        }
-    }
-
-    pub fn sequence_length_trimmed(&self) -> Option<usize> {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.trimmed_length),
-            _ => None,
-        }
-    }
-
-    pub fn sequence_avg_quality_trimmed(&self) -> Option<f32> {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.trimmed_avg_quality_opt,
-            _ => None,
-        }
-    }
-
-    pub fn is_abscessus_seq_id(&self) -> bool {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .and_then(|s| s.seq_id_hits.first())
-                .map(|h| h.description == "Mycobacteroides abscessus subsp. abscessus")
-                .unwrap_or(false),
-            _ => false,
-        }
-    }
-
-    pub fn is_bolletii_seq_id(&self) -> bool {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .and_then(|s| s.seq_id_hits.first())
-                .map(|h| h.description == "Mycobacteroides abscessus subsp. bolletii")
-                .unwrap_or(false),
-            _ => false,
-        }
-    }
-
-    pub fn is_massiliense_seq_id(&self) -> bool {
-        match self {
-            Self::Path { sequence_opt, .. } => sequence_opt
-                .as_ref()
-                .and_then(|s| s.seq_id_hits.first())
-                .map(|h| h.description == "Mycobacteroides abscessus subsp. massiliense")
-                .unwrap_or(false),
-            _ => false,
-        }
-    }
-
-    pub fn set_json(&mut self, json: Option<TbProfilerJson>) {
-        match self {
-            Self::Path {
-                tbprofilerjson_opt, ..
-            } => *tbprofilerjson_opt = json,
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                tbprofilerjson_opt, ..
-            } => *tbprofilerjson_opt = json,
-            _ => {}
-        }
-    }
-
-    pub fn is_tbprofilerjson_opt(&self) -> bool {
-        match self {
-            Self::Path {
-                tbprofilerjson_opt, ..
-            } => tbprofilerjson_opt.is_some(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                tbprofilerjson_opt, ..
-            } => tbprofilerjson_opt.is_some(),
-            _ => false,
-        }
-    }
-
-    pub fn is_tbprofiler_result_as_sample(&self) -> bool {
-        match self {
-            Self::Path {
-                is_tbprofiler_result_as_sample,
-                ..
-            } => *is_tbprofiler_result_as_sample,
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                is_tbprofiler_result_as_sample,
-                ..
-            } => *is_tbprofiler_result_as_sample,
-            _ => false,
-        }
-    }
-
-    pub fn is_groupable_as_sample_tbprofiler_result_item(&self) -> bool {
-        match self {
-            Self::Path {
-                is_tbprofiler_groupable_raw_result_file,
-                ..
-            } => *is_tbprofiler_groupable_raw_result_file,
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                is_tbprofiler_groupable_raw_result_file,
-                ..
-            } => *is_tbprofiler_groupable_raw_result_file,
-            _ => false,
-        }
-    }
-
-    pub fn json_path(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Path {
-                sample_json_path_opt,
-                ..
-            } => sample_json_path_opt.as_ref(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                sample_json_path_opt,
-                ..
-            } => sample_json_path_opt.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub fn csv_path(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Path {
-                sample_csv_path_opt,
-                ..
-            } => sample_csv_path_opt.as_ref(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                sample_csv_path_opt,
-                ..
-            } => sample_csv_path_opt.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub fn docx_path(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Path {
-                sample_docx_path_opt,
-                ..
-            } => sample_docx_path_opt.as_ref(),
-            #[cfg(feature = "russh")]
-            Self::RusshPath {
-                sample_docx_path_opt,
-                ..
-            } => sample_docx_path_opt.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub fn is_susceptible(&self) -> Option<bool> {
-        match self {
-            Self::Path { is_susceptible, .. } => *is_susceptible,
-            #[cfg(feature = "russh")]
-            Self::RusshPath { is_susceptible, .. } => *is_susceptible,
-            _ => None,
-        }
-    }
-
-    pub fn susceptibility_calls(&self) -> SusceptibilityCalls {
-        match self {
-            Self::Path {
-                susceptibility_calls,
-                ..
-            } => susceptibility_calls.clone(),
-            _ => SusceptibilityCalls::default(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ItemThumbnail {
-    NotImage,
-    Image(widget::image::Handle, Option<(u32, u32)>),
-    Svg(widget::svg::Handle),
-    Text(widget::text_editor::Content),
-}
-
-impl Clone for ItemThumbnail {
-    fn clone(&self) -> Self {
-        match self {
-            Self::NotImage => Self::NotImage,
-            Self::Image(handle, size_opt) => Self::Image(handle.clone(), *size_opt),
-            Self::Svg(handle) => Self::Svg(handle.clone()),
-            // Content cannot be cloned simply
-            Self::Text(content) => {
-                Self::Text(widget::text_editor::Content::with_text(&content.text()))
-            }
-        }
-    }
-}
-
-impl ItemThumbnail {
-    pub fn new(
-        path: &Path,
-        metadata: ItemMetadata,
-        mime: mime::Mime,
-        mut thumbnail_size: u32,
-        max_mem: u64,
-        jobs: usize,
-        max_size_mb: u64,
-    ) -> Self {
-        let thumbnail_cacher =
-            ThumbnailCacher::new(path, ThumbnailSize::from_pixel_size(thumbnail_size));
-        match thumbnail_cacher.as_ref() {
-            Ok(cache) => match cache.get_cached_thumbnail() {
-                CachedThumbnail::Valid((thumbnail_path, size)) => {
-                    // Check original image dimensions even when loading cached thumbnail
-                    // This prevents trying to load huge images in preview mode
-                    let original_dims = match image::image_dimensions(path) {
-                        Ok((width, height)) => Some((width, height)),
-                        Err(_) => size.map(|s| (s.pixel_size(), s.pixel_size())),
-                    };
-
-                    return Self::Image(
-                        widget::image::Handle::from_path(thumbnail_path),
-                        original_dims,
-                    );
-                }
-                CachedThumbnail::Failed => {
-                    if mime.type_() != mime::IMAGE {
-                        return Self::NotImage;
-                    }
-                }
-                CachedThumbnail::RequiresUpdate(size) => {
-                    thumbnail_size = size.pixel_size();
-                }
-            },
-            Err(err) => {
-                log::warn!(
-                    "failed to create ThumbnailCache for {}: {}",
-                    path.display(),
-                    err
-                );
-            }
-        }
-
-        let size = metadata.file_size().unwrap_or_default();
-        let check_size = |thumbnailer: &str, max_size| {
-            if size <= max_size {
-                true
-            } else {
-                log::warn!(
-                    "skipping internal {} thumbnailer for {}: file size {} is larger than {}",
-                    thumbnailer,
-                    path.display(),
-                    format_size(size),
-                    format_size(max_size)
-                );
-                false
-            }
-        };
-
-        let mut tried_supported_file = false;
-        // First try built-in image thumbnailer
-        if mime.type_() == mime::IMAGE && check_size("image", max_size_mb * 1000 * 1000) {
-            // Check if image dimensions would exceed available memory budget
-            // The GPU tiling system can handle large images, but we still need to decode them first
-            let dimensions_ok = match image::image_dimensions(path) {
-                Ok((width, height)) => {
-                    if exceeds_memory_limit(width, height, max_mem) {
-                        log::warn!(
-                            "skipping thumbnail generation for {}: {}x{} image would exceed {}MB memory budget",
-                            path.display(),
-                            width,
-                            height,
-                            max_mem
-                        );
-                        false
-                    } else {
-                        if should_use_tiling(width, height) {
-                            log::info!(
-                                "Large image {}x{} detected, will use GPU tiling for display",
-                                width,
-                                height
-                            );
-                        }
-                        true
-                    }
-                }
-                Err(err) => {
-                    log::debug!(
-                        "failed to read dimensions for {}: {}, will try decoding",
-                        path.display(),
-                        err
-                    );
-                    true // If we can't read dimensions, try anyway
-                }
-            };
-
-            if !dimensions_ok {
-                // Skip this image entirely since it is too large to safely decode
-                return Self::NotImage;
-            }
-
-            tried_supported_file = true;
-            let dyn_img = match image::ImageReader::open(path)
-                .and_then(image::ImageReader::with_guessed_format)
-            {
-                Ok(mut reader) => {
-                    let mut limits = image::Limits::default();
-                    let max_ram = max_mem * 1000 * 1000 / jobs as u64;
-                    limits.max_alloc = Some(max_ram);
-                    reader.limits(limits);
-                    match reader.decode() {
-                        Ok(reader) => Some(reader),
-                        Err(err) => {
-                            log::warn!("failed to decode {}: {}", path.display(), err);
-                            None
-                        }
-                    }
-                }
-                Err(err) => {
-                    log::warn!("failed to read {}: {}", path.display(), err);
-                    None
-                }
-            };
-
-            if let Some(dyn_img) = dyn_img {
-                let (img_width, img_height) = (dyn_img.width(), dyn_img.height());
-
-                if let Ok(cacher) = thumbnail_cacher.as_ref() {
-                    match cacher.update_with_image(dyn_img) {
-                        Ok(thumb_path) => {
-                            return Self::Image(
-                                widget::image::Handle::from_path(thumb_path),
-                                Some((img_width, img_height)),
-                            );
-                        }
-                        Err(err) => {
-                            log::warn!("cacher failed to decode {}: {}", path.display(), err);
-                        }
-                    }
-                } else {
-                    // Fallback for when thumbnail cacher isn't available.
-                    let thumbnail = dyn_img
-                        .thumbnail(thumbnail_size, thumbnail_size)
-                        .into_rgba8();
-                    return Self::Image(
-                        widget::image::Handle::from_rgba(
-                            thumbnail.width(),
-                            thumbnail.height(),
-                            thumbnail.into_raw(),
-                        ),
-                        Some((img_width, img_height)),
-                    );
-                }
-            }
-        }
-
-        // Try external thumbnailers.
-        let thumbnail_dir = thumbnail_cacher
-            .as_ref()
-            .ok()
-            .map(ThumbnailCacher::thumbnail_dir);
-        if let Some((item_thumbnail, temp_file)) =
-            Self::generate_thumbnail_external(path, &mime, thumbnail_size, thumbnail_dir)
-        {
-            if let Ok(cache) = thumbnail_cacher
-                && let Err(err) = cache.update_with_temp_file(temp_file)
-            {
-                log::warn!("failed to update cache for {}: {}", path.display(), err);
-            }
-            return item_thumbnail;
-        }
-
-        tried_supported_file = tried_supported_file || !thumbnailer(&mime).is_empty();
-
-        // Try internal thumbnailers that don't get cached.
-        //TODO: adjust limits for internal thumbnailers as desired
-        if mime.type_() == mime::IMAGE
-            && mime.subtype() == mime::SVG
-            && check_size("svg", 8 * 1000 * 1000)
-        {
-            tried_supported_file = true;
-            // Try built-in svg thumbnailer
-            match fs::read(path) {
-                Ok(data) => {
-                    //TODO: validate SVG data
-                    return Self::Svg(widget::svg::Handle::from_memory(data));
-                }
-                Err(err) => {
-                    log::warn!("failed to read {}: {}", path.display(), err);
-                }
-            }
-        } else if mime.type_() == mime::TEXT && check_size("text", TEXT_PREVIEW_MAX_FILE_BYTES) {
-            tried_supported_file = true;
-            if size > 0 {
-                // Reuse size from metadata above; cap allocation and read
-                let read_cap = (size.min(TEXT_PREVIEW_MAX_BYTES as u64)) as usize;
-                let mut buf = vec![0u8; read_cap];
-                match File::open(path).and_then(|f| {
-                    let n = Read::read(&mut f.take(read_cap as u64), &mut buf)?;
-                    buf.truncate(n);
-                    Ok(())
-                }) {
-                    Ok(()) => {
-                        let text = match std::str::from_utf8(&buf) {
-                            Ok(s) => s.to_string(),
-                            Err(e) => {
-                                // Use only the valid UTF-8 prefix (slice is guaranteed valid by valid_up_to())
-                                std::str::from_utf8(&buf[..e.valid_up_to()])
-                                    .unwrap_or("")
-                                    .to_string()
-                            }
-                        };
-                        if !text.is_empty() {
-                            return Self::Text(widget::text_editor::Content::with_text(&text));
-                        }
-                    }
-                    Err(err) => {
-                        log::warn!("failed to read {}: {}", path.display(), err);
-                    }
-                }
-            }
-            // size == 0: empty file or unknown size; skip read and allocation
-        }
-
-        // If we weren't able to create a thumbnail, but we should have
-        // been able to, create a fail marker so that it isn't tried the
-        // next time.
-        if let Ok(cacher) = thumbnail_cacher
-            && tried_supported_file
-            && let Err(err) = cacher.create_fail_marker()
-        {
-            log::warn!(
-                "failed to create thumbnail fail marker for {}: {}",
-                path.display(),
-                err
-            );
-        }
-
-        Self::NotImage
-    }
-
-    fn generate_thumbnail_external(
-        path: &Path,
-        mime: &mime::Mime,
-        thumbnail_size: u32,
-        thumbnail_dir: Option<&Path>,
-    ) -> Option<(Self, NamedTempFile)> {
-        // Try external thumbnailers
-        for thumbnailer in thumbnailer(mime) {
-            let is_evince = thumbnailer.exec.starts_with("evince-thumbnailer ");
-            let prefix = if is_evince {
-                //TODO: apparmor config for evince-thumbnailer does not allow /tmp/cosmic-files*
-                "gnome-desktop-"
-            } else {
-                "cosmic-files-"
-            };
-
-            // It's preferable to create the tempfile in the same directory as the final cached
-            // thumbnail to ensure that no copies across filesytems need to be made. However,
-            // the apparmor config for evince-thumbnailer does not allow this, so we need to
-            // fallback to the system tempdir.
-            let dir = if is_evince { None } else { thumbnail_dir };
-            let file = match dir {
-                Some(d) => tempfile::Builder::new().prefix(prefix).tempfile_in(d),
-                None => tempfile::Builder::new().prefix(prefix).tempfile(),
-            };
-            let file = match file {
-                Ok(ok) => ok,
-                Err(err) => {
-                    log::warn!(
-                        "failed to create temporary file for thumbnail of {}: {}",
-                        path.display(),
-                        err
-                    );
-                    continue;
-                }
-            };
-
-            let Some(mut command) = thumbnailer.command(path, file.path(), thumbnail_size) else {
-                continue;
-            };
-            match command.status() {
-                Ok(status) => {
-                    if status.success() {
-                        match image::ImageReader::open(file.path())
-                            .and_then(ImageReader::with_guessed_format)
-                        {
-                            Ok(reader) => match reader.decode().map(DynamicImage::into_rgba8) {
-                                Ok(image) => {
-                                    return Some((
-                                        Self::Image(
-                                            widget::image::Handle::from_rgba(
-                                                image.width(),
-                                                image.height(),
-                                                image.into_raw(),
-                                            ),
-                                            None,
-                                        ),
-                                        file,
-                                    ));
-                                }
-                                Err(err) => {
-                                    log::warn!("failed to decode {}: {}", path.display(), err);
-                                }
-                            },
-                            Err(err) => {
-                                log::warn!("failed to read {}: {}", path.display(), err);
-                            }
-                        }
-                    } else {
-                        log::warn!(
-                            "failed to run {:?} for {}: {}",
-                            thumbnailer,
-                            path.display(),
-                            status
-                        );
-                    }
-                }
-                Err(err) => {
-                    log::warn!(
-                        "failed to run {thumbnailer:?} for {}: {}",
-                        path.display(),
-                        err
-                    );
-                }
-            }
-        }
-
-        None
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Item {
-    pub name: String,
-    pub is_mount_point: bool,
-    pub is_client_point: bool,
-    pub display_name: String,
-    pub metadata: ItemMetadata,
-    pub hidden: bool,
-    pub location_opt: Option<Location>,
-    pub mime: Mime,
-    pub image_dimensions: Option<(u32, u32)>,
-    pub icon_handle_grid: widget::icon::Handle,
-    pub icon_handle_list: widget::icon::Handle,
-    pub icon_handle_list_condensed: widget::icon::Handle,
-    pub thumbnail_opt: Option<ItemThumbnail>,
-    pub button_id: widget::Id,
-    pub pos_opt: Cell<Option<(usize, usize)>>,
-    pub rect_opt: Cell<Option<Rectangle>>,
-    pub selected: bool,
-    pub highlighted: bool,
-    pub cut: bool,
-    pub overlaps_drag_rect: bool,
-    pub dir_size: DirSize,
-    pub checksums: ChecksumState,
-}
-
-impl Item {
-    fn display_name(name: &str) -> String {
-        // In order to wrap at periods and underscores, add a zero width space after each one
-        name.replace('.', ".\u{200B}").replace('_', "_\u{200B}")
-    }
-
-    /// Text widget for a filename in grid/icon view: word-or-glyph wrapping, middle-ellipsized to 3 lines.
-    fn grid_display_name<'a>(
-        name: impl Into<Cow<'a, str>> + 'a,
-    ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
-        widget::text::body(name)
-            .wrapping(text::Wrapping::WordOrGlyph)
-            .align_x(text::Alignment::Center)
-            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
-                3,
-            )))
-    }
-
-    /// Text widget for a filename in list view: word-or-glyph wrapping, middle-ellipsized to 1 line.
-    fn list_display_name<'a>(
-        name: impl Into<Cow<'a, str>> + 'a,
-    ) -> widget::Text<'a, cosmic::Theme, cosmic::Renderer> {
-        widget::text::body(name)
-            .wrapping(text::Wrapping::WordOrGlyph)
-            .ellipsize(text::Ellipsize::Middle(text::EllipsizeHeightLimit::Lines(
-                1,
-            )))
-    }
-
-    pub fn path_opt(&self) -> Option<&PathBuf> {
-        self.location_opt.as_ref()?.path_opt()
-    }
-
-    /// Returns seq_id_hits for preview, falling back to `AB1_SEQ_CACHE` when the item was
-    /// created before the background scan ran (empty stored hits).
-    pub fn seq_id_hits_cached(&self) -> Vec<SeqIdHit> {
-        let stored = self.metadata.seq_id_hits();
-        if !stored.is_empty() {
-            log::debug!(
-                "seq_id_hits_cached({}): {} stored hits",
-                self.name,
-                stored.len()
-            );
-            return stored.to_vec();
-        }
-        let path = self.path_opt();
-        let cache_size = crate::sequencing::batch::AB1_SEQ_CACHE
-            .read()
-            .map(|g| g.len())
-            .unwrap_or(0);
-        let result = path
-            .and_then(|p| {
-                crate::sequencing::batch::AB1_SEQ_CACHE
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.get(p).cloned())
-            })
-            .unwrap_or_default();
-        log::debug!(
-            "seq_id_hits_cached({}): path={:?}, cache_size={}, found {} hits",
-            self.name,
-            path,
-            cache_size,
-            result.len()
-        );
-        result
-    }
-
-    fn is_fasta(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        lower.ends_with(".fasta") || lower.ends_with(".fa")
-    }
-
-    pub fn is_erm41(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("erm41") || lower.contains("erm"))
-    }
-
-    pub fn is_hsp65(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("hsp65") || lower.contains("65kda"))
-    }
-
-    pub fn is_rpob_ntm(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("2573f") || lower.contains("3337r")
-    }
-
-    pub fn is_16s(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("mbak14") || lower.contains("mbak-14")
-    }
-
-    pub fn is_16s3end(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("1098s") || lower.contains("1525a")
-    }
-
-    /// Returns the sample's 16S seq_id_hits, first by looking for a sibling 16S AB1 in the
-    /// currently listed `items`, then falling back to the project-wide
-    /// [`SIXTEEN_S_HITS_CACHE`](crate::sequencing::batch::SIXTEEN_S_HITS_CACHE) populated by
-    /// background `scan_ab1_directory` runs — so the sibling is found even when it lives in a
-    /// different directory than the file being previewed.
-    fn sibling_16s_hits(&self, items: &[Item]) -> Option<Vec<SeqIdHit>> {
-        let (sample_id, _) = parse_ab1_filename(&self.name);
-        if let Some(sibling) = items
-            .iter()
-            .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
-        {
-            return Some(sibling.seq_id_hits_cached());
-        }
-        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id)
-    }
-
-    pub fn is_chelonae(&self, items: &[Item]) -> bool {
-        let chelonae_abscessus_complex = self
-            .sibling_16s_hits(items)
-            .and_then(|hits| {
-                hits.first().map(|top| {
-                    top.description.contains("chelonae") || top.description.contains("abscessus")
-                })
-            })
-            .unwrap_or(false);
-        chelonae_abscessus_complex
-            && self
-                .seq_id_hits_cached()
-                .first()
-                .is_some_and(|top| top.description.contains("chelonae"))
-    }
-
-    pub fn is_marinum(&self, items: &[Item]) -> bool {
-        let marinum_ulcerans = self
-            .sibling_16s_hits(items)
-            .and_then(|hits| {
-                hits.first().map(|top| {
-                    top.description.contains("marinum") || top.description.contains("ulcerans")
-                })
-            })
-            .unwrap_or(false);
-        marinum_ulcerans && self.metadata.rrs3endposition_call() == Rrs3EndPosition1248::A1248
-    }
-
-    pub fn is_ulcerans(&self, items: &[Item]) -> bool {
-        let marinum_ulcerans = self
-            .sibling_16s_hits(items)
-            .and_then(|hits| {
-                hits.first().map(|top| {
-                    top.description.contains("ulcerans") || top.description.contains("marinum")
-                })
-            })
-            .unwrap_or(false);
-        marinum_ulcerans && self.metadata.rrs3endposition_call() == Rrs3EndPosition1248::G1248
-    }
-
-    pub fn species_from_16s_sibling(&self, items: &[Item]) -> Option<String> {
-        self.sibling_16s_hits(items)
-            .and_then(|hits| crate::sequencing::batch::species_from_16s_hits(&hits))
-    }
-
-    pub fn species_from_rpob_hits(&self) -> Option<String> {
-        crate::sequencing::batch::species_from_rpob_hits(&self.seq_id_hits_cached())
-    }
-
-    pub fn is_rrl_ntm(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("mclr"))
-    }
-
-    pub fn is_pnca(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("pnca")
-    }
-
-    pub fn can_gallery(&self) -> bool {
-        self.mime.type_() == mime::IMAGE || self.mime.type_() == mime::TEXT
-    }
-
-    pub fn file_metadata(&self) -> Option<Metadata> {
-        match &self.metadata {
-            ItemMetadata::Path { metadata, .. } => Some(metadata.clone()),
-            #[cfg(feature = "gvfs")]
-            ItemMetadata::GvfsPath { .. } => self.path_opt().and_then(|p| fs::metadata(p).ok()),
-            #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { .. } => None,
-            _ => {
-                //TODO: other metadata types
-                None
-            }
-        }
-    }
-
-    fn preview(&self) -> Element<'_, Message> {
-        let spacing = cosmic::theme::spacing();
-        // This loads the image only if thumbnailing worked
-        let icon = widget::icon::icon(self.icon_handle_grid.clone())
-            .content_fit(ContentFit::Contain)
-            .size(IconSizes::default().grid())
-            .into();
-        match self
-            .thumbnail_opt
-            .as_ref()
-            .unwrap_or(&ItemThumbnail::NotImage)
-        {
-            ItemThumbnail::NotImage => icon,
-            ItemThumbnail::Image(handle, _original_dims) => {
-                // Preview pane: ALWAYS show thumbnail for instant, responsive UI
-                // Full resolution loading happens in gallery mode
-                widget::image(handle.clone()).into()
-            }
-            ItemThumbnail::Svg(handle) => widget::svg(handle.clone()).into(),
-            ItemThumbnail::Text(content) => widget::text_editor::text_editor(content)
-                .style(text_editor_class)
-                .width(THUMBNAIL_SIZE as f32)
-                .height(Length::Fixed(THUMBNAIL_SIZE as f32))
-                .padding(spacing.space_xxs)
-                .into(),
-        }
-    }
-
-    pub fn preview_actions(&self) -> Element<'_, Message> {
-        let mut row = widget::row::with_capacity(3)
-            .align_y(Alignment::Center)
-            .spacing(theme::spacing().space_xxs)
-            .push(
-                widget::button::icon(widget::icon::from_name("go-previous-symbolic"))
-                    .on_press(Message::ItemLeft),
-            )
-            .push(
-                widget::button::icon(widget::icon::from_name("go-next-symbolic"))
-                    .on_press(Message::ItemRight),
-            );
-        if self.can_gallery()
-            && let Some(_path) = self.path_opt()
-        {
-            row = row.push(
-                widget::button::icon(widget::icon::from_name("view-fullscreen-symbolic"))
-                    .on_press(Message::Gallery(true)),
-            );
-        }
-        row.into()
-    }
-
-    pub fn preview_view<'a>(
-        &'a self,
-        mime_app_cache_opt: Option<&'a mime_app::MimeAppCache>,
-        military_time: bool,
-    ) -> Element<'a, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::spacing();
-
-        let mut column = widget::column::with_capacity(4).spacing(space_m);
-
-        column = column.push(
-            widget::container(self.preview())
-                .center_x(Length::Fill)
-                .max_height(THUMBNAIL_SIZE as f32),
-        );
-
-        let mut details = widget::column::with_capacity(8).spacing(space_xxxs);
-        details = details.push(widget::selectable_text::heading(self.name.clone()));
-        details = details.push(widget::text::body(fl!(
-            "type",
-            mime = self.mime.to_string()
-        )));
-        let mut settings = Vec::new();
-        if let Some(mime_app_cache) = mime_app_cache_opt {
-            let mime_apps = mime_app_cache.get_apps_for_mime(&self.mime, false);
-            if !mime_apps.is_empty() {
-                let (names, icons) = mime_apps
-                    .iter()
-                    .map(|(app, _)| (Cow::Owned(app.name.clone()), app.icon()))
-                    .collect::<(Vec<_>, Vec<_>)>();
-                settings.push(
-                    widget::settings::item::builder(fl!("open-with")).control(
-                        Element::from(
-                            widget::dropdown(
-                                names,
-                                mime_apps.iter().position(|(x, _)| x.is_default(&self.mime)),
-                                move |index| index,
-                            )
-                            .icons(Cow::Owned(icons)),
-                        )
-                        .map(move |index| {
-                            let mime_app = &mime_apps[index].0;
-                            Message::SetOpenWith(self.mime.clone(), mime_app.id.clone())
-                        }),
-                    ),
-                );
-            }
-        }
-
-        if let Some(metadata) = self.file_metadata() {
-            if metadata.is_dir() {
-                if let Some(children) = self.metadata.children_count() {
-                    details = details.push(widget::text::body(fl!("items", items = children)));
-                }
-                let size = match &self.dir_size {
-                    DirSize::Calculating(_) => fl!("calculating"),
-                    DirSize::Directory(size) => format_size(*size),
-                    DirSize::NotDirectory => String::new(),
-                    DirSize::Error(err) => err.clone(),
-                };
-                if !size.is_empty() {
-                    details = details.push(widget::text::body(fl!("item-size", size = size)));
-                }
-            } else {
-                details = details.push(widget::text::body(fl!(
-                    "item-size",
-                    size = format_size(metadata.len())
-                )));
-            }
-
-            let date_time_formatter = date_time_formatter(military_time);
-            let time_formatter = time_formatter(military_time);
-
-            if let Ok(time) = metadata.created() {
-                details = details.push(widget::selectable_text::body(fl!(
-                    "item-created",
-                    created = format_time(time, &date_time_formatter, &time_formatter).to_string()
-                )));
-            }
-
-            if let Ok(time) = metadata.modified() {
-                details = details.push(widget::selectable_text::body(fl!(
-                    "item-modified",
-                    modified = format_time(time, &date_time_formatter, &time_formatter).to_string()
-                )));
-            }
-
-            if let Ok(time) = metadata.accessed() {
-                details = details.push(widget::selectable_text::body(fl!(
-                    "item-accessed",
-                    accessed = format_time(time, &date_time_formatter, &time_formatter).to_string()
-                )));
-            }
-
-            #[cfg(unix)]
-            if let Some(path) = self.path_opt() {
-                use std::os::unix::fs::MetadataExt;
-
-                let mode = metadata.mode();
-
-                let user_name = uzers::get_user_by_uid(metadata.uid())
-                    .and_then(|user| user.name().to_str().map(ToOwned::to_owned))
-                    .unwrap_or_default();
-                let user_path = path.clone();
-                settings.push(
-                    widget::settings::item::builder(user_name)
-                        .description(fl!("owner"))
-                        .control(widget::dropdown(
-                            Cow::Borrowed(MODE_NAMES.as_slice()),
-                            Some(get_mode_part(mode, MODE_SHIFT_USER).try_into().unwrap()),
-                            move |selected| {
-                                Message::SetPermissions(
-                                    user_path.clone(),
-                                    set_mode_part(
-                                        mode,
-                                        MODE_SHIFT_USER,
-                                        selected.try_into().unwrap(),
-                                    ),
-                                )
-                            },
-                        )),
-                );
-
-                let group_name = uzers::get_group_by_gid(metadata.gid())
-                    .and_then(|group| group.name().to_str().map(ToOwned::to_owned))
-                    .unwrap_or_default();
-                let group_path = path.clone();
-                settings.push(
-                    widget::settings::item::builder(group_name)
-                        .description(fl!("group"))
-                        .control(widget::dropdown(
-                            Cow::Borrowed(MODE_NAMES.as_slice()),
-                            Some(get_mode_part(mode, MODE_SHIFT_GROUP).try_into().unwrap()),
-                            move |selected| {
-                                Message::SetPermissions(
-                                    group_path.clone(),
-                                    set_mode_part(
-                                        mode,
-                                        MODE_SHIFT_GROUP,
-                                        selected.try_into().unwrap(),
-                                    ),
-                                )
-                            },
-                        )),
-                );
-
-                let other_path = path.clone();
-                settings.push(widget::settings::item::builder(fl!("other")).control(
-                    widget::dropdown(
-                        Cow::Borrowed(MODE_NAMES.as_slice()),
-                        Some(get_mode_part(mode, MODE_SHIFT_OTHER).try_into().unwrap()),
-                        move |selected| {
-                            Message::SetPermissions(
-                                other_path.clone(),
-                                set_mode_part(mode, MODE_SHIFT_OTHER, selected.try_into().unwrap()),
-                            )
-                        },
-                    ),
-                ));
-            }
-        } else {
-            match self.metadata {
-                #[cfg(feature = "russh")]
-                ItemMetadata::RusshPath { .. } => {
-                    if self.metadata.is_dir() {
-                        if let Some(children) = self.metadata.children_count() {
-                            details =
-                                details.push(widget::text::body(fl!("items", items = children)));
-                        }
-                    } else if let Some(size) = self.metadata.file_size() {
-                        details = details.push(widget::text::body(fl!(
-                            "item-size",
-                            size = format_size(size)
-                        )));
-                    }
-                    let date_time_formatter = date_time_formatter(military_time);
-                    let time_formatter = time_formatter(military_time);
-                    if let Some(time) = self.metadata.modified() {
-                        details = details.push(widget::text::body(fl!(
-                            "item-modified",
-                            modified = format_time(time, &date_time_formatter, &time_formatter)
-                                .to_string()
-                        )));
-                    }
-                }
-                _ => (),
-            }
-        }
-
-        match self.metadata {
-            #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath { .. } => {
-                column = column.push(details);
-
-                if self.metadata.is_dir() {
-                    if let Some(_path) = self.path_opt()
-                        && self.selected
-                    {
-                        column = column.push(
-                            widget::button::standard(fl!("open")).on_press(Message::Open(None)),
-                        );
-                    }
-                } else if let Some(Location::Remote(uri, _user, path_opt)) =
-                    self.location_opt.clone()
-                    && self.selected
-                    && path_opt.is_some()
-                {
-                    column = column.push(
-                        widget::button::standard(fl!("download"))
-                            .on_press(Message::Download(Some((path_opt.unwrap(), uri.clone())))),
-                    );
-                }
-            }
-            _ => {
-                if let Some(path) = self.path_opt()
-                    && let Ok(img) = image::image_dimensions(path)
-                {
-                    let (width, height) = img;
-                    details = details.push(widget::text::body(format!("{width}x{height}")));
-                }
-                column = column.push(details);
-
-                if let Some(metadata) = self.file_metadata()
-                    && !metadata.is_dir()
-                    && let Some(path) = self.path_opt()
-                {
-                    let control: Element<'_, Message> = match &self.checksums {
-                        ChecksumState::NotCalculated => widget::button::standard(fl!("calculate"))
-                            .on_press(Message::CalculateChecksums(path.clone()))
-                            .into(),
-                        ChecksumState::Calculating => widget::row::with_capacity(2)
-                            .align_y(Alignment::Center)
-                            .spacing(space_xxxs)
-                            .push(widget::indeterminate_circular().size(16.0))
-                            .push(widget::text::body(fl!("calculating")))
-                            .into(),
-                        ChecksumState::Calculated(checksums) => {
-                            let value = checksums.sha256.clone();
-                            let value_text = widget::tooltip(
-                                widget::text::body(value.clone())
-                                    .font(cosmic::font::mono())
-                                    .width(Length::Fill)
-                                    .wrapping(text::Wrapping::None)
-                                    .ellipsize(text::Ellipsize::Middle(
-                                        text::EllipsizeHeightLimit::Lines(1),
-                                    )),
-                                widget::text::body(value.clone()),
-                                widget::tooltip::Position::Bottom,
-                            );
-                            let copy_button = widget::button::icon(
-                                widget::icon::from_name("edit-copy-symbolic").size(16),
-                            )
-                            .on_press(Message::CopyChecksum(value.clone()))
-                            .tooltip(fl!("copy"));
-                            widget::row::with_capacity(2)
-                                .align_y(Alignment::Center)
-                                .spacing(space_xxxs)
-                                .push(value_text)
-                                .push(copy_button)
-                                .into()
-                        }
-                        ChecksumState::Error(err) => {
-                            widget::text::body(format!("{}: {}", fl!("error"), err)).into()
-                        }
-                    };
-                    settings.push(
-                        widget::settings::item::builder(fl!("checksum", kind = "SHA256"))
-                            .control(control),
-                    );
-                }
-
-                if let Some(path) = self.path_opt()
-                    && self.selected
-                {
-                    column = column.push(
-                        widget::button::standard(fl!("open"))
-                            .on_press(Message::Open(Some(path.clone()))),
-                    );
-                }
-            }
-        }
-
-        if !settings.is_empty() {
-            let mut section = widget::settings::section();
-            section = section.extend(settings);
-            column = column.push(section);
-        }
-
-        column.into()
-    }
-
-    pub fn preview_tbprofiler_json(&self) -> Element<'_, Message> {
-        fn tb_variant_widget(v: &DrVariant) -> Element<'static, Message> {
-            widget::container(
-                widget::column::with_capacity(3)
-                    .push({
-                        let mut drug_col = widget::column::with_capacity(v.drugs.len());
-                        for drug in &v.drugs {
-                            drug_col = drug_col.push(widget::text::body(format!(
-                                "{}: {}",
-                                drug.drug, drug.confidence
-                            )));
-                        }
-                        drug_col
-                    })
-                    .push(widget::text::body(format!(
-                        "{} ({}): {}",
-                        v.gene_name, v.gene_id, v.change
-                    )))
-                    .push({
-                        let mut ecoli_col = widget::column::with_capacity(1);
-                        if let Some(ecoli_value) =
-                            TB_ECOLI_MAPPING.get(&(v.gene_name.clone(), v.change.clone()))
-                        {
-                            ecoli_col = ecoli_col
-                                .push(widget::text::body(format!("E. coli: {}", ecoli_value)));
-                        }
-                        ecoli_col
-                    }),
-            )
-            .into()
-        }
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-        let tbprofilerjson_opt = match &self.metadata {
-            ItemMetadata::Path {
-                tbprofilerjson_opt, ..
-            } => tbprofilerjson_opt.as_ref(),
-            #[cfg(feature = "russh")]
-            ItemMetadata::RusshPath {
-                tbprofilerjson_opt, ..
-            } => tbprofilerjson_opt.as_ref(),
-            _ => None,
-        };
-
-        let dr_variant_count = tbprofilerjson_opt.map_or(0, |json| json.dr_variants.len());
-        let mut column = widget::column::with_capacity(5 + dr_variant_count).spacing(space_m);
-        let mut details = widget::column::with_capacity(1).spacing(space_xxxs);
-        details = details.push(widget::text::heading(self.name.clone()));
-
-        column = column.push(details);
-
-        #[cfg(feature = "russh")]
-        if let ItemMetadata::RusshPath { .. } = &self.metadata
-            && self.metadata.is_dir()
-        {
-            if self.selected {
-                column = column
-                    .push(widget::button::standard(fl!("open")).on_press(Message::Open(None)));
-            }
-            return column.into();
-        }
-
-        if let Some(json) = tbprofilerjson_opt {
-            column = column.push(widget::text::heading(format!(
-                "DB: {} ({})",
-                json.pipeline.db_version.name, json.pipeline.db_version.commit
-            )));
-            let mut dr_variants = json.dr_variants.clone();
-            dr_variants.sort_by_key(|v| v.highest_confidence_rank());
-            for v in &dr_variants {
-                column = column.push(tb_variant_widget(v));
-            }
-        }
-
-        if let ItemMetadata::Path { .. } = &self.metadata
-            && self.metadata.is_tbprofiler_result_as_sample()
-        {
-            for (label, opt_path) in [
-                ("Open .results.csv", self.metadata.csv_path()),
-                ("Open .results.json", self.metadata.json_path()),
-                ("Open .results.docx", self.metadata.docx_path()),
-            ] {
-                if let Some(p) = opt_path {
-                    column = column.push(
-                        widget::button::standard(label)
-                            .on_press(Message::Open(Some(p.to_path_buf()))),
-                    );
-                }
-            }
-        }
-
-        #[cfg(feature = "russh")]
-        if let ItemMetadata::RusshPath { .. } = &self.metadata {
-            if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
-                log::info!(
-                    "item is remote, showing download button: {}",
-                    path.display()
-                );
-                if !self.metadata.is_tbprofiler_result_as_sample() {
-                    column = column.push(
-                        widget::button::standard(fl!("download"))
-                            .on_press(Message::Download(Some((path.clone(), uri.clone())))),
-                    );
-                }
-            }
-            if let Some(Location::Remote(uri, _, _)) = &self.location_opt
-                && self.metadata.is_tbprofiler_result_as_sample()
-            {
-                for (label, opt_path) in [
-                    ("Download .results.csv", self.metadata.csv_path()),
-                    ("Download .results.json", self.metadata.json_path()),
-                    ("Download .results.docx", self.metadata.docx_path()),
-                ] {
-                    if let Some(p) = opt_path {
-                        column = column.push(
-                            widget::button::standard(label)
-                                .on_press(Message::Download(Some((p.to_path_buf(), uri.clone())))),
-                        );
-                    }
-                }
-            }
-        }
-
-        column.into()
-    }
-
-    pub fn preview_erm41(&self) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-        let erm41_snp_tag_count = hits.first().map_or(0, |best| {
-            best.erm41_snp_calls
-                .iter()
-                .filter(|s| !s.call_tag().is_empty())
-                .count()
-        });
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details =
-            widget::column::with_capacity(22 + erm41_snp_tag_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43622-erm(41)-Endpunkt-PCR"));
-
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to references.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Percent identity to erm(41) references of abscessus subspecies:",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{}: {:.1}%", hit.description, hit.identity,))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-            if self.metadata.is_abscessus_seq_id() || self.metadata.is_bolletii_seq_id() {
-                let call = self.metadata.erm41position28_call();
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::heading(format!("erm(41) {}", call)));
-            }
-
-            details = details.push(widget::text::body(""));
-            {
-                let snp_tags: Vec<String> = best
-                    .erm41_snp_calls
-                    .iter()
-                    .map(|s| s.call_tag())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                details = details.push(widget::text::body("erm(41) loss-of-function SNPs:"));
-                if snp_tags.is_empty() {
-                    details = details.push(widget::text::body("No erm(41) SNPs found."));
-                } else {
-                    details = details.push(widget::text::body(format!(
-                        "(Using commit: {} of ntm-db repository)",
-                        env!("NTM_DB_COMMIT")
-                    )));
-                    for tag in snp_tags {
-                        details = details.push(widget::text::body(tag));
-                    }
-                }
-            }
-
-            if let Some(chrom) = self
-                .metadata
-                .ab1_chromatogram()
-                .filter(|c| c.erm41_view_state_opt.is_some())
-                && !self.metadata.is_massiliense_seq_id()
-            {
-                let view_state = chrom.erm41_view_state_opt.unwrap();
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "Shown are bases 19-39, with position 28 in bold.",
-                ));
-                if view_state.is_reverse {
-                    details = details.push(widget::text::body("reverse complement"));
-                }
-                details = details.push(widget::text::body(""));
-                let canvas = widget::Canvas::new(ChromatogramProgram {
-                    is_reverse: view_state.is_reverse,
-                    display_window: Some(view_state.window),
-                    highlighted_scans: chrom
-                        .peak_locs
-                        .get(view_state.pos28_base_idx as usize)
-                        .copied()
-                        .map(|v| vec![v])
-                        .unwrap_or_default(),
-                    chrom,
-                })
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0));
-                details = details.push(canvas);
-                details = details.push(widget::text::body(""));
-            } else {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "erm(41) chromatogram view is not available.",
-                ));
-                details = details.push(widget::text::body(""));
-            }
-            match self
-                .metadata
-                .susceptibility_calls()
-                .erm41
-                .position_28
-                .and_then(|p| p.is_susceptible())
-            {
-                Some(true) => {
-                    details = details.push(widget::text::heading(
-                        "Predicted to be susceptible to macrolides.",
-                    ))
-                }
-                Some(false) => {
-                    details = details.push(widget::text::heading(
-                        "Predicted inducible macrolide resistance.",
-                    ))
-                }
-                None => {}
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn preview_hsp65(&self, items: &[Item]) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-        let (kansasii_gastri_n, marinum_ulcerans_n) = hits.first().map_or((0, 0), |best| {
-            (
-                best.kansasii_gastri_snp_calls.len(),
-                best.marinum_ulcerans_snp_calls.len(),
-            )
-        });
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details =
-            widget::column::with_capacity(18 + kansasii_gastri_n + marinum_ulcerans_n)
-                .spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43505-2-Mykobakterien NTM 65kDa"));
-
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to references.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
-
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (hsp65 database):",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-
-            details = details.push(widget::text::body(""));
-            if best.is_kansasii() || best.is_gastri() {
-                let gastri_n = best
-                    .kansasii_gastri_snp_calls
-                    .iter()
-                    .filter(|c| c.is_gastri())
-                    .count();
-                let kansasii_n = best
-                    .kansasii_gastri_snp_calls
-                    .iter()
-                    .filter(|c| c.is_kansasii())
-                    .count();
-                let total = best.kansasii_gastri_snp_calls.len();
-                let species_call = best
-                    .kansasii_gastri_snp_species_call()
-                    .unwrap_or("Ambiguous");
-                details = details.push(widget::text::body("hsp65 kansasii/gastri SNP call:"));
-                details = details.push(widget::text::body(format!(
-                    "{} (M. gastri {}/{}, M. kansasii {}/{})",
-                    species_call, gastri_n, total, kansasii_n, total,
-                )));
-                for snp in &best.kansasii_gastri_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "  pos {}: {} = {}",
-                        snp.ref_pos + 1,
-                        snp.query_base as char,
-                        snp.species_tag(),
-                    )));
-                }
-                details = details.push(widget::text::body(""));
-            }
-            if best.is_marinum() || best.is_ulcerans() {
-                let ulcerans_n = best
-                    .marinum_ulcerans_snp_calls
-                    .iter()
-                    .filter(|c| c.is_ulcerans())
-                    .count();
-                let marinum_n = best
-                    .marinum_ulcerans_snp_calls
-                    .iter()
-                    .filter(|c| c.is_marinum())
-                    .count();
-                let total = best.marinum_ulcerans_snp_calls.len();
-                let species_call = best
-                    .marinum_ulcerans_snp_species_call()
-                    .unwrap_or("Ambiguous");
-                details = details.push(widget::text::body("hsp65 marinum/ulcerans SNP call:"));
-                details = details.push(widget::text::body(format!(
-                    "{} (M. ulcerans {}/{}, M. marinum {}/{})",
-                    species_call, ulcerans_n, total, marinum_n, total,
-                )));
-                for snp in &best.marinum_ulcerans_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "  pos {}: {} = {}",
-                        snp.ref_pos + 1,
-                        snp.query_base as char,
-                        snp.species_tag(),
-                    )));
-                }
-                details = details.push(widget::text::body(""));
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn preview_rpob_ntm(&self, items: &[Item]) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(15).spacing(space_xxxs);
-        details = details.push(widget::text::heading(
-            "32.43504-3-Mykobakterien NTM rpob-seq",
-        ));
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to references.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
-
-            match self.species_from_rpob_hits() {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("rpoB: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "rpoB: No species identified from rpoB hits.",
-                    ));
-                }
-            }
-
-            if self.is_chelonae(items) {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::heading(
-                    "16S and rpoB: Mycobacteroides chelonae",
-                ));
-            }
-
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (rpoB database):",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn preview_16s(&self) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-        // for the winning species, since SNP positions are anchored to the gene start
-        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
-        let best_snp_hit = hits.first().and_then(|best| {
-            hits.iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
-        });
-        let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls.len());
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(19 + rrs_snp_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43501-1-Mtb-NTM Kulturen-LC"));
-
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to references.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-
-            match crate::sequencing::batch::species_from_16s_hits(&hits) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
-
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (16S database):",
-            ));
-            for hit in &hits[..hits.len().min(8)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-            if let Some(snp_hit) = best_snp_hit {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "16S rRNA amikacin resistance SNPs (rrs):",
-                ));
-                details = details.push(widget::text::body(format!(
-                    "(Using commit: {} of ntm-db repository)",
-                    env!("NTM_DB_COMMIT")
-                )));
-                for snp in &snp_hit.rrs_snp_calls {
-                    details = details.push(widget::text::body(snp.call_tag().to_string()));
-                }
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn preview_16s3end(&self, items: &[Item]) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-        // for the winning species, since SNP positions are anchored to the gene start
-        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
-        let best_snp_hit = hits.first().and_then(|best| {
-            hits.iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls_3end.is_empty())
-        });
-        let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls_3end.len());
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(29 + rrs_snp_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43506-1-16SEnd"));
-
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to references.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
-
-            if self.is_marinum(items) {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::heading(
-                    "16S and 16S 3'-End: Mycobacterium marinum",
-                ));
-            }
-            if self.is_ulcerans(items) {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::heading(
-                    "16S and 16S 3'-End: Mycobacterium ulcerans",
-                ));
-            }
-
-            if let Some(snp_hit) = best_snp_hit {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "16S rRNA amikacin resistance SNPs (rrs):",
-                ));
-                details = details.push(widget::text::body(format!(
-                    "(Using commit: {} of ntm-db repository)",
-                    env!("NTM_DB_COMMIT")
-                )));
-                for snp in &snp_hit.rrs_snp_calls_3end {
-                    details = details.push(widget::text::body(snp.call_tag().to_string()));
-                }
-            }
-            if let Some(chrom) = self
-                .metadata
-                .ab1_chromatogram()
-                .filter(|c| c.rrs3end_view_state_opt.is_some())
-                && !self.metadata.is_massiliense_seq_id()
-            {
-                let view_state = chrom.rrs3end_view_state_opt.unwrap();
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "Shown are bases 19-39, with E. coli position 1248 in bold.",
-                ));
-                if view_state.is_reverse {
-                    details = details.push(widget::text::body("reverse complement"));
-                }
-                details = details.push(widget::text::body(""));
-                let canvas = widget::Canvas::new(ChromatogramProgram {
-                    is_reverse: view_state.is_reverse,
-                    display_window: Some(view_state.window),
-                    highlighted_scans: chrom
-                        .peak_locs
-                        .get(view_state.pos28_base_idx as usize)
-                        .copied()
-                        .map(|v| vec![v])
-                        .unwrap_or_default(),
-                    chrom,
-                })
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0));
-                details = details.push(canvas);
-                details = details.push(widget::text::body(""));
-            } else {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "16S 3-End chromatogram view is not available.",
-                ));
-                details = details.push(widget::text::body(""));
-            }
-
-            match self.metadata.rrs3endposition_call() {
-                Rrs3EndPosition1248::A1248 => {
-                    details = details.push(widget::text::heading(
-                        "16S 3'-End position 1248 = A:  M. marinum",
-                    ))
-                }
-                Rrs3EndPosition1248::G1248 => {
-                    details = details.push(widget::text::heading(
-                        "16S 3'-End position 1248 = G:  M. ulcerans",
-                    ))
-                }
-                Rrs3EndPosition1248::C1248 => {
-                    details = details.push(widget::text::heading("16S 3'-End position 1248 = C"))
-                }
-                Rrs3EndPosition1248::T1248 => {
-                    details = details.push(widget::text::heading("16S 3'-End position 1248 = T"))
-                }
-                Rrs3EndPosition1248::Undetermined => {
-                    details = details.push(widget::text::heading(
-                        "16S 3'-End position 1248 = undetermined",
-                    ))
-                }
-            }
-
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification only using 16S 3'-End sequencing:",
-            ));
-            for hit in &hits[..hits.len().min(8)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn preview_rrl_ntm(&self, items: &[Item]) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-        // for the winning species, since SNP positions are anchored to the gene start
-        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
-        let best_snp_hit = hits.first().and_then(|best| {
-            hits.iter()
-                .find(|h| h.description == best.description && !h.rrl_snp_calls.is_empty())
-        });
-        let rrl_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrl_snp_calls.len());
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(21 + rrl_snp_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading(
-            "32.43605-1-PCR - NTM 23S CLR-Sequenzierung",
-        ));
-
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to references.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
-
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (rrl database):",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-            details = details.push(widget::text::body(""));
-            if let Some(snp_hit) = best_snp_hit {
-                details = details.push(widget::text::body(
-                    "23S rRNA macrolide resistance SNPs (rrl):",
-                ));
-                details = details.push(widget::text::body(format!(
-                    "(Using commit: {} of ntm-db repository)",
-                    env!("NTM_DB_COMMIT")
-                )));
-                for snp in &snp_hit.rrl_snp_calls {
-                    details = details.push(widget::text::body(snp.call_tag().to_string()));
-                }
-            }
-            if let Some(chrom) = self
-                .metadata
-                .ab1_chromatogram()
-                .filter(|c| c.rrl_ntm_view_state_opt.is_some())
-            {
-                let view_state = chrom.rrl_ntm_view_state_opt.unwrap();
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "Shown in bold are bases coresponding to E. coli positions 2058/2059",
-                ));
-                if view_state.is_reverse {
-                    details = details.push(widget::text::body("reverse complement"));
-                }
-                details = details.push(widget::text::body(""));
-                let canvas = widget::Canvas::new(ChromatogramProgram {
-                    is_reverse: view_state.is_reverse,
-                    display_window: Some(view_state.window),
-                    highlighted_scans: {
-                        let idx = view_state.snp_base_idx as usize;
-                        [idx, idx + 1]
-                            .iter()
-                            .filter_map(|&i| chrom.peak_locs.get(i).copied())
-                            .collect()
-                    },
-                    chrom,
-                })
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0));
-                details = details.push(canvas);
-                details = details.push(widget::text::body(""));
-            } else {
-                details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "rrl chromatogram view is not available.",
-                ));
-                details = details.push(widget::text::body(""));
-            }
-            match self
-                .metadata
-                .susceptibility_calls()
-                .rrl
-                .position_2058_2059
-                .and_then(|p| p.is_susceptible())
-            {
-                Some(true) => {
-                    details = details.push(widget::text::heading(
-                        "E. coli positions A2058 and A2059 are wt (macrolide susceptible).",
-                    ))
-                }
-                Some(false) => {
-                    details = details.push(widget::text::heading(
-                        "Mutation in E. coli A2058 and/or A2059. Predicted macrolide resistance.",
-                    ))
-                }
-                None => {}
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn preview_pnca(&self) -> Element<'_, Message> {
-        let cosmic_theme::Spacing {
-            space_xxxs,
-            space_m,
-            ..
-        } = theme::active().cosmic().spacing;
-
-        let hits = self.seq_id_hits_cached();
-        let pnca_called_count = self
-            .metadata
-            .susceptibility_calls()
-            .pnca
-            .snp_calls
-            .iter()
-            .filter(|c| !c.call_tag().is_empty())
-            .count()
-            .max(1);
-
-        let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(9 + pnca_called_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43616-2-MtbKomplex-pncA-Seq"));
-
-        if hits.is_empty()
-            || self
-                .metadata
-                .sequence_length_trimmed()
-                .is_some_and(|n| n < 100)
-            || hits
-                .first()
-                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
-        {
-            details = details.push(widget::text::body(
-                "Could not align sequence to the pncA reference.",
-            ));
-            if let Some(sequence_length) = self.metadata.sequence_length() {
-                details = details.push(widget::text::body(format!(
-                    "Sequence length: {}",
-                    sequence_length
-                )));
-            }
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-        } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
-            if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Trimmed sequence length: {}",
-                    sequence_length_trimmed
-                )));
-            }
-            if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
-                details = details.push(widget::text::body(format!(
-                    "Average quality score: {:.1}",
-                    avg_qual
-                )));
-            }
-            details = details.push(
-                widget::button::link(format!("View alignment ({:.1}%)", best.identity))
-                    .on_press(Message::OpenSeqAlignment(Box::new(best.clone())))
-                    .padding(0),
-            );
-
-            let pnca = &self.metadata.susceptibility_calls().pnca;
-            let called: Vec<_> = pnca
-                .snp_calls
-                .iter()
-                .filter(|c| !c.call_tag().is_empty())
-                .collect();
-            details = details.push(widget::text::body(""));
-            details = details.push(widget::text::heading("Pyrazinamide resistance calls"));
-            details = details.push(widget::text::body("(pncA, WHO mutation catalogue):"));
-            if called.is_empty() {
-                details = details.push(widget::text::body("No catalogued sites covered."));
-            } else {
-                for snp in &called {
-                    details = details.push(widget::text::body(format!(
-                        "    {}: {}",
-                        snp.site_label(),
-                        snp.call_tag()
-                    )));
-                }
-            }
-            match pnca.is_susceptible {
-                Some(true) => {
-                    details = details.push(widget::text::heading(
-                        "No pncA mutation at or above WHO-catalogue resistance confidence. Predicted pyrazinamide susceptible.",
-                    ))
-                }
-                Some(false) => {
-                    details = details.push(widget::text::heading(
-                        "pncA mutation meets WHO-catalogue resistance confidence. Predicted pyrazinamide resistance.",
-                    ))
-                }
-                None => {}
-            }
-        }
-
-        column = column.push(details);
-        column.into()
-    }
-
-    pub fn replace_view(&self, heading: String, military_time: bool) -> Element<'_, Message> {
-        let cosmic_theme::Spacing { space_xxxs, .. } = theme::spacing();
-
-        let mut row = widget::row::with_capacity(2).spacing(space_xxxs);
-        row = row.push(self.preview());
-
-        let mut column = widget::column::with_capacity(3).spacing(space_xxxs);
-        column = column.push(widget::text::heading(heading));
-
-        //TODO: translate!
-        //TODO: correct display of folder size?
-        if let ItemMetadata::Path {
-            metadata,
-            children_opt,
-            ..
-        } = &self.metadata
-        {
-            if metadata.is_dir() {
-                if let Some(children) = children_opt {
-                    column = column.push(widget::text::body(format!("Items: {children}")));
-                }
-            } else {
-                column = column.push(widget::text::body(format!(
-                    "Size: {}",
-                    format_size(metadata.len())
-                )));
-            }
-            if let Ok(time) = metadata.modified() {
-                let date_time_formatter = date_time_formatter(military_time);
-                let time_formatter = time_formatter(military_time);
-
-                column = column.push(widget::text::body(format!(
-                    "Last modified: {}",
-                    format_time(time, &date_time_formatter, &time_formatter)
-                )));
-            }
-        } else {
-            //TODO: other metadata
-        }
-
-        row = row.push(column);
-        row.into()
-    }
-}
-
-/// Canvas program that renders an AB1 Sanger chromatogram.
-///
-/// Draws the four channel intensity curves in standard colors:
-/// A = green, C = blue, G = black, T = red.
-/// Base call letters are drawn at their peak scan positions along the top.
-struct ChromatogramProgram<'a> {
-    chrom: &'a crate::sequencing::Ab1Channels,
-    is_reverse: bool,
-    display_window: Option<(u16, u16)>,
-    highlighted_scans: Vec<u16>,
-}
-
-impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
-    for ChromatogramProgram<'a>
-{
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &cosmic::Renderer,
-        _theme: &cosmic::Theme,
-        bounds: Rectangle,
-        _cursor: cosmic::iced::mouse::Cursor,
-    ) -> Vec<widget::canvas::Geometry<cosmic::Renderer>> {
-        use cosmic::iced::alignment;
-        use widget::canvas::{Frame, Path, Stroke};
-
-        let chrom = self.chrom;
-        let is_rev = self.is_reverse;
-
-        // Standard Sanger palette: colour by the base the dye represents.
-        // For a reverse read the channel physically contains the complement base,
-        // so we complement the channel's base before looking up the colour â€”
-        // that way the displayed colour always matches the plus-strand base.
-        let dna_complement = |b: u8| -> u8 {
-            match b.to_ascii_uppercase() {
-                b'A' => b'T',
-                b'T' => b'A',
-                b'C' => b'G',
-                b'G' => b'C',
-                _ => b'N',
-            }
-        };
-        let base_color = |base: u8| -> Color {
-            match base.to_ascii_uppercase() {
-                b'A' => Color::from_rgb(0.0, 0.7, 0.0),
-                b'C' => Color::from_rgb(0.0, 0.0, 1.0),
-                b'G' => Color::from_rgb(0.8, 0.55, 0.0),
-                b'T' => Color::from_rgb(1.0, 0.0, 0.0),
-                _ => Color::from_rgb(0.5, 0.5, 0.5),
-            }
-        };
-
-        // Restrict to the display window.
-        // Fall back to the full scan range if the anchor was not found.
-        let total_scans: u16 = chrom
-            .channels
-            .iter()
-            .map(|c| c.len() as u16)
-            .max()
-            .unwrap_or(1);
-        if total_scans == 0 {
-            return vec![];
-        }
-        let (scan_start, scan_end) = self
-            .display_window
-            .unwrap_or((0, total_scans.saturating_sub(1)));
-        let scan_end = scan_end.min(total_scans.saturating_sub(1));
-        let window_len = (scan_end + 1).saturating_sub(scan_start).max(1);
-
-        // Y range: only over the visible window for better contrast
-        let mut y_min = i16::MAX;
-        let mut y_max = i16::MIN;
-        for channel in &chrom.channels {
-            for &v in &channel
-                [(scan_start as usize).min(channel.len())..(scan_end as usize).min(channel.len())]
-            {
-                if v < y_min {
-                    y_min = v;
-                }
-                if v > y_max {
-                    y_max = v;
-                }
-            }
-        }
-        if y_min == i16::MAX {
-            y_min = 0;
-            y_max = 1;
-        }
-        if y_max == y_min {
-            y_max = y_min + 1;
-        }
-        let y_range = (y_max - y_min) as f32;
-
-        // Leave a small margin at the top for base letters
-        let top_margin = 18.0_f32;
-        let plot_h = (bounds.height - top_margin).max(1.0);
-        let plot_w = bounds.width;
-
-        // Map scan index to canvas x.
-        // For reverse reads we flip the x-axis so the plus-strand 5â€²â†’3â€² direction
-        // always runs left to right, identical to a forward read.
-        let scan_to_x = |scan: usize| -> f32 {
-            let t = (scan.saturating_sub(scan_start as usize)) as f32
-                / ((window_len as usize) - 1).max(1) as f32;
-            if is_rev {
-                (1.0 - t) * plot_w
-            } else {
-                t * plot_w
-            }
-        };
-        let intensity_to_y =
-            |v: i16| -> f32 { top_margin + (1.0 - (v - y_min) as f32 / y_range) * plot_h };
-
-        let mut frame = Frame::new(renderer, bounds.size());
-
-        // Draw each channel, restricted to [scan_start, scan_end].
-        // For reverse reads the channel base is the complement of the plus-strand base,
-        // so we complement it before resolving the display colour.
-        for (ch_idx, channel) in chrom.channels.iter().enumerate() {
-            if channel.is_empty() {
-                continue;
-            }
-            let raw_base = chrom.base_order[ch_idx];
-            let display_base = if is_rev {
-                dna_complement(raw_base)
-            } else {
-                raw_base
-            };
-            let color = base_color(display_base);
-
-            let slice_end = (scan_end + 1).min(channel.len() as u16);
-            let slice_start = scan_start.min(slice_end);
-            if slice_start >= slice_end {
-                continue;
-            }
-            let window_slice = &channel[slice_start as usize..slice_end as usize];
-
-            let path = Path::new(|builder| {
-                builder.move_to(Point {
-                    x: scan_to_x(slice_start as usize),
-                    y: intensity_to_y(window_slice[0]),
-                });
-                for (i, &v) in window_slice.iter().enumerate().skip(1) {
-                    builder.line_to(Point {
-                        x: scan_to_x(slice_start as usize + i),
-                        y: intensity_to_y(v),
-                    });
-                }
-            });
-
-            frame.stroke(&path, Stroke::default().with_color(color).with_width(1.2));
-        }
-
-        // Draw base call letters only for bases whose peak falls in the window.
-        // For reverse reads show the complement letter so the label matches the
-        // plus-strand base at each position.
-        // Highlighted scan positions are drawn in bold.
-        for (base, &peak) in chrom.bases.iter().zip(chrom.peak_locs.iter()) {
-            let scan = peak;
-            if scan < scan_start || scan > scan_end {
-                continue;
-            }
-            let display_base = if is_rev { dna_complement(*base) } else { *base };
-            let x = scan_to_x(scan as usize);
-            let color = base_color(display_base);
-            let is_highlighted = self.highlighted_scans.contains(&scan);
-            frame.fill_text(widget::canvas::Text {
-                content: String::from(display_base as char),
-                position: Point { x, y: 2.0 },
-                max_width: f32::INFINITY,
-                color,
-                size: cosmic::iced::Pixels(if is_highlighted { 20.0 } else { 11.0 }),
-                line_height: cosmic::iced::advanced::text::LineHeight::default(),
-                font: cosmic::iced::Font::default(),
-                align_x: cosmic::iced::advanced::text::Alignment::Center,
-                align_y: alignment::Vertical::Top,
-                shaping: cosmic::iced::advanced::text::Shaping::Basic,
-            });
-        }
-
-        vec![frame.into_geometry()]
     }
 }
 
@@ -5201,52 +625,15 @@ async fn calculate_checksums(path: &Path) -> Result<FileChecksums, String> {
         }
 
         Ok(FileChecksums {
-            sha256: format!("{:x}", sha256_hasher.finalize()),
+            sha256: sha256_hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect(),
         })
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-fn folder_name<P: AsRef<Path>>(path: P) -> (String, bool) {
-    let path = path.as_ref();
-    let mut found_home = false;
-    let name = match path.file_name() {
-        Some(name) => {
-            if path == crate::home_dir() {
-                found_home = true;
-                fl!("home")
-            } else {
-                match (get_filename_from_path(path), fs::metadata(path)) {
-                    (Ok(name), Ok(metadata)) => {
-                        let is_gvfs = fs_kind(&metadata) == FsKind::Gvfs;
-                        display_name_for_file(path, &name, is_gvfs, false)
-                    }
-                    _ => name.to_string_lossy().into_owned(),
-                }
-            }
-        }
-        None => {
-            fl!("filesystem")
-        }
-    };
-    (name, found_home)
-}
-
-// parse .hidden file and return files path
-pub fn parse_hidden_file(path: &PathBuf) -> Box<[String]> {
-    let Ok(file) = File::open(path) else {
-        return Default::default();
-    };
-
-    BufReader::new(file)
-        .lines()
-        .map_while(Result::ok)
-        .filter_map(|line| {
-            let line = line.trim();
-            (!line.is_empty()).then_some(line.to_owned())
-        })
-        .collect()
 }
 
 impl Tab {
@@ -5324,15 +711,15 @@ impl Tab {
         let highlighted = self
             .items_opt
             .as_ref()
-            .and_then(|items| items.iter().enumerate().find(|i| i.1.highlighted))
+            .and_then(|items| items.iter().enumerate().find(|i| i.1.state.highlighted))
             .map(|(i, _)| i);
         let selected = self.selected_locations();
         for item in &mut items {
-            item.selected = false;
+            item.state.selected = false;
             if let Some(location) = &item.location_opt
                 && selected.contains(location)
             {
-                item.selected = true;
+                item.state.selected = true;
             }
         }
         self.items_opt = Some(items);
@@ -5340,14 +727,14 @@ impl Tab {
             .zip(self.items_opt.as_mut())
             .and_then(|(h, items)| items.get_mut(h))
         {
-            i.highlighted = true;
+            i.state.highlighted = true;
         }
     }
 
     pub fn cut_selected(&mut self) {
         if let Some(ref mut items) = self.items_opt {
             for item in items.iter_mut() {
-                item.cut = item.selected;
+                item.state.cut = item.state.selected;
             }
         }
     }
@@ -5355,11 +742,11 @@ impl Tab {
     pub fn refresh_cut(&mut self, locations: &[PathBuf]) {
         if let Some(ref mut items) = self.items_opt {
             for item in items.iter_mut() {
-                item.cut = false;
+                item.state.cut = false;
                 if let Some(location_path) = item.location_opt.as_ref().and_then(Location::path_opt)
                     && locations.contains(location_path)
                 {
-                    item.cut = true;
+                    item.state.cut = true;
                 }
             }
         }
@@ -5370,7 +757,7 @@ impl Tab {
             items
                 .iter()
                 .filter_map(|item| {
-                    if item.selected {
+                    if item.state.selected {
                         item.location_opt.clone()
                     } else {
                         None
@@ -5390,7 +777,7 @@ impl Tab {
         };
         items
             .iter()
-            .filter(|item| item.selected)
+            .filter(|item| item.state.selected)
             .flat_map(|item| {
                 if item.metadata.is_tbprofiler_result_as_sample() {
                     let mut paths = Vec::new();
@@ -5419,10 +806,10 @@ impl Tab {
         if let Some(ref mut items) = self.items_opt {
             for item in items.iter_mut() {
                 if !self.config.show_hidden && item.hidden {
-                    item.selected = false;
+                    item.state.selected = false;
                     continue;
                 }
-                item.selected = true;
+                item.state.selected = true;
             }
         }
     }
@@ -5432,8 +819,8 @@ impl Tab {
         let mut had_selection = false;
         if let Some(ref mut items) = self.items_opt {
             for item in items.iter_mut() {
-                if item.selected {
-                    item.selected = false;
+                if item.state.selected {
+                    item.state.selected = false;
                     had_selection = true;
                 }
             }
@@ -5445,8 +832,8 @@ impl Tab {
         self.select_focus = None;
         if let Some(ref mut items) = self.items_opt {
             for (i, item) in items.iter_mut().enumerate() {
-                item.selected = item.name == name;
-                if item.selected {
+                item.state.selected = item.name == name;
+                if item.state.selected {
                     self.select_focus = Some(i);
                 }
             }
@@ -5462,7 +849,7 @@ impl Tab {
         if let Some(ref mut items) = self.items_opt {
             // First, deselect all items
             for item in items.iter_mut() {
-                item.selected = false;
+                item.state.selected = false;
             }
 
             // Determine the start index of the search. When the index is before the currently focused item, it will be
@@ -5556,7 +943,7 @@ impl Tab {
     ) -> Option<usize> {
         for (i, item) in items {
             if item.name.to_lowercase().starts_with(prefix) {
-                item.selected = true;
+                item.state.selected = true;
                 return Some(i);
             }
         }
@@ -5567,11 +954,11 @@ impl Tab {
         self.select_focus = None;
         if let Some(ref mut items) = self.items_opt {
             for (i, item) in items.iter_mut().enumerate() {
-                item.selected = false;
+                item.state.selected = false;
                 if let Some(path) = item.path_opt()
                     && paths.contains(path)
                 {
-                    item.selected = true;
+                    item.state.selected = true;
                     self.select_focus = Some(i);
                 }
             }
@@ -5599,8 +986,8 @@ impl Tab {
         let mut found = false;
         if let Some(ref mut items) = self.items_opt {
             for (i, item) in items.iter_mut().enumerate() {
-                item.selected = false;
-                let pos = match item.pos_opt.get() {
+                item.state.selected = false;
+                let pos = match item.state.pos_opt.get() {
                     Some(some) => some,
                     None => continue,
                 };
@@ -5622,7 +1009,7 @@ impl Tab {
                     };
                     found = true;
                 }
-                item.selected = true;
+                item.state.selected = true;
             }
         }
         found
@@ -5631,17 +1018,21 @@ impl Tab {
     pub fn select_rect(&mut self, rect: Rectangle, mod_ctrl: bool, mod_shift: bool) {
         if let Some(ref mut items) = self.items_opt {
             for item in items.iter_mut() {
-                let was_overlapped = item.overlaps_drag_rect;
-                item.overlaps_drag_rect = item.rect_opt.get().is_some_and(|r| r.intersects(&rect));
+                let was_overlapped = item.state.overlaps_drag_rect;
+                item.state.overlaps_drag_rect = item
+                    .state
+                    .rect_opt
+                    .get()
+                    .is_some_and(|r| r.intersects(&rect));
 
-                item.selected = if mod_ctrl || mod_shift {
-                    if was_overlapped == item.overlaps_drag_rect {
-                        item.selected
+                item.state.selected = if mod_ctrl || mod_shift {
+                    if was_overlapped == item.state.overlaps_drag_rect {
+                        item.state.selected
                     } else {
-                        !item.selected
+                        !item.state.selected
                     }
                 } else {
-                    item.overlaps_drag_rect
+                    item.state.overlaps_drag_rect
                 };
             }
         }
@@ -5650,19 +1041,19 @@ impl Tab {
     pub fn select_focus_id(&self) -> Option<widget::Id> {
         let items = self.items_opt.as_ref()?;
         let item = items.get(self.select_focus?)?;
-        Some(item.button_id.clone())
+        Some(item.state.button_id.clone())
     }
 
     fn select_focus_pos_opt(&self) -> Option<(usize, usize)> {
         let items = self.items_opt.as_ref()?;
         let item = items.get(self.select_focus?)?;
-        item.pos_opt.get()
+        item.state.pos_opt.get()
     }
 
     fn dehighlight_all(&mut self) {
         if let Some(items) = self.items_opt.as_mut() {
             for item in items.iter_mut() {
-                item.highlighted = false;
+                item.state.highlighted = false;
             }
         }
     }
@@ -5670,7 +1061,7 @@ impl Tab {
     pub(crate) fn select_focus_scroll(&mut self) -> Option<AbsoluteOffset> {
         let items = self.items_opt.as_ref()?;
         let item = items.get(self.select_focus?)?;
-        let rect = item.rect_opt.get()?;
+        let rect = item.state.rect_opt.get()?;
 
         //TODO: move to function
         let visible_rect = {
@@ -5707,7 +1098,7 @@ impl Tab {
         let row_height = self
             .select_focus
             .and_then(|i| self.items_opt.as_ref()?.get(i))
-            .and_then(|item| item.rect_opt.get())
+            .and_then(|item| item.state.rect_opt.get())
             .map_or(0.0, |r| r.height);
         if row_height > 0.0 && viewport_height > 0.0 {
             (viewport_height / row_height).floor() as usize
@@ -5719,18 +1110,18 @@ impl Tab {
     fn select_range_start_pos_opt(&self) -> Option<(usize, usize)> {
         let items = self.items_opt.as_ref()?;
         let item = items.get(self.select_range.map(|r| r.0)?)?;
-        item.pos_opt.get()
+        item.state.pos_opt.get()
     }
 
     fn select_first_pos_opt(&self) -> Option<(usize, usize)> {
         let items = self.items_opt.as_ref()?;
         let mut first = None;
         for item in items {
-            if !item.selected {
+            if !item.state.selected {
                 continue;
             }
 
-            let (row, col) = match item.pos_opt.get() {
+            let (row, col) = match item.state.pos_opt.get() {
                 Some(some) => some,
                 None => continue,
             };
@@ -5751,11 +1142,11 @@ impl Tab {
         let items = self.items_opt.as_ref()?;
         let mut last = None;
         for item in items {
-            if !item.selected {
+            if !item.state.selected {
                 continue;
             }
 
-            let (row, col) = match item.pos_opt.get() {
+            let (row, col) = match item.state.pos_opt.get() {
                 Some(some) => some,
                 None => continue,
             };
@@ -5939,12 +1330,12 @@ impl Tab {
                 {
                     for (i, item) in items.iter_mut().enumerate() {
                         if mod_ctrl {
-                            if Some(i) == click_i_opt && item.selected {
-                                item.selected = false;
+                            if Some(i) == click_i_opt && item.state.selected {
+                                item.state.selected = false;
                                 self.select_range = None;
                             }
                         } else if Some(i) != click_i_opt {
-                            item.selected = false;
+                            item.state.selected = false;
                         }
                     }
                 }
@@ -6041,10 +1432,10 @@ impl Tab {
                                     if let Some(item) = items.get_mut(index) {
                                         if item.hidden {
                                             if self.config.show_hidden {
-                                                item.selected = true;
+                                                item.state.selected = true;
                                             }
                                         } else {
-                                            item.selected = true;
+                                            item.state.selected = true;
                                         }
                                     }
                                 }
@@ -6058,7 +1449,7 @@ impl Tab {
                     let dont_unset = mod_ctrl
                         || self.column_sort().is_some_and(|l| {
                             l.iter()
-                                .any(|&(e_i, e)| Some(e_i) == click_i_opt && e.selected)
+                                .any(|&(e_i, e)| Some(e_i) == click_i_opt && e.state.selected)
                         });
                     if let Some(ref mut items) = self.items_opt {
                         for (i, item) in items.iter_mut().enumerate() {
@@ -6075,16 +1466,16 @@ impl Tab {
                                         }
                                     }
                                 }
-                                if !item.selected {
+                                if !item.state.selected {
                                     self.clicked = click_i_opt;
-                                    item.selected = true;
+                                    item.state.selected = true;
                                 }
                                 self.select_range = Some((i, i));
                                 self.select_focus = click_i_opt;
                                 self.selected_clicked = true;
-                            } else if !dont_unset && item.selected {
+                            } else if !dont_unset && item.state.selected {
                                 self.clicked = click_i_opt;
-                                item.selected = false;
+                                item.state.selected = false;
                             }
                         }
                     }
@@ -6112,7 +1503,7 @@ impl Tab {
                 // Unhighlight all items when config changes
                 if let Some(ref mut items) = self.items_opt {
                     for item in items.iter_mut() {
-                        item.highlighted = false;
+                        item.state.highlighted = false;
                     }
                 }
             }
@@ -6130,7 +1521,7 @@ impl Tab {
                     && let Some(ref mut items) = self.items_opt
                 {
                     for item in items.iter_mut() {
-                        item.selected = false;
+                        item.state.selected = false;
                     }
                 }
             }
@@ -6300,11 +1691,14 @@ impl Tab {
                 match path.map_or_else(
                     || {
                         let items = self.items_opt.as_deref()?;
-                        items.iter().find(|&item| item.selected).and_then(|item| {
-                            let location = item.location_opt.as_ref()?;
-                            let path = location.path_opt()?;
-                            cosmic::desktop::load_desktop_file(&[language.into()], path.into())
-                        })
+                        items
+                            .iter()
+                            .find(|&item| item.state.selected)
+                            .and_then(|item| {
+                                let location = item.location_opt.as_ref()?;
+                                let path = location.path_opt()?;
+                                cosmic::desktop::load_desktop_file(&[language.into()], path.into())
+                            })
                     },
                     |path| cosmic::desktop::load_desktop_file(&[language.into()], path),
                 ) {
@@ -6335,7 +1729,7 @@ impl Tab {
                             continue;
                         }
                         if found && item.can_gallery() {
-                            pos_opt = item.pos_opt.get();
+                            pos_opt = item.state.pos_opt.get();
                             if pos_opt.is_some() {
                                 break;
                             }
@@ -6367,7 +1761,7 @@ impl Tab {
             Message::GalleryToggle => {
                 if let Some(indices) = self.column_sort() {
                     for (_, item) in &indices {
-                        if item.selected && item.can_gallery() {
+                        if item.state.selected && item.can_gallery() {
                             self.gallery = !self.gallery;
 
                             if self.gallery {
@@ -6453,7 +1847,7 @@ impl Tab {
                         let best = self.items_opt.as_ref().and_then(|items| {
                             items
                                 .iter()
-                                .filter_map(|item| item.pos_opt.get())
+                                .filter_map(|item| item.state.pos_opt.get())
                                 .filter(|(r, _)| *r <= target_row)
                                 .max()
                         });
@@ -6497,7 +1891,7 @@ impl Tab {
                         let best = self.items_opt.as_ref().and_then(|items| {
                             items
                                 .iter()
-                                .filter_map(|item| item.pos_opt.get())
+                                .filter_map(|item| item.state.pos_opt.get())
                                 .filter(|(r, _)| *r >= target_row)
                                 .min()
                         });
@@ -6547,7 +1941,7 @@ impl Tab {
                                 let mut col = 0;
                                 if let Some(ref items) = self.items_opt {
                                     for item in items {
-                                        match item.pos_opt.get() {
+                                        match item.state.pos_opt.get() {
                                             Some((item_row, item_col)) if item_row == row => {
                                                 col = col.max(item_col);
                                             }
@@ -6724,7 +2118,7 @@ impl Tab {
                             mode: &Mode,
                             is_only_one_selected: bool,
                         ) -> ResolveResult {
-                            if !item.selected {
+                            if !item.state.selected {
                                 return ResolveResult::Skip;
                             }
 
@@ -6775,7 +2169,7 @@ impl Tab {
                         }
                         let mut open_files = Vec::new();
                         if let Some(items) = self.items_opt.as_ref() {
-                            let selected_count = items.iter().filter(|i| i.selected).count();
+                            let selected_count = items.iter().filter(|i| i.state.selected).count();
 
                             for item in items.iter() {
                                 match resolve_item(item, &self.mode, selected_count == 1) {
@@ -6820,11 +2214,11 @@ impl Tab {
                 }
                 if let Some(ref mut items) = self.items_opt
                     && !click_i_opt
-                        .is_some_and(|click_i| items.get(click_i).is_some_and(|x| x.selected))
+                        .is_some_and(|click_i| items.get(click_i).is_some_and(|x| x.state.selected))
                 {
                     // If item not selected, clear selection on other items
                     for (i, item) in items.iter_mut().enumerate() {
-                        item.selected = Some(i) == click_i_opt;
+                        item.state.selected = Some(i) == click_i_opt;
                     }
                 }
                 //TODO: hack for clearing selecting when right clicking empty space
@@ -6836,7 +2230,7 @@ impl Tab {
                 } else {
                     if let Some(ref mut items) = self.items_opt {
                         for (i, item) in items.iter_mut().enumerate() {
-                            item.selected = i == click_i;
+                            item.state.selected = i == click_i;
                         }
                         self.select_range = Some((click_i, click_i));
                     }
@@ -6860,12 +2254,12 @@ impl Tab {
             }
             Message::HighlightDeactivate(i) => {
                 if let Some(item) = self.items_opt.as_mut().and_then(|f| f.get_mut(i)) {
-                    item.highlighted = false;
+                    item.state.highlighted = false;
                 }
             }
             Message::HighlightActivate(i) => {
                 if let Some(item) = self.items_opt.as_mut().and_then(|f| f.get_mut(i)) {
-                    item.highlighted = true;
+                    item.state.highlighted = true;
                 }
             }
             Message::Resize(viewport) => {
@@ -7005,7 +2399,10 @@ impl Tab {
             }
             Message::SelectLast => {
                 if let Some(ref items) = self.items_opt
-                    && let Some(last_pos) = items.iter().filter_map(|item| item.pos_opt.get()).max()
+                    && let Some(last_pos) = items
+                        .iter()
+                        .filter_map(|item| item.state.pos_opt.get())
+                        .max()
                     && self.select_position(last_pos.0, last_pos.1, mod_shift)
                 {
                     if let Some(offset) = self.select_focus_scroll() {
@@ -7038,9 +2435,9 @@ impl Tab {
                 )),
                 // Shift permissions on all selected items
                 None => {
-                    let permissions = Vec::new();
-                    for _item in self.items_opt().map_or(Vec::new(), |items| {
-                        items.iter().filter(|item| item.selected).collect()
+                    let mut permissions = Vec::new();
+                    for item in self.items_opt().map_or(Vec::new(), |items| {
+                        items.iter().filter(|item| item.state.selected).collect()
                     }) {
                         #[cfg(unix)]
                         if let (Some(path), Some(mode)) = (
@@ -7263,12 +2660,12 @@ impl Tab {
                 if let Some(ref mut item) = self.parent_item_opt
                     && item.location_opt.as_ref() == Some(&location)
                 {
-                    item.checksums = checksum_state.clone();
+                    item.state.checksums = checksum_state.clone();
                 }
                 if let Some(ref mut items) = self.items_opt {
                     for item in items.iter_mut() {
                         if item.location_opt.as_ref() == Some(&location) {
-                            item.checksums = checksum_state;
+                            item.state.checksums = checksum_state;
                             break;
                         }
                     }
@@ -7279,12 +2676,12 @@ impl Tab {
                 if let Some(ref mut item) = self.parent_item_opt
                     && item.location_opt.as_ref() == Some(&location)
                 {
-                    item.checksums = ChecksumState::Calculating;
+                    item.state.checksums = ChecksumState::Calculating;
                 }
                 if let Some(ref mut items) = self.items_opt {
                     for item in items.iter_mut() {
                         if item.location_opt.as_ref() == Some(&location) {
-                            item.checksums = ChecksumState::Calculating;
+                            item.state.checksums = ChecksumState::Calculating;
                             break;
                         }
                     }
@@ -7403,9 +2800,9 @@ impl Tab {
                                 (false, metadata.len())
                             }
                         }
-                        ItemMetadata::Trash { metadata, .. } => match metadata.size {
-                            trash::TrashItemSize::Entries(entries) => (true, entries as u64),
-                            trash::TrashItemSize::Bytes(bytes) => (false, bytes),
+                        ItemMetadata::Trash { size, .. } => match size {
+                            TrashItemSize::Entries(entries) => (true, *entries as u64),
+                            TrashItemSize::Bytes(bytes) => (false, *bytes),
                         },
                         ItemMetadata::SimpleDir { entries } => (true, *entries),
                         ItemMetadata::SimpleFile { size } => (false, *size),
@@ -7477,7 +2874,7 @@ impl Tab {
             }
             HeadingOptions::TrashedOn => {
                 let time_deleted = |x: &Item| match &x.metadata {
-                    ItemMetadata::Trash { entry, .. } => Some(entry.time_deleted),
+                    ItemMetadata::Trash { entry, .. } => entry.time_deleted,
                     _ => None,
                 };
 
@@ -8310,14 +3707,14 @@ impl Tab {
             let mut grid_elements = Vec::new();
             for &(i, item) in &items {
                 if !show_hidden && item.hidden {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     hidden += 1;
                     continue;
                 }
                 if matches!(item.metadata.is_susceptible(), Some(true)) && !show_susceptible {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     susceptible_hidden += 1;
                     continue;
                 }
@@ -8326,8 +3723,8 @@ impl Tab {
                     .is_groupable_as_sample_tbprofiler_result_item()
                     && show_as_samples
                 {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     continue;
                 }
                 if item.metadata.is_tbprofiler_result_as_sample()
@@ -8336,11 +3733,11 @@ impl Tab {
                         .is_groupable_as_sample_tbprofiler_result_item()
                     && !show_as_samples
                 {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     continue;
                 }
-                item.pos_opt.set(Some((row, col)));
+                item.state.pos_opt.set(Some((row, col)));
                 let item_rect = Rectangle::new(
                     Point::new(
                         (col * (item_width + column_spacing as usize) + space_xxs as usize) as f32,
@@ -8348,7 +3745,7 @@ impl Tab {
                     ),
                     Size::new(item_width as f32, item_height as f32),
                 );
-                item.rect_opt.set(Some(item_rect));
+                item.state.rect_opt.set(Some(item_rect));
 
                 //TODO: error if the row or col is already set?
                 while grid_elements.len() <= row {
@@ -8366,9 +3763,9 @@ impl Tab {
                         )
                         .padding(space_xxxs)
                         .class(button_style(
-                            item.selected,
-                            item.highlighted,
-                            item.cut,
+                            item.state.selected,
+                            item.state.highlighted,
+                            item.state.cut,
                             false,
                             false,
                             false,
@@ -8376,12 +3773,12 @@ impl Tab {
                         .into(),
                         widget::tooltip(
                             widget::button::custom(Item::grid_display_name(&item.display_name))
-                                .id(item.button_id.clone())
+                                .id(item.state.button_id.clone())
                                 .padding([0, space_xxxs])
                                 .class(button_style(
-                                    item.selected,
-                                    item.highlighted,
-                                    item.cut,
+                                    item.state.selected,
+                                    item.state.highlighted,
+                                    item.state.cut,
                                     true,
                                     true,
                                     matches!(self.mode, Mode::Desktop),
@@ -8413,7 +3810,7 @@ impl Tab {
                             column.into()
                         };
 
-                    if item.selected {
+                    if item.state.selected {
                         dnd_items.push((i, (row, col), item));
                         drag_w_i = drag_w_i.min(col);
                         drag_n_i = drag_n_i.min(row);
@@ -8481,7 +3878,7 @@ impl Tab {
             {
                 let mut max_bottom = 0;
                 for (_, item) in items {
-                    if let Some(rect) = item.rect_opt.get() {
+                    if let Some(rect) = item.state.rect_opt.get() {
                         let bottom = (rect.y + rect.height).ceil() as usize;
                         if bottom > max_bottom {
                             max_bottom = bottom;
@@ -8532,9 +3929,9 @@ impl Tab {
                             .on_press(Message::Click(Some(*i)))
                             .padding(space_xxxs)
                             .class(button_style(
-                                item.selected,
-                                item.highlighted,
-                                item.cut,
+                                item.state.selected,
+                                item.state.highlighted,
+                                item.state.cut,
                                 false,
                                 false,
                                 false,
@@ -8542,13 +3939,13 @@ impl Tab {
                             widget::button::custom(Item::grid_display_name(
                                 item.display_name.clone(),
                             ))
-                            .id(item.button_id.clone())
+                            .id(item.state.button_id.clone())
                             .on_press(Message::Click(Some(*i)))
                             .padding([0, space_xxxs])
                             .class(button_style(
-                                item.selected,
-                                item.highlighted,
-                                item.cut,
+                                item.state.selected,
+                                item.state.highlighted,
+                                item.state.cut,
                                 true,
                                 true,
                                 false,
@@ -8647,14 +4044,14 @@ impl Tab {
             let mut susceptible_hidden = 0;
             for (i, item) in items {
                 if item.hidden && !show_hidden {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     hidden += 1;
                     continue;
                 }
                 if matches!(item.metadata.is_susceptible(), Some(true)) && !show_susceptible {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     susceptible_hidden += 1;
                     continue;
                 }
@@ -8665,8 +4062,8 @@ impl Tab {
                     .is_groupable_as_sample_tbprofiler_result_item()
                     && show_as_samples
                 {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     continue;
                 }
                 if item.metadata.is_tbprofiler_result_as_sample()
@@ -8675,8 +4072,8 @@ impl Tab {
                         .is_groupable_as_sample_tbprofiler_result_item()
                     && !show_as_samples
                 {
-                    item.pos_opt.set(None);
-                    item.rect_opt.set(None);
+                    item.state.pos_opt.set(None);
+                    item.state.rect_opt.set(None);
                     continue;
                 }
 
@@ -8686,12 +4083,12 @@ impl Tab {
                     y += 1.0;
                 }
 
-                item.pos_opt.set(Some((count, 0)));
+                item.state.pos_opt.set(Some((count, 0)));
                 let item_rect = Rectangle::new(
                     Point::new(f32::from(space_s), y),
                     Size::new(size.width - f32::from(2 * space_s), f32::from(row_height)),
                 );
-                item.rect_opt.set(Some(item_rect));
+                item.state.rect_opt.set(Some(item_rect));
 
                 // Only build elements if visible (for performance)
                 let button_row = if item_rect.intersects(&visible_rect) {
@@ -8700,13 +4097,10 @@ impl Tab {
                             Ok(time) => self.format_time(time).to_string(),
                             Err(_) => String::new(),
                         },
-                        ItemMetadata::Trash { entry, .. } => FormatTime::from_secs(
-                            entry.time_deleted,
-                            &self.date_time_formatter,
-                            &self.time_formatter,
-                        )
-                        .map(|t| t.to_string())
-                        .unwrap_or_default(),
+                        ItemMetadata::Trash { entry, .. } => match entry.time_deleted {
+                            Some(time) => self.format_time(time).to_string(),
+                            None => String::new(),
+                        },
                         #[cfg(feature = "gvfs")]
                         ItemMetadata::GvfsPath { .. } => match item.metadata.modified() {
                             Some(mtime) => self.format_time(mtime).to_string(),
@@ -8741,16 +4135,16 @@ impl Tab {
                                 format_size(metadata.len())
                             }
                         }
-                        ItemMetadata::Trash { metadata, .. } => match metadata.size {
-                            trash::TrashItemSize::Entries(entries) => {
+                        ItemMetadata::Trash { size, .. } => match size {
+                            TrashItemSize::Entries(entries) => {
                                 //TODO: translate
-                                if entries == 1 {
+                                if *entries == 1 {
                                     format!("{entries} item")
                                 } else {
                                     format!("{entries} items")
                                 }
                             }
-                            trash::TrashItemSize::Bytes(bytes) => format_size(bytes),
+                            TrashItemSize::Bytes(bytes) => format_size(*bytes),
                         },
                         ItemMetadata::SimpleDir { entries } => {
                             //TODO: translate
@@ -8873,12 +4267,12 @@ impl Tab {
                             let mouse_area = crate::mouse_area::MouseArea::new(
                                 widget::button::custom(row)
                                     .width(Length::Fill)
-                                    .id(item.button_id.clone())
+                                    .id(item.state.button_id.clone())
                                     .padding([0, space_xxs])
                                     .class(button_style(
-                                        item.selected,
-                                        item.highlighted,
-                                        item.cut,
+                                        item.state.selected,
+                                        item.state.highlighted,
+                                        item.state.cut,
                                         true,
                                         true,
                                         false,
@@ -8905,8 +4299,8 @@ impl Tab {
                         button_row.into()
                     };
 
-                    if item.selected || !drag_items.is_empty() {
-                        let dnd_row = if !item.selected {
+                    if item.state.selected || !drag_items.is_empty() {
+                        let dnd_row = if !item.state.selected {
                             Element::from(
                                 space::vertical().height(Length::Fixed(f32::from(row_height))),
                             )
@@ -8980,7 +4374,7 @@ impl Tab {
                             .spacing(space_xxs)
                             .into()
                         };
-                        if item.selected {
+                        if item.state.selected {
                             drag_items.push(
                                 widget::container(button(dnd_row))
                                     .width(Length::Shrink)
@@ -9080,7 +4474,7 @@ impl Tab {
                 items
                     .iter()
                     .filter_map(|item| {
-                        if item.selected {
+                        if item.state.selected {
                             item.path_opt().cloned()
                         } else {
                             None
@@ -9336,7 +4730,7 @@ impl Tab {
             items
                 .iter()
                 .filter(|item| {
-                    if !item.selected {
+                    if !item.state.selected {
                         return false;
                     }
                     // Include remote TB result items even though their location path is None
@@ -9691,7 +5085,7 @@ impl Tab {
                 };
 
                 // Skip items that are not visible, or have no determined rect
-                match item.rect_opt.get() {
+                match item.state.rect_opt.get() {
                     Some(rect) if rect.intersects(&visible_rect) => {}
                     _ => continue,
                 }
@@ -9751,7 +5145,7 @@ impl Tab {
                     continue;
                 }
 
-                match item.rect_opt.get() {
+                match item.state.rect_opt.get() {
                     Some(rect) => {
                         if !rect.intersects(&visible_rect) {
                             // Skip items that are not visible
@@ -9771,6 +5165,10 @@ impl Tab {
                 let metadata = item.metadata.clone();
                 let can_thumbnail = match metadata {
                     ItemMetadata::Path { .. } => true,
+                    ItemMetadata::Trash {
+                        size: TrashItemSize::Bytes(_),
+                        ..
+                    } => true,
                     #[cfg(feature = "gvfs")]
                     ItemMetadata::GvfsPath { .. } => true,
                     _ => false,
@@ -9890,7 +5288,7 @@ impl Tab {
             // Align a previewed AB1 file on demand when no background scan has covered it. The
             // subscription is keyed by path, so a file is never aligned twice concurrently, and
             // it drops once the hits arrive (or the selection changes).
-            let mut selected = items.iter().filter(|item| item.selected);
+            let mut selected = items.iter().filter(|item| item.state.selected);
             if preview
                 && let (Some(item), None) = (selected.next(), selected.next())
                 && item.metadata.is_ab1()
@@ -9958,7 +5356,7 @@ impl Tab {
                 // Load directory size for selected items
 
                 let mut selected_items: Vec<&Item> =
-                    items.iter().filter(|item| item.selected).collect();
+                    items.iter().filter(|item| item.state.selected).collect();
 
                 if selected_items.is_empty()
                     && let Some(p) = self.parent_item_opt.as_ref()
@@ -10212,14 +5610,18 @@ impl Tab {
         format_time(time, &self.date_time_formatter, &self.time_formatter)
     }
 
-    fn on_drag<'a>(&self, rect_opt: Option<Rectangle>) -> Option<Message> {
+    fn on_drag(&self, rect_opt: Option<Rectangle>) -> Option<Message> {
         let rect = rect_opt?;
         // We only want to publish a drag message if the overlapped items of the drag rect change,
         // otherwise a view rebuild is triggered on every drag event.
         let changed = self.items_opt.as_ref().is_some_and(|items| {
             items.iter().any(|item| {
-                let overlaps = item.rect_opt.get().is_some_and(|r| r.intersects(&rect));
-                overlaps != item.overlaps_drag_rect
+                let overlaps = item
+                    .state
+                    .rect_opt
+                    .get()
+                    .is_some_and(|r| r.intersects(&rect));
+                overlaps != item.state.overlaps_drag_rect
             })
         });
         changed.then_some(Message::Drag(Some(rect)))
@@ -10247,7 +5649,7 @@ pub fn respond_to_scroll_direction(delta: ScrollDelta, modifiers: &Modifiers) ->
     None
 }
 
-fn text_editor_class(
+pub fn text_editor_class(
     theme: &cosmic::Theme,
     status: cosmic::widget::text_editor::Status,
 ) -> cosmic::iced::widget::text_editor::Style {
@@ -10307,14 +5709,13 @@ mod tests {
     use tempfile::TempDir;
     use test_log::test;
 
-    use super::{
-        ItemMetadata, ItemThumbnail, Location, Message, Tab, respond_to_scroll_direction, scan_path,
-    };
+    use super::{ItemMetadata, ItemThumbnail, Location, Message, Tab, respond_to_scroll_direction};
     use crate::app::test_utils::{
         NAME_LEN, NUM_DIRS, NUM_FILES, NUM_HIDDEN, NUM_NESTED, assert_eq_tab_path, empty_fs,
         eq_path_item, filter_dirs, read_dir_sorted, simple_fs, tab_click_new,
     };
     use crate::config::{IconSizes, TBConfig, TabConfig, ThumbCfg};
+    use crate::scan::scan_path;
     use crate::sequencing::SusceptibilityCalls;
 
     // Boilerplate for tab tests. Checks if simulated clicks selected items.
@@ -10339,7 +5740,7 @@ mod tests {
         for (i, (&expected, actual)) in expected_selected.iter().zip(items).enumerate() {
             assert_eq!(
                 expected,
-                actual.selected,
+                actual.state.selected,
                 "expected index {i} to be {}",
                 if expected {
                     "selected but it was deselected"

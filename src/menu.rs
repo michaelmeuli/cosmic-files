@@ -17,9 +17,9 @@ use std::sync::LazyLock;
 use crate::app::{Action, Message};
 use crate::config::{Config, ContextActionPreset, TBConfig};
 use crate::fl;
-use crate::tab::{
-    self, HeadingOptions, ItemMetadata, Location, LocationMenuAction, SearchLocation, Tab,
-};
+use crate::item::ItemMetadata;
+use crate::location::{Location, SearchLocation};
+use crate::tab::{self, HeadingOptions, LocationMenuAction, Tab};
 use crate::trash::{Trash, TrashExt};
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
@@ -109,7 +109,7 @@ pub fn context_menu(
     let mut any_trash_item = false;
     if let Some(items) = tab.items_opt() {
         for item in items {
-            if item.selected {
+            if item.state.selected {
                 selected += 1;
                 if item.metadata.is_dir() {
                     selected_mount_point += i32::from(item.is_mount_point);
@@ -490,7 +490,7 @@ pub fn dialog_menu(
     let mut selected_gallery = 0;
     if let Some(items) = tab.items_opt() {
         for item in items {
-            if item.selected && item.can_gallery() {
+            if item.state.selected && item.can_gallery() {
                 selected_gallery += 1;
             }
         }
@@ -642,7 +642,7 @@ pub fn menu_bar<'a>(
     let mut selected_gallery = 0;
     if let Some(items) = tab_opt.and_then(|tab| tab.items_opt()) {
         for item in items {
-            if item.selected {
+            if item.state.selected {
                 selected += 1;
                 if item.metadata.is_dir() {
                     selected_dir += 1;

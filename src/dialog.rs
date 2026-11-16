@@ -37,11 +37,13 @@ use crate::app::{
 use crate::config::{
     Config, DialogConfig, State, TIME_CONFIG_ID, ThumbCfg, TimeConfig, TypeToSearch,
 };
+use crate::item::{Item, ItemMetadata, folder_icon_symbolic};
 use crate::key_bind::key_binds;
 use crate::localize::LANGUAGE_SORTER;
+use crate::location::{Location, SearchLocation};
 use crate::mounter::{MOUNTERS, MounterItem, MounterItems, MounterKey, MounterMessage};
 use crate::russh::{CLIENTS, ClientItem, ClientItems, ClientKey, ClientMessage};
-use crate::tab::{self, HeadingOptions, ItemMetadata, Location, SearchLocation, Tab};
+use crate::tab::{self, HeadingOptions, Tab};
 use crate::zoom::{zoom_in_view, zoom_out_view, zoom_to_default};
 use crate::{fl, home_dir, menu, mime_icon};
 
@@ -482,12 +484,7 @@ enum Message {
     Surface(cosmic::surface::Action<Message>),
     #[allow(clippy::enum_variant_names)]
     TabMessage(tab::Message),
-    TabRescan(
-        Location,
-        Option<Box<tab::Item>>,
-        Vec<tab::Item>,
-        Option<Vec<PathBuf>>,
-    ),
+    TabRescan(Location, Option<Box<Item>>, Vec<Item>, Option<Vec<PathBuf>>),
     TabView(tab::View),
     TimeConfigChange(TimeConfig),
     ToggleFoldersFirst,
@@ -650,7 +647,7 @@ impl App {
         let mut has_selected = false;
         if let Some(items) = self.tab.items_opt() {
             for item in items {
-                if item.selected {
+                if item.state.selected {
                     has_selected = true;
                     break;
                 }
@@ -712,7 +709,7 @@ impl App {
             PreviewKind::Selected => {
                 if let Some(items) = self.tab.items_opt() {
                     let preview_opt = {
-                        let mut selected = items.iter().filter(|item| item.selected);
+                        let mut selected = items.iter().filter(|item| item.state.selected);
 
                         match (selected.next(), selected.next()) {
                             // At least two selected items
@@ -742,7 +739,7 @@ impl App {
     fn rescan_tab(&self, selection_paths: Option<Vec<PathBuf>>) -> Task<Message> {
         let location = self.tab.location.clone();
         let icon_sizes = self.tab.config.icon_sizes;
-        let _mounter_items = self.mounter_items.clone();
+        let mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
         Task::future(async move {
             let location2 = location.clone();
@@ -912,7 +909,7 @@ impl App {
                     b.text(name.clone())
                         .icon(
                             widget::icon::icon(if path.is_dir() {
-                                tab::folder_icon_symbolic(&path, 16)
+                                folder_icon_symbolic(&path, 16)
                             } else {
                                 widget::icon::from_name("text-x-generic-symbolic")
                                     .size(16)
@@ -1060,6 +1057,13 @@ impl Application for App {
 
         let key_binds = key_binds(&tab.mode);
 
+        let mut mounter_items = FxHashMap::default();
+        for (&key, mounter) in MOUNTERS.iter() {
+            if let Some(items) = mounter.items(tab.config.icon_sizes) {
+                mounter_items.insert(key, items);
+            }
+        }
+
         let mut app = Self {
             core,
             flags,
@@ -1073,7 +1077,7 @@ impl Application for App {
             filter_selected: None,
             filename_id: widget::Id::new("Dialog Filename"),
             modifiers: Modifiers::empty(),
-            mounter_items: FxHashMap::default(),
+            mounter_items,
             client_items: FxHashMap::default(),
             nav_model: segmented_button::ModelBuilder::default().build(),
             result_opt: None,
@@ -1109,7 +1113,7 @@ impl Application for App {
                     .and_then(|items| {
                         items
                             .iter()
-                            .find(|item| item.selected)
+                            .find(|item| item.state.selected)
                             .map(|item| item.preview_actions().map(Message::TabMessage))
                     })
                     .unwrap_or_else(|| widget::space::horizontal().into());
@@ -1702,7 +1706,7 @@ impl Application for App {
                 let mut paths = Vec::new();
                 if let Some(items) = self.tab.items_opt() {
                     for item in items {
-                        if item.selected
+                        if item.state.selected
                             && let Some(path) = item.path_opt()
                         {
                             paths.push(path.clone());
@@ -1812,7 +1816,7 @@ impl Application for App {
                     && let Some(click_i) = click_i_opt
                     && let Some(items) = self.tab.items_opt()
                     && let Some(item) = items.get(click_i)
-                    && item.selected
+                    && item.state.selected
                     && !item.metadata.is_dir()
                 {
                     filename.clone_from(&item.name);
@@ -1932,7 +1936,7 @@ impl Application for App {
                     // Select based on filename
                     if let DialogKind::SaveFile { filename } = &self.flags.kind {
                         for item in &mut items {
-                            item.selected = &item.name == filename;
+                            item.state.selected = &item.name == filename;
                         }
                     }
 

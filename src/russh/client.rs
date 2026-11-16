@@ -10,7 +10,6 @@ use cosmic::{
 };
 use std::{
     any::TypeId,
-    cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     future::pending,
@@ -26,8 +25,9 @@ use super::{ClientAuth, ClientItem, ClientItems, ClientMessage, Connector};
 use crate::{
     config::IconSizes,
     fl,
+    item::{DirSize, Item as FileItem, ItemMetadata, ItemState, ItemThumbnail},
+    location::Location,
     sequencing::tb_data::TbProfilerJson,
-    tab::{self, DirSize, ItemMetadata, ItemThumbnail, Location},
 };
 use mime_guess::MimeGuess;
 use tokio::io::AsyncReadExt;
@@ -158,7 +158,7 @@ async fn remote_sftp_list(
     client: &Client,
     uri: &str,
     sizes: IconSizes,
-) -> Result<Vec<tab::Item>, String> {
+) -> Result<Vec<FileItem>, String> {
     let mut remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let force_dir = uri.starts_with("ssh:///");
     let path = remote_file.path.clone();
@@ -340,7 +340,7 @@ async fn remote_sftp_list(
         // Check if item is hidden
         let hidden = name.starts_with('.');
 
-        items.push(tab::Item {
+        items.push(FileItem {
             name: name.clone(),
             is_mount_point: false,
             is_client_point: false,
@@ -354,15 +354,8 @@ async fn remote_sftp_list(
             icon_handle_list,
             icon_handle_list_condensed,
             thumbnail_opt: Some(ItemThumbnail::NotImage),
-            button_id: widget::Id::unique(),
-            pos_opt: Cell::new(None),
-            rect_opt: Cell::new(None),
-            selected: false,
-            highlighted: false,
-            overlaps_drag_rect: false,
             dir_size: DirSize::NotDirectory,
-            cut: false,
-            checksums: tab::ChecksumState::default(),
+            state: ItemState::default(),
         });
     }
 
@@ -457,7 +450,7 @@ async fn remote_sftp_list(
             is_susceptible,
         };
 
-        items.push(tab::Item {
+        items.push(FileItem {
             name: sample_id.clone(),
             display_name: sample_id.clone(),
             metadata,
@@ -477,15 +470,8 @@ async fn remote_sftp_list(
             is_mount_point: false,
             is_client_point: false,
             thumbnail_opt: Some(ItemThumbnail::NotImage),
-            button_id: widget::Id::unique(),
-            pos_opt: Cell::new(None),
-            rect_opt: Cell::new(None),
-            selected: false,
-            highlighted: false,
-            overlaps_drag_rect: false,
             dir_size: DirSize::NotDirectory,
-            cut: false,
-            checksums: tab::ChecksumState::default(),
+            state: ItemState::default(),
         });
     }
 
@@ -496,7 +482,7 @@ async fn remote_sftp_parent(
     client: &Client,
     uri: &str,
     sizes: IconSizes,
-) -> Result<tab::Item, String> {
+) -> Result<FileItem, String> {
     let remote_file = uri.parse::<RemoteFile>().map_err(|e| e.to_string())?;
     let path = remote_file.path.clone();
     let channel = client.get_channel().await.map_err(|e| e.to_string())?;
@@ -598,7 +584,7 @@ async fn remote_sftp_parent(
         )
     };
     let hidden = name.starts_with('.');
-    let item = tab::Item {
+    let item = FileItem {
         name: name.clone(),
         is_mount_point: false,
         is_client_point: false,
@@ -612,15 +598,8 @@ async fn remote_sftp_parent(
         icon_handle_list,
         icon_handle_list_condensed,
         thumbnail_opt: Some(ItemThumbnail::NotImage),
-        button_id: widget::Id::unique(),
-        pos_opt: Cell::new(None),
-        rect_opt: Cell::new(None),
-        selected: false,
-        highlighted: false,
-        overlaps_drag_rect: false,
         dir_size: DirSize::NotDirectory,
-        cut: false,
-        checksums: tab::ChecksumState::default(),
+        state: ItemState::default(),
     };
     Ok(item)
 }
@@ -1122,9 +1101,9 @@ enum Cmd {
     RemoteScan(
         String,
         IconSizes,
-        mpsc::Sender<Result<Vec<tab::Item>, String>>,
+        mpsc::Sender<Result<Vec<FileItem>, String>>,
     ),
-    RemoteParent(String, IconSizes, mpsc::Sender<Result<tab::Item, String>>),
+    RemoteParent(String, IconSizes, mpsc::Sender<Result<FileItem, String>>),
     #[allow(clippy::type_complexity)]
     DirInfo(
         String,
@@ -1922,7 +1901,7 @@ impl Connector for Russh {
         ))
     }
 
-    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<tab::Item>, String>> {
+    fn remote_scan(&self, uri: &str, sizes: IconSizes) -> Option<Result<Vec<FileItem>, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
 
         if let Err(e) = self
@@ -1940,7 +1919,7 @@ impl Connector for Russh {
         items_rx.blocking_recv()
     }
 
-    fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<tab::Item, String>> {
+    fn remote_parent_item(&self, uri: &str, sizes: IconSizes) -> Option<Result<FileItem, String>> {
         let (items_tx, mut items_rx) = mpsc::channel(1);
 
         if let Err(e) = self
