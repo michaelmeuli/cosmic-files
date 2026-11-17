@@ -3,9 +3,10 @@
 //! Microsynth's "Secure Download FTP" (<https://shop.microsynth.com/SecureDownload/Ftp/Ftp>)
 //! is an SFTP server at `shop.microsynth.com:22` that accepts the webshop username and
 //! password. Results are delivered as one folder per order number containing `.zip`
-//! archives. [`sync_ab1`] downloads new archives, extracts the `.ab1` files they hold into
-//! `<dest>/<order>/…`, and also mirrors any loose `.ab1` files. The local directory is
-//! then analysed by [`super::batch::scan_ab1_directory`] as usual.
+//! archives. [`sync_ab1`] downloads new archives and extracts the `.ab1` files they hold
+//! directly into `dest` (no order or archive subfolders); loose `.ab1` files are copied
+//! there too. The local directory is then analysed by
+//! [`super::batch::scan_ab1_directory`] as usual.
 //!
 //! The password is kept in the OS keyring ([`load_password`] / [`store_password`]),
 //! never in the cosmic config.
@@ -129,9 +130,9 @@ fn local_path_for(dest: &Path, relative: &str) -> Option<PathBuf> {
     any.then_some(out)
 }
 
-/// Remote directory of a relative file path (`"4861178/x.zip"` → `"4861178"`).
-fn remote_parent(relative: &str) -> &str {
-    relative.rsplit_once('/').map_or("", |(dir, _)| dir)
+/// File name part of a `/`-separated remote path (`"4861178/x.ab1"` → `"x.ab1"`).
+fn remote_file_name(relative: &str) -> &str {
+    relative.rsplit('/').next().unwrap_or(relative)
 }
 
 /// `true` when the file is older than the reporting window and should not be fetched.
@@ -144,8 +145,12 @@ fn too_old(mtime: u64, max_age_days: u32, now: SystemTime) -> bool {
         .is_ok_and(|age| age > Duration::from_secs(u64::from(max_age_days) * 86_400))
 }
 
-/// `true` when the local copy is missing or differs in size or mtime from the remote file.
-fn needs_download(local: &Path, size: u64, mtime: u64) -> bool {
+/// Decides whether a file with `size`/`mtime` may be written to `local`.
+///
+/// All files land in one flat directory, so two orders can deliver the same file
+/// name. The newest version wins: write when the local file is missing, is older,
+/// or has the same mtime but a different size. Never replace a newer local file.
+fn should_write(local: &Path, size: u64, mtime: u64) -> bool {
     let Ok(meta) = std::fs::metadata(local) else {
         return true;
     };
@@ -154,7 +159,7 @@ fn needs_download(local: &Path, size: u64, mtime: u64) -> bool {
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs());
-    meta.len() != size || local_mtime != mtime
+    local_mtime < mtime || (local_mtime == mtime && meta.len() != size)
 }
 
 /// Picks the host-key check: verify against `~/.ssh/known_hosts` when it lists the
@@ -281,9 +286,9 @@ fn write_file(local: &Path, data: &[u8], mtime: u64) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Extracts every `.ab1` entry of a zip archive into `out_dir`, keeping the archive's
-/// inner folder layout. Extracted files get `mtime` so rescans hit the AB1 disk cache.
-/// Returns the number of `.ab1` files written.
+/// Extracts every `.ab1` entry of a zip archive directly into `out_dir`, dropping any
+/// folders inside the archive. Extracted files get `mtime` so rescans hit the AB1 disk
+/// cache. Returns the number of `.ab1` files written.
 fn extract_ab1_from_zip(data: &[u8], out_dir: &Path, mtime: u64) -> anyhow::Result<usize> {
     let mut archive = zip::ZipArchive::new(Cursor::new(data)).context("opening zip")?;
     let mut written = 0;
@@ -296,14 +301,12 @@ fn extract_ab1_from_zip(data: &[u8], out_dir: &Path, mtime: u64) -> anyhow::Resu
             log::warn!("microsynth: unsafe zip entry {:?} skipped", entry.name());
             continue;
         };
-        if !inner
-            .file_name()
-            .is_some_and(|n| is_ab1(&n.to_string_lossy()))
-        {
+        let Some(file_name) = inner.file_name().filter(|n| is_ab1(&n.to_string_lossy())) else {
             continue;
-        }
-        let local = out_dir.join(&inner);
-        if !needs_download(&local, entry.size(), mtime) {
+        };
+        let local = out_dir.join(file_name);
+        if !should_write(&local, entry.size(), mtime) {
+            log::debug!("microsynth: keeping existing {}", local.display());
             continue;
         }
         let mut buf = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
@@ -383,17 +386,7 @@ pub async fn sync_ab1(
                     summary.skipped += 1;
                     continue;
                 }
-                let Some(out_dir) =
-                    local_path_for(dest, remote_parent(&file.relative)).or_else(|| {
-                        remote_parent(&file.relative)
-                            .is_empty()
-                            .then(|| dest.into())
-                    })
-                else {
-                    log::warn!("microsynth: refusing unsafe remote path {}", file.relative);
-                    summary.failed += 1;
-                    continue;
-                };
+                let out_dir = dest.to_path_buf();
                 match fetch(&sftp, file).await {
                     Ok(data) => {
                         summary.downloaded += 1;
@@ -412,12 +405,12 @@ pub async fn sync_ab1(
                 }
             }
             RemoteKind::Ab1 => {
-                let Some(local) = local_path_for(dest, &file.relative) else {
+                let Some(local) = local_path_for(dest, remote_file_name(&file.relative)) else {
                     log::warn!("microsynth: refusing unsafe remote path {}", file.relative);
                     summary.failed += 1;
                     continue;
                 };
-                if !needs_download(&local, file.size, file.mtime) {
+                if !should_write(&local, file.size, file.mtime) {
                     summary.skipped += 1;
                     continue;
                 }
@@ -552,8 +545,8 @@ mod tests {
         assert_eq!(local_path_for(dest, ""), None);
         #[cfg(windows)]
         assert_eq!(local_path_for(dest, "C:/a.ab1"), None);
-        assert_eq!(remote_parent("4861178/x.zip"), "4861178");
-        assert_eq!(remote_parent("x.zip"), "");
+        assert_eq!(remote_file_name("4861178/x.ab1"), "x.ab1");
+        assert_eq!(remote_file_name("x.ab1"), "x.ab1");
     }
 
     #[test]
@@ -566,51 +559,71 @@ mod tests {
     }
 
     #[test]
-    fn download_decision() {
+    fn write_decision() {
         let dir = temp_dir("decision");
         let f = dir.join("a.ab1");
-        assert!(needs_download(&f, 3, 1_000));
+        assert!(should_write(&f, 3, 1_000));
         std::fs::write(&f, b"abc").unwrap();
         filetime::set_file_mtime(&f, filetime::FileTime::from_unix_time(1_000, 0)).unwrap();
-        assert!(!needs_download(&f, 3, 1_000));
-        assert!(needs_download(&f, 4, 1_000));
-        assert!(needs_download(&f, 3, 2_000));
+        assert!(!should_write(&f, 3, 1_000)); // identical
+        assert!(should_write(&f, 4, 1_000)); // same time, different size
+        assert!(should_write(&f, 3, 2_000)); // newer remote
+        assert!(!should_write(&f, 9, 500)); // older remote never overwrites
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut buf = Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in entries {
+            zw.start_file(*name, opts).unwrap();
+            zw.write_all(body).unwrap();
+        }
+        zw.finish().unwrap();
+        buf.into_inner()
+    }
+
+    #[test]
+    fn zip_extraction_is_flat_and_keeps_only_ab1() {
+        let data = make_zip(&[
+            ("run1/s1_rrl.ab1", b"AB1A"),
+            ("run1/s1_rrl.seq", b"ACGT"),
+            ("s2.AB1", b"AB1B"),
+            ("report.pdf", b"%PDF"),
+        ]);
+        let dir = temp_dir("zip");
+        let n = extract_ab1_from_zip(&data, &dir, 1_700_000_000).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(std::fs::read(dir.join("s1_rrl.ab1")).unwrap(), b"AB1A");
+        assert_eq!(std::fs::read(dir.join("s2.AB1")).unwrap(), b"AB1B");
+        // No folders are created, and non-AB1 entries are ignored.
+        let subdirs = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_dir())
+            .count();
+        assert_eq!(subdirs, 0);
+        assert!(!dir.join("s1_rrl.seq").exists());
+        assert!(!dir.join("report.pdf").exists());
+        // Second extraction writes nothing: files already match.
+        assert_eq!(extract_ab1_from_zip(&data, &dir, 1_700_000_000).unwrap(), 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn zip_extraction_keeps_only_ab1() {
-        let mut buf = Cursor::new(Vec::new());
-        {
-            let mut zw = zip::ZipWriter::new(&mut buf);
-            let opts = zip::write::SimpleFileOptions::default();
-            for (name, body) in [
-                ("run1/s1_rrl.ab1", &b"AB1A"[..]),
-                ("run1/s1_rrl.seq", b"ACGT"),
-                ("s2.AB1", b"AB1B"),
-                ("report.pdf", b"%PDF"),
-            ] {
-                zw.start_file(name, opts).unwrap();
-                zw.write_all(body).unwrap();
-            }
-            zw.finish().unwrap();
-        }
-        let dir = temp_dir("zip");
-        let n = extract_ab1_from_zip(buf.get_ref(), &dir, 1_700_000_000).unwrap();
-        assert_eq!(n, 2);
+    fn older_archive_does_not_overwrite_newer_file() {
+        let dir = temp_dir("collide");
+        let newer = make_zip(&[("x.ab1", b"NEW")]);
+        let older = make_zip(&[("x.ab1", b"OLD-VERSION")]);
         assert_eq!(
-            std::fs::read(dir.join("run1").join("s1_rrl.ab1")).unwrap(),
-            b"AB1A"
+            extract_ab1_from_zip(&newer, &dir, 2_000_000_000).unwrap(),
+            1
         );
-        assert_eq!(std::fs::read(dir.join("s2.AB1")).unwrap(), b"AB1B");
-        assert!(!dir.join("run1").join("s1_rrl.seq").exists());
-        assert!(!dir.join("report.pdf").exists());
-        assert!(!needs_download(&dir.join("s2.AB1"), 4, 1_700_000_000));
-        // Second extraction writes nothing: files already match.
         assert_eq!(
-            extract_ab1_from_zip(buf.get_ref(), &dir, 1_700_000_000).unwrap(),
+            extract_ab1_from_zip(&older, &dir, 1_000_000_000).unwrap(),
             0
         );
+        assert_eq!(std::fs::read(dir.join("x.ab1")).unwrap(), b"NEW");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
