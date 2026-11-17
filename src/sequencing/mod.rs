@@ -17,6 +17,8 @@ pub mod batch;
 pub mod bed;
 pub mod erm41;
 pub mod hsp65;
+#[cfg(feature = "russh")]
+pub mod microsynth;
 pub mod ntfy_notify;
 pub mod pnca;
 pub mod rpob;

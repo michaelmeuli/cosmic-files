@@ -59,6 +59,7 @@ jxl-image-rs-integration = "0.8"
 num_cpus = "1.17.0"
 async-ssh2-tokio = { version = "0.12.1", optional = true }
 russh-sftp = { version = "~2.1", optional = true }
+keyring = { version = "3", features = ["windows-native", "linux-native-sync-persistent", "apple-native", "crypto-rust"], optional = true }
 mime = "0.3.17"
 serde_json = "1.0.149"
 csv = "1.4.0"
@@ -141,7 +142,7 @@ dbus-config = ["libcosmic/dbus-config"]
 desktop = ["libcosmic/desktop", "dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
 gvfs = ["dep:gio", "dep:glib"]
-russh = ["dep:async-ssh2-tokio", "dep:russh-sftp"]
+russh = ["dep:async-ssh2-tokio", "dep:russh-sftp", "dep:keyring"]
 io-uring = ["compio/io-uring"]
 jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]

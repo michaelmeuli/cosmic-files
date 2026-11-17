@@ -54,6 +54,7 @@ The core unique feature of this fork. Parses AB1 capillary sequencer files and i
 - **`rrs.rs`** — 16S rRNA species identification.
 - **`hsp65.rs`** — hsp65/groEL2 SNP calls for *M. kansasii/gastri* and *M. marinum/ulcerans* discrimination.
 - **`bed.rs`** — BED file format utilities.
+- **`microsynth.rs`** (feature `russh`) — Downloads per-order `.zip` archives from Microsynth's secure download area (SFTP `shop.microsynth.com:22`, webshop login; password in the OS keyring) and extracts their `.ab1` files into `ab1_scan_path/<order>/` (already-extracted archives tracked in `.microsynth_sync.json`) before each periodic scan (`Message::SyncMicrosynth` → `ScanAb1Directory`).
 
 Reference FASTA sequences (`res/sequences/myco_*.fasta`) are assembled **at build time** by `build.rs` from three sources:
 - Single-gene NCBI ESearch/EFetch fetches driven by `res/sequences/sequences.toml` (`[[genome]]`/`[[append]]` entries, via `locus_tag` or explicit `seq_start`/`seq_stop` coordinates).

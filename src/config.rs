@@ -228,6 +228,9 @@ pub struct TBConfig {
     pub ab1_out_dir_csv_2: String,
     pub ab1_out_dir_pdf_2: String,
     pub ntfy_topic: String,
+    /// Microsynth webshop username for SFTP download of AB1 files into
+    /// `ab1_scan_path`. The password is kept in the OS keyring, not here.
+    pub microsynth_username: String,
     pub report_max_age_days: u32,
 }
 
@@ -252,6 +255,7 @@ impl Default for TBConfig {
             ab1_out_dir_csv_2: String::new(),
             ab1_out_dir_pdf_2: String::new(),
             ntfy_topic: String::new(),
+            microsynth_username: String::new(),
             report_max_age_days: DEFAULT_REPORT_MAX_AGE_DAYS,
         }
     }

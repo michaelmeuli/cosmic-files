@@ -546,6 +546,17 @@ pub enum Message {
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
     ScanAb1Directory2,
     Ab1ScanComplete2(Vec<crate::sequencing::SampleSusceptibilityRecord>),
+    #[cfg(feature = "russh")]
+    SetTbMicrosynthUsername(String),
+    #[cfg(feature = "russh")]
+    MicrosynthPasswordInput(String),
+    #[cfg(feature = "russh")]
+    SaveMicrosynthPassword,
+    /// Download new AB1 files from Microsynth into `ab1_scan_path`, then scan it.
+    #[cfg(feature = "russh")]
+    SyncMicrosynth,
+    #[cfg(feature = "russh")]
+    MicrosynthSyncComplete(Result<crate::sequencing::microsynth::SyncSummary, String>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -858,6 +869,12 @@ pub struct App {
     scrollable_id: widget::Id,
     search_id: widget::Id,
     size: Option<Size>,
+    /// Unsaved text in the Microsynth password field (never persisted).
+    #[cfg(feature = "russh")]
+    microsynth_password_input: String,
+    /// Whether the OS keyring holds a password for the configured Microsynth user.
+    #[cfg(feature = "russh")]
+    microsynth_password_saved: bool,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     layer_sizes: FxHashMap<window::Id, Size>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -2564,6 +2581,67 @@ impl App {
         .into()
     }
 
+    /// `true` when AB1 files should be downloaded from Microsynth before each scan.
+    fn microsynth_sync_enabled(&self) -> bool {
+        #[cfg(feature = "russh")]
+        {
+            !self.config.tb_config.microsynth_username.is_empty() && self.microsynth_password_saved
+        }
+        #[cfg(not(feature = "russh"))]
+        {
+            false
+        }
+    }
+
+    /// Message that starts the periodic AB1 run: sync-then-scan, or just scan.
+    fn ab1_scan_message(&self) -> Message {
+        #[cfg(feature = "russh")]
+        if self.microsynth_sync_enabled() {
+            return Message::SyncMicrosynth;
+        }
+        Message::ScanAb1Directory
+    }
+
+    #[cfg(feature = "russh")]
+    fn microsynth_settings_username(&self) -> Option<Element<'_, Message>> {
+        Some(
+            widget::settings::item::builder("Microsynth username (SFTP download)")
+                .control(
+                    widget::text_input("", &self.config.tb_config.microsynth_username)
+                        .on_input(Message::SetTbMicrosynthUsername),
+                )
+                .into(),
+        )
+    }
+
+    #[cfg(feature = "russh")]
+    fn microsynth_settings_password(&self) -> Option<Element<'_, Message>> {
+        let placeholder = if self.microsynth_password_saved {
+            "saved in keyring (type to replace, Enter to save)"
+        } else {
+            "Enter to save in keyring"
+        };
+        Some(
+            widget::settings::item::builder("Microsynth password")
+                .control(
+                    widget::secure_input(placeholder, &self.microsynth_password_input, None, true)
+                        .on_input(Message::MicrosynthPasswordInput)
+                        .on_submit(|_| Message::SaveMicrosynthPassword),
+                )
+                .into(),
+        )
+    }
+
+    #[cfg(not(feature = "russh"))]
+    fn microsynth_settings_username(&self) -> Option<Element<'_, Message>> {
+        None
+    }
+
+    #[cfg(not(feature = "russh"))]
+    fn microsynth_settings_password(&self) -> Option<Element<'_, Message>> {
+        None
+    }
+
     fn tb_settings(&self) -> Element<'_, Message> {
         widget::settings::view_column(vec![
             widget::settings::section()
@@ -2604,6 +2682,8 @@ impl App {
                             .on_input(Message::SetTbAb1ScanPath),
                     ),
                 )
+                .add_maybe(self.microsynth_settings_username())
+                .add_maybe(self.microsynth_settings_password())
                 .add(
                     widget::settings::item::builder("AB1 cache file").control(
                         widget::text_input("", &self.config.tb_config.ab1_cache_path)
@@ -2877,12 +2957,24 @@ impl Application for App {
             download_files_done: 0,
             #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
             layer_sizes: FxHashMap::default(),
+            #[cfg(feature = "russh")]
+            microsynth_password_input: String::new(),
+            #[cfg(feature = "russh")]
+            microsynth_password_saved: false,
         };
+
+        #[cfg(feature = "russh")]
+        {
+            app.microsynth_password_saved = crate::sequencing::microsynth::load_password(
+                &app.config.tb_config.microsynth_username,
+            )
+            .is_some();
+        }
 
         let mut commands = vec![app.update_config(), app.update(Message::CheckClipboard)];
 
         if !app.config.tb_config.ab1_scan_path.is_empty() {
-            commands.push(app.update(Message::ScanAb1Directory));
+            commands.push(app.update(app.ab1_scan_message()));
         }
 
         if !app.config.tb_config.ab1_scan_path_2.is_empty() {
@@ -6488,6 +6580,75 @@ impl Application for App {
                 config_set!(tb_config, tb_config);
                 return self.update_config();
             }
+            #[cfg(feature = "russh")]
+            Message::SetTbMicrosynthUsername(v) => {
+                let mut tb_config = self.config.tb_config.clone();
+                tb_config.microsynth_username = v.trim().to_string();
+                self.microsynth_password_saved =
+                    crate::sequencing::microsynth::load_password(&tb_config.microsynth_username)
+                        .is_some();
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            #[cfg(feature = "russh")]
+            Message::MicrosynthPasswordInput(v) => {
+                self.microsynth_password_input = v;
+            }
+            #[cfg(feature = "russh")]
+            Message::SaveMicrosynthPassword => {
+                let password = std::mem::take(&mut self.microsynth_password_input);
+                if password.is_empty() {
+                    return Task::none();
+                }
+                match crate::sequencing::microsynth::store_password(
+                    &self.config.tb_config.microsynth_username,
+                    &password,
+                ) {
+                    Ok(()) => {
+                        self.microsynth_password_saved = true;
+                        log::info!("microsynth: password saved to keyring");
+                    }
+                    Err(e) => log::warn!("microsynth: saving password failed: {e:#}"),
+                }
+            }
+            #[cfg(feature = "russh")]
+            Message::SyncMicrosynth => {
+                let username = self.config.tb_config.microsynth_username.clone();
+                let dest = std::path::PathBuf::from(&self.config.tb_config.ab1_scan_path);
+                let max_age_days = self.config.tb_config.report_max_age_days;
+                if username.is_empty() || dest.as_os_str().is_empty() {
+                    return self.update(Message::ScanAb1Directory);
+                }
+                return Task::future(async move {
+                    let user = username.clone();
+                    let password = tokio::task::spawn_blocking(move || {
+                        crate::sequencing::microsynth::load_password(&user)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    let result = match password {
+                        Some(password) => crate::sequencing::microsynth::sync_ab1(
+                            &username,
+                            &password,
+                            &dest,
+                            max_age_days,
+                        )
+                        .await
+                        .map_err(|e| format!("{e:#}")),
+                        None => Err("no Microsynth password in keyring".to_string()),
+                    };
+                    cosmic::action::app(Message::MicrosynthSyncComplete(result))
+                });
+            }
+            #[cfg(feature = "russh")]
+            Message::MicrosynthSyncComplete(result) => {
+                if let Err(e) = result {
+                    log::warn!("microsynth: sync failed: {e}");
+                }
+                // Always scan, so files already on disk are analysed even if the download failed.
+                return self.update(Message::ScanAb1Directory);
+            }
             Message::SetNtfyTopic(v) => {
                 let mut tb_config = self.config.tb_config.clone();
                 tb_config.ntfy_topic = v;
@@ -8500,10 +8661,17 @@ impl Application for App {
         }
 
         if !self.config.tb_config.ab1_scan_path.is_empty() {
-            subscriptions.push(
-                iced::time::every(time::Duration::from_secs(2 * 60 * 60))
-                    .map(|_| Message::ScanAb1Directory),
-            );
+            let every = iced::time::every(time::Duration::from_secs(2 * 60 * 60));
+            // `Subscription::map` closures must not capture, so branch here.
+            #[cfg(feature = "russh")]
+            let sub = if self.microsynth_sync_enabled() {
+                every.map(|_| Message::SyncMicrosynth)
+            } else {
+                every.map(|_| Message::ScanAb1Directory)
+            };
+            #[cfg(not(feature = "russh"))]
+            let sub = every.map(|_| Message::ScanAb1Directory);
+            subscriptions.push(sub);
         }
 
         if !self.config.tb_config.ab1_scan_path_2.is_empty() {
