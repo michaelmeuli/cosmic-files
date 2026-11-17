@@ -47,11 +47,14 @@ The app follows a message-driven state machine (Elm-style) via `libcosmic` (Iced
 
 The core unique feature of this fork. Parses AB1 capillary sequencer files and identifies mycobacterial species/resistance:
 
-- **`mod.rs`** — AB1 chromatogram parsing, Phred-quality trimming, k-mer seeding alignment (word size 11, FNV-1a hashing), pairwise alignment formatting, FASTA database lookup.
+- **`mod.rs`** — AB1 chromatogram parsing, Phred-quality trimming, `align_to_ref` (semiglobal alignment via rust-bio's `pairwise::Aligner`; match +1, mismatch −1, gap open −5, gap extend −1; identity = matches / reference span; gene modules call it on both forward and reverse complement and keep the better hit), `trim_alignment_ends` (sliding-window trimming of low-identity alignment ends), pairwise alignment formatting, FASTA database lookup.
 - **`tb_data.rs`** — Deserializes TBProfiler JSON output (`*.results.json`); confidence ranking (strongest: "Assoc w R" → weakest: "Not assoc w R").
 - **`erm41.rs`** — erm(41) loss-of-function calls for *M. abscessus* macrolide resistance (13 LOF positions; C28 = susceptible, T28 = inducible resistance).
 - **`rrl.rs`** — 23S rRNA macrolide resistance at positions 2057–2058 (wildtype A2057/A2058 = susceptible).
 - **`rrs.rs`** — 16S rRNA species identification.
+- **`rrs3end.rs`** — 16S rRNA 3′-end analysis: position 1248 discriminates *M. marinum* (A1248) from *M. ulcerans* (G1248); otherwise mirrors `rrs.rs`'s aminoglycoside resistance-SNP calling (kept separate via `rrs_snp_calls_3end`).
+- **`rpob.rs`** — rpoB species identification only (no diagnostic SNP calls).
+- **`pnca.rs`** — pncA pyrazinamide resistance for *M. tuberculosis* complex; parses the WHO catalogue (`tbprofiler/mutations.csv`) at startup into per-position nucleotide/amino-acid maps (gene + 50 bp promoter flank) and calls every listed site (`is_susceptible_pnca` combines them into one verdict).
 - **`hsp65.rs`** — hsp65/groEL2 SNP calls for *M. kansasii/gastri* and *M. marinum/ulcerans* discrimination.
 - **`bed.rs`** — BED file format utilities.
 - **`microsynth.rs`** (feature `russh`) — Downloads per-order `.zip` archives from Microsynth's secure download area (SFTP `shop.microsynth.com:22`, webshop login; password in the OS keyring) and extracts their `.ab1` files flat into `ab1_scan_path` (no subfolders; newest file wins on name clashes) (already-extracted archives tracked in `.microsynth_sync.json`) before each periodic scan (`Message::SyncMicrosynth` → `ScanAb1Directory`).
