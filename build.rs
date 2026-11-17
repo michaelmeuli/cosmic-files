@@ -581,7 +581,11 @@ fn is_hsp65_paralog2(features: &[GffFeature], candidate: &GffFeature) -> bool {
 /// layout used by both the vendored ntm-db submodule and the hand-curated
 /// `res/sequences/kansasii-complex` directory) and appends matched gene sequences into the
 /// pooled `myco_*.fasta` reference files under `seq_dir`.
-fn extract_species_gff_sequences(seq_dir: &std::path::Path, db_dir: &std::path::Path, log_tag: &str) {
+fn extract_species_gff_sequences(
+    seq_dir: &std::path::Path,
+    db_dir: &std::path::Path,
+    log_tag: &str,
+) {
     use std::collections::HashSet;
 
     struct Target {
@@ -706,10 +710,16 @@ fn extract_species_gff_sequences(seq_dir: &std::path::Path, db_dir: &std::path::
                             log_tag, species_name, target.gene, target.fasta
                         ),
                         Err(e) => {
-                            println!("cargo:warning={}: write error {}: {e}", log_tag, target.fasta)
+                            println!(
+                                "cargo:warning={}: write error {}: {e}",
+                                log_tag, target.fasta
+                            )
                         }
                     },
-                    Err(e) => println!("cargo:warning={}: open error {}: {e}", log_tag, target.fasta),
+                    Err(e) => println!(
+                        "cargo:warning={}: open error {}: {e}",
+                        log_tag, target.fasta
+                    ),
                 }
             }
         }
@@ -823,7 +833,11 @@ fn main() {
     fetch_myco_sequences(&seq_dir, Some(api_key.as_str()));
     fetch_sequences_from_toml(&seq_dir, Some(api_key.as_str()));
     extract_species_gff_sequences(&seq_dir, &seq_dir.join("ntm-db/db"), "ntm-db");
-    extract_species_gff_sequences(&seq_dir, &seq_dir.join("kansasii-complex"), "kansasii-complex");
+    extract_species_gff_sequences(
+        &seq_dir,
+        &seq_dir.join("kansasii-complex"),
+        "kansasii-complex",
+    );
     check_hsp65_integrity(&seq_dir);
     check_rrl_integrity(&seq_dir);
     check_rrs_integrity(&seq_dir);

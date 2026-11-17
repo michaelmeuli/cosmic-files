@@ -118,9 +118,9 @@ impl Favorite {
     pub fn display_name(&self) -> Option<String> {
         match self {
             Self::Home => Some(crate::fl!("home")),
-            Self::Named { name, .. }
-            | Self::Network { name, .. }
-            | Self::Remote { name, .. } => Some(name.clone()),
+            Self::Named { name, .. } | Self::Network { name, .. } | Self::Remote { name, .. } => {
+                Some(name.clone())
+            }
             _ => self
                 .path_opt()?
                 .file_name()

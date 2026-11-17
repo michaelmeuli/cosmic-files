@@ -404,12 +404,12 @@ pub fn context_menu(
             if selected > 0 {
                 if selected == selected_remote_paths.len() && selected_dir == 0 {
                     if config.pair1_suffix.is_empty() || config.pair2_suffix.is_empty() {
-                        children.push(
-                            menu_item(fl!("run-tb-profiler"), Action::TbProfilerConfigError),
-                        );
+                        children.push(menu_item(
+                            fl!("run-tb-profiler"),
+                            Action::TbProfilerConfigError,
+                        ));
                     } else if is_valid_fastq_selection(&selected_remote_paths, config) {
-                        children
-                            .push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler));
+                        children.push(menu_item(fl!("run-tb-profiler"), Action::RunTbProfiler));
                     }
                 }
                 if matches!(tab.mode, tab::Mode::App) {
@@ -417,14 +417,16 @@ pub fn context_menu(
                     children.push(menu_item(fl!("add-to-sidebar"), Action::AddToSidebar));
                 }
                 if selected == 1 && selected_dir == 0 {
-                    children.push(
-                        menu_item(fl!("delete-remote-file"), Action::DeleteRemoteFiles),
-                    );
+                    children.push(menu_item(
+                        fl!("delete-remote-file"),
+                        Action::DeleteRemoteFiles,
+                    ));
                 }
                 if selected > 1 && selected_dir == 0 {
-                    children.push(
-                        menu_item(fl!("delete-remote-files"), Action::DeleteRemoteFiles),
-                    );
+                    children.push(menu_item(
+                        fl!("delete-remote-files"),
+                        Action::DeleteRemoteFiles,
+                    ));
                 }
                 children.push(menu_item(fl!("download-to"), Action::DownloadTo));
             } else {
