@@ -8,7 +8,7 @@
 //! [`SeqIdHit`] fields (`rrs_snp_calls` vs `rrs_snp_calls_3end`) are kept independent.
 
 use super::{
-    GappedAlignment, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R, SeqIdHit, align_to_ref,
+    GappedAlignment, REF_AMPLICON_RRS3END, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R, SeqIdHit, align_to_ref,
     base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
     trim_alignment_ends,
 };
@@ -171,7 +171,11 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
 
 /// Parsed and substring-deduplicated rrs reference sequences, initialised once.
 static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RRS)));
+    LazyLock::new(|| {
+        let mut refs = parse_multi_fasta(REF_MYCO_RRS);
+        refs.extend(parse_multi_fasta(REF_AMPLICON_RRS3END));
+        dedup_substring_same_desc(refs)
+    });
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall3End {
@@ -346,7 +350,6 @@ pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
 
     let mut hits: Vec<SeqIdHit> = RRS_REFS
         .iter()
-        .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRS_REF_LEN)
         .map(|(accession, description, refseq)| {
             let fwd = align_to_ref(query, refseq);
             let rev = align_to_ref(&rc, refseq);
@@ -385,10 +388,6 @@ pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
             }
         })
         .collect();
-    hits.sort_by(|a, b| {
-        b.identity
-            .partial_cmp(&a.identity)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    super::sort_hits_by_identity(&mut hits);
     hits
 }

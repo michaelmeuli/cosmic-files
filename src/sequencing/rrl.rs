@@ -11,7 +11,7 @@ use super::{
     GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc,
     parse_multi_fasta, trim_alignment_ends,
 };
-use super::{REF_MYCO_RRL, RRL_ANCHOR_L, RRL_ANCHOR_R};
+use super::{REF_AMPLICON_RRL, REF_MYCO_RRL, RRL_ANCHOR_L, RRL_ANCHOR_R};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -222,7 +222,11 @@ fn parse_rrl_resistance_snps(csv: &str) -> RrlSnpMap {
 
 /// Parsed and substring-deduplicated rrl reference sequences, initialised once.
 static RRL_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RRL)));
+    LazyLock::new(|| {
+        let mut refs = parse_multi_fasta(REF_MYCO_RRL);
+        refs.extend(parse_multi_fasta(REF_AMPLICON_RRL));
+        dedup_substring_same_desc(refs)
+    });
 
 /// Resistance SNP maps per species description, parsed once from each species' ntm-db
 /// `variants.csv`.
@@ -396,8 +400,8 @@ pub(super) fn find_rrl_ntm_display_window(
 /// whose accession contains `:`, marking a full-gene ntm-db sequence rather than an NCBI
 /// partial sequence — see `extract_ntm_db_sequences()` in `build.rs`).
 ///
-/// References shorter than [`super::MIN_RRL_REF_LEN`] are excluded up front, since rrl partial
-/// sequences below that length are too short to distinguish species reliably.
+/// Short amplicon references are included alongside full-length ones; identity ties go to the
+/// longer reference.
 ///
 /// The reference database is generated at build time by filtering NCBI Nucleotide for
 /// `Mycobacteriaceae[Organism] AND (23S ribosomal RNA[Title] OR rrl[Gene Name]) AND
@@ -410,7 +414,6 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
 
     let mut hits: Vec<SeqIdHit> = RRL_REFS
         .iter()
-        .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRL_REF_LEN)
         .map(|(accession, description, refseq)| {
             let fwd = align_to_ref(query, refseq);
             let rev = align_to_ref(&rc, refseq);
@@ -450,10 +453,6 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
         })
         .collect();
 
-    hits.sort_by(|a, b| {
-        b.identity
-            .partial_cmp(&a.identity)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    super::sort_hits_by_identity(&mut hits);
     hits
 }

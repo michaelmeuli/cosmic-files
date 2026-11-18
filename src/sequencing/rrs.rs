@@ -8,7 +8,7 @@
 //! (position 1248).
 
 use super::{
-    GappedAlignment, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
+    GappedAlignment, REF_AMPLICON_RRS, REF_MYCO_RRS, SeqIdHit, align_to_ref, base_at_ref_pos,
     dedup_substring_same_desc, parse_multi_fasta, reverse_complement, trim_alignment_ends,
 };
 use serde::{Deserialize, Serialize};
@@ -104,7 +104,11 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
 
 /// Parsed and substring-deduplicated rrs reference sequences, initialised once.
 static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RRS)));
+    LazyLock::new(|| {
+        let mut refs = parse_multi_fasta(REF_MYCO_RRS);
+        refs.extend(parse_multi_fasta(REF_AMPLICON_RRS));
+        dedup_substring_same_desc(refs)
+    });
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall {
@@ -226,8 +230,8 @@ fn call_rrs_snps(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall> {
 ///
 /// # Algorithm
 ///
-/// For each reference sequence (filtered to ≥ [`super::MIN_RRS_REF_LEN`] bp to avoid inflated
-/// scores from truncated entries):
+/// For each reference sequence (full-length NCBI/ntm-db entries plus short amplicon
+/// references; ties on identity go to the longer reference):
 ///
 /// 1. **Strand**: both forward and reverse-complement alignments are scored via
 ///    [`align_to_ref`]; the strand with the higher identity wins.
@@ -240,7 +244,6 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let mut hits: Vec<SeqIdHit> = RRS_REFS
         .iter()
-        .filter(|(_, _, refseq)| refseq.len() >= super::MIN_RRS_REF_LEN)
         .map(|(accession, description, refseq)| {
             let fwd = align_to_ref(query, refseq);
             let rev = align_to_ref(&rc, refseq);
@@ -279,10 +282,6 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
             }
         })
         .collect();
-    hits.sort_by(|a, b| {
-        b.identity
-            .partial_cmp(&a.identity)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    super::sort_hits_by_identity(&mut hits);
     hits
 }

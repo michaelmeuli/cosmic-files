@@ -4,14 +4,18 @@
 //! rrs, it carries no diagnostic SNP calls in [`SeqIdHit`] — those fields are always left empty).
 
 use super::{
-    REF_MYCO_RPOB, SeqIdHit, align_to_ref, dedup_substring_same_desc, parse_multi_fasta,
-    reverse_complement, trim_alignment_ends,
+    REF_AMPLICON_RPOB, REF_MYCO_RPOB, SeqIdHit, align_to_ref, dedup_substring_same_desc,
+    parse_multi_fasta, reverse_complement, trim_alignment_ends,
 };
 use std::sync::LazyLock;
 
-/// Parsed and substring-deduplicated rpoB reference sequences, initialised once.
-static RPOB_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_RPOB)));
+/// Parsed and substring-deduplicated rpoB reference sequences (NCBI type material plus the
+/// cosmic-seq amplicon references), initialised once.
+static RPOB_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
+    let mut refs = parse_multi_fasta(REF_MYCO_RPOB);
+    refs.extend(parse_multi_fasta(REF_AMPLICON_RPOB));
+    dedup_substring_same_desc(refs)
+});
 
 /// Identifies the closest-matching mycobacterial species for an rpoB read.
 ///

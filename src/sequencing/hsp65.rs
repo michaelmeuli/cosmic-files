@@ -12,7 +12,7 @@
 
 use super::reverse_complement;
 use super::{
-    GappedAlignment, REF_MYCO_HSP65, SeqIdHit, align_to_ref, base_at_ref_pos,
+    GappedAlignment, REF_AMPLICON_HSP65, REF_MYCO_HSP65, SeqIdHit, align_to_ref, base_at_ref_pos,
     dedup_substring_same_desc, parse_multi_fasta, trim_alignment_ends,
 };
 use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
@@ -82,7 +82,11 @@ fn call_marinum_ulcerans_snps(ga: &GappedAlignment) -> Vec<MarinumUlceransSnpCal
 
 /// Parsed and substring-deduplicated hsp65 reference sequences, initialised once.
 static HSP65_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| dedup_substring_same_desc(parse_multi_fasta(REF_MYCO_HSP65)));
+    LazyLock::new(|| {
+        let mut refs = parse_multi_fasta(REF_MYCO_HSP65);
+        refs.extend(parse_multi_fasta(REF_AMPLICON_HSP65));
+        dedup_substring_same_desc(refs)
+    });
 
 /// Trim hsp65 amplification primers from a sequencing read.
 ///
