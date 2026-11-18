@@ -578,9 +578,8 @@ fn is_hsp65_paralog2(features: &[GffFeature], candidate: &GffFeature) -> bool {
 }
 
 /// Walks `db_dir` for per-species `<Genus>_<species>/{genome.gff,genome.fasta}` pairs (the
-/// layout used by both the vendored ntm-db submodule and the hand-curated
-/// `res/sequences/kansasii-complex` directory) and appends matched gene sequences into the
-/// pooled `myco_*.fasta` reference files under `seq_dir`.
+/// layout of the vendored ntm-db submodule's `db/` directory) and appends matched gene
+/// sequences into the pooled `myco_*.fasta` reference files under `seq_dir`.
 fn extract_species_gff_sequences(
     seq_dir: &std::path::Path,
     db_dir: &std::path::Path,
@@ -726,9 +725,12 @@ fn extract_species_gff_sequences(
     }
 }
 
-/// Accessions that must be present in myco_hsp65.fasta for SNP dispatch to work.
-/// Keep in sync with the constants in src/sequencing/hsp65.rs.
-const HSP65_REQUIRED_ACCS: &[&str] = &["AF547836", "AF547849", "AY299134", "AY299145"];
+/// hsp65 SNP-reference accessions + positions, shared verbatim with the crate
+/// (`sequencing::hsp65_snp_refs`) so build-time validation can't drift from runtime dispatch.
+#[allow(dead_code)]
+mod hsp65_snp_refs {
+    include!("src/sequencing/hsp65_snp_refs.rs");
+}
 
 /// Species that must appear as descriptions in myco_rrl.fasta for RRL_RESISTANCE_SNPS lookups
 /// to work. Keep in sync with the keys in RRL_RESISTANCE_SNPS in src/sequencing/rrl.rs.
@@ -805,23 +807,90 @@ fn check_rrs_integrity(seq_dir: &std::path::Path) {
     }
 }
 
+/// Minimal multi-FASTA reader mirroring `parse_multi_fasta()`'s `(id, "Genus species", seq)`
+/// split (without its subspecies folding, which none of the hsp65 SNP species need).
+fn read_fasta_records(text: &str) -> Vec<(String, String, Vec<u8>)> {
+    let mut out: Vec<(String, String, Vec<u8>)> = Vec::new();
+    for line in text.lines() {
+        if let Some(header) = line.strip_prefix('>') {
+            let mut words = header.splitn(4, ' ');
+            let id = words.next().unwrap_or("").to_string();
+            let genus = words.next().unwrap_or("");
+            let species = words.next().unwrap_or("");
+            out.push((id, format!("{genus} {species}").trim().to_string(), Vec::new()));
+        } else if let Some((_, _, seq)) = out.last_mut() {
+            seq.extend(line.trim().bytes().map(|b| b.to_ascii_uppercase()));
+        }
+    }
+    out
+}
+
+/// Validates the hsp65 SNP coordinate references (`src/sequencing/hsp65_snp_refs.rs`) against
+/// the pooled references the app will actually load (`myco_hsp65.fasta` + the TB11/TB12
+/// amplicons):
+/// - each reference accession is present with the expected length (coordinates are offsets into
+///   that exact entry);
+/// - each reference carries its own species' allele at every SNP position;
+/// - no reference is an exact substring of a longer same-species entry (runtime dedup exempts
+///   SNP refs, but this flags the situation explicitly if data ever changes).
 fn check_hsp65_integrity(seq_dir: &std::path::Path) {
-    let path = seq_dir.join("myco_hsp65.fasta");
-    let fasta = match fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) => panic!("cannot read myco_hsp65.fasta: {e}"),
-    };
-    let present: std::collections::HashSet<&str> = fasta
-        .lines()
-        .filter(|l| l.starts_with('>'))
-        .filter_map(|l| l[1..].split_whitespace().next())
-        .map(|id| id.split('.').next().unwrap_or(id))
-        .collect();
-    for acc in HSP65_REQUIRED_ACCS {
-        assert!(
-            present.contains(acc),
-            "myco_hsp65.fasta is missing required accession {acc} — SNP dispatch will not work"
-        );
+    use hsp65_snp_refs::HSP65_SNP_PAIRS;
+
+    const AMPLICON_HSP65: &str = "references/hsp65_TB11_TB12.fasta";
+    println!("cargo:rerun-if-changed=src/sequencing/hsp65_snp_refs.rs");
+    println!("cargo:rerun-if-changed=res/sequences/{AMPLICON_HSP65}");
+
+    let mut records = Vec::new();
+    for file in ["myco_hsp65.fasta", AMPLICON_HSP65] {
+        let text = fs::read_to_string(seq_dir.join(file))
+            .unwrap_or_else(|e| panic!("cannot read {file}: {e}"));
+        records.extend(read_fasta_records(&text));
+    }
+
+    for pair in HSP65_SNP_PAIRS {
+        for (i, snp_ref) in pair.refs.iter().enumerate() {
+            let acc = snp_ref.accession;
+            let (_, desc, seq) = records
+                .iter()
+                .find(|(id, _, _)| id.split('.').next() == Some(acc))
+                .unwrap_or_else(|| {
+                    panic!("myco_hsp65.fasta is missing SNP reference {acc} — SNP dispatch will not work")
+                });
+            assert_eq!(
+                desc, snp_ref.species,
+                "hsp65 SNP reference {acc}: header species is \"{desc}\", expected \"{}\"",
+                snp_ref.species
+            );
+            assert_eq!(
+                seq.len(),
+                snp_ref.len,
+                "hsp65 SNP reference {acc}: length {} != expected {} — record revised? SNP positions may be shifted",
+                seq.len(),
+                snp_ref.len
+            );
+            for &(pos, allele0, allele1) in pair.snps {
+                let expected = if i == 0 { allele0 } else { allele1 };
+                let actual = seq.get(pos).copied();
+                assert_eq!(
+                    actual,
+                    Some(expected),
+                    "hsp65 SNP reference {acc} ({}): base at 0-based pos {pos} is {:?}, table expects '{}'",
+                    snp_ref.species,
+                    actual.map(char::from),
+                    char::from(expected)
+                );
+            }
+            if let Some((other, _, _)) = records.iter().find(|(id, d, s)| {
+                id.split('.').next() != Some(acc)
+                    && d == desc
+                    && s.len() > seq.len()
+                    && s.windows(seq.len()).any(|w| w == seq.as_slice())
+            }) {
+                println!(
+                    "cargo:warning=hsp65 SNP reference {acc} is a substring of {other}; kept only because HSP65_REFS exempts SNP references from dedup"
+                );
+            }
+        }
     }
 }
 
@@ -833,11 +902,6 @@ fn main() {
     fetch_myco_sequences(&seq_dir, Some(api_key.as_str()));
     fetch_sequences_from_toml(&seq_dir, Some(api_key.as_str()));
     extract_species_gff_sequences(&seq_dir, &seq_dir.join("ntm-db/db"), "ntm-db");
-    extract_species_gff_sequences(
-        &seq_dir,
-        &seq_dir.join("kansasii-complex"),
-        "kansasii-complex",
-    );
     check_hsp65_integrity(&seq_dir);
     check_rrl_integrity(&seq_dir);
     check_rrs_integrity(&seq_dir);

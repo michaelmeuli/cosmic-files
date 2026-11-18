@@ -1,48 +1,48 @@
 //! hsp65/groEL2 species identification and discrimination.
 //!
-//! Aligns a trimmed hsp65 read against the [`REF_MYCO_HSP65`] database (built at compile time
-//! from NCBI + [ntm-db](https://github.com/pathogen-profiler/ntm-db), see
-//! [`identify_sequence_hsp65`]) to find the best-matching mycobacterial reference. hsp65 alone
-//! cannot always separate two closely related species pairs, so once a hit is identified as
-//! belonging to one of those pairs, a small fixed set of diagnostic SNP positions is checked
-//! against the alignment to call the specific species:
+//! Aligns a trimmed hsp65 read against the pooled hsp65 references ([`REF_MYCO_HSP65`]: NCBI
+//! type material + [ntm-db](https://github.com/pathogen-profiler/ntm-db), built at compile
+//! time; plus the [`REF_AMPLICON_HSP65`] TB11/TB12 amplicons) to find the best-matching
+//! mycobacterial reference (see [`identify_sequence_hsp65`]). hsp65 alone cannot always separate
+//! two closely related species pairs, so once a hit is identified as one of those pairs, a small
+//! fixed set of diagnostic SNP positions is checked against the alignment to call the specific
+//! species:
 //!
-//! - *M. kansasii* vs *M. gastri* ([`KANSASII_GASTRI_SNPS`], [`KansasiiGastriSnpCall`])
-//! - *M. marinum* vs *M. ulcerans* ([`MARINUM_ULCERANS_SNPS`], [`MarinumUlceransSnpCall`])
+//! - *M. kansasii* vs *M. gastri* ([`KANSASII_GASTRI`], [`KansasiiGastriSnpCall`])
+//! - *M. marinum* vs *M. ulcerans* ([`MARINUM_ULCERANS`], [`MarinumUlceransSnpCall`])
+//!
+//! The SNP positions are offsets into four specific GenBank partial-cds entries, not into the
+//! full-length or amplicon references. Only hits on exactly those accessions get SNP calls, and
+//! they are exempt from substring dedup (see [`super::hsp65_snp_refs`]). `build.rs`
+//! (`check_hsp65_integrity`) checks each entry's length and its alleles at build time.
 
+use super::hsp65_snp_refs::{HSP65_SNP_PAIRS, KANSASII_GASTRI, MARINUM_ULCERANS};
 use super::reverse_complement;
 use super::{
     GappedAlignment, REF_AMPLICON_HSP65, REF_MYCO_HSP65, SeqIdHit, align_to_ref, base_at_ref_pos,
     dedup_substring_same_desc, parse_multi_fasta, trim_alignment_ends,
 };
-use super::{KANSASII_GASTRI_ACCS, MARINUM_ULCERANS_ACCS};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
 /// Diagnostic positions distinguishing *M. kansasii* from *M. gastri*, as
 /// `(0-based ref pos, gastri_base, kansasii_base)`.
-const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = &[
-    // (0-based ref pos, gastri_base, kansasii_base)
-    (100, b'C', b'T'),
-    (130, b'C', b'T'),
-    (148, b'G', b'A'),
-    (193, b'G', b'C'),
-    (283, b'C', b'G'),
-    (304, b'T', b'C'),
-    (349, b'G', b'C'),
-    (399, b'G', b'A'),
-];
+const KANSASII_GASTRI_SNPS: &[(usize, u8, u8)] = KANSASII_GASTRI.snps;
 
 /// Diagnostic positions distinguishing *M. marinum* from *M. ulcerans*, as
 /// `(0-based ref pos, marinum_base, ulcerans_base)`.
-const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = &[
-    // (0-based ref pos, marinum_base, ulcerans_base)
-    (20, b'C', b'T'),
-    (204, b'T', b'C'),
-    (212, b'G', b'A'),
-    (482, b'T', b'C'),
-    (500, b'G', b'C'),
-];
+const MARINUM_ULCERANS_SNPS: &[(usize, u8, u8)] = MARINUM_ULCERANS.snps;
+
+/// Whether `accession` (version suffix stripped) is one of `pair`'s SNP coordinate references.
+fn is_ref_of(pair: &super::hsp65_snp_refs::Hsp65SnpPair, accession: &str) -> bool {
+    pair.refs.iter().any(|r| r.accession == accession)
+}
+
+/// Whether `raw_accession` (with or without version suffix) is any hsp65 SNP reference.
+fn is_snp_ref_accession(raw_accession: &str) -> bool {
+    let acc = raw_accession.split('.').next().unwrap_or(raw_accession);
+    HSP65_SNP_PAIRS.iter().any(|pair| is_ref_of(pair, acc))
+}
 
 /// Reads the query base at each [`KANSASII_GASTRI_SNPS`] position out of an existing alignment.
 /// Positions that fall outside the aligned region (or land on a gap) are silently dropped.
@@ -81,11 +81,19 @@ fn call_marinum_ulcerans_snps(ga: &GappedAlignment) -> Vec<MarinumUlceransSnpCal
 }
 
 /// Parsed and substring-deduplicated hsp65 reference sequences, initialised once.
+///
+/// The SNP coordinate references are kept out of dedup. A longer same-species entry that
+/// contains one of them (e.g. a 441 bp TB11/TB12 amplicon around a 424 bp GenBank entry) would
+/// otherwise remove it, and SNP calls would silently disappear.
 static HSP65_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
     LazyLock::new(|| {
         let mut refs = parse_multi_fasta(REF_MYCO_HSP65);
         refs.extend(parse_multi_fasta(REF_AMPLICON_HSP65));
-        dedup_substring_same_desc(refs)
+        let (mut snp_refs, others): (Vec<_>, Vec<_>) = refs
+            .into_iter()
+            .partition(|(acc, _, _)| is_snp_ref_accession(acc));
+        snp_refs.extend(dedup_substring_same_desc(others));
+        snp_refs
     });
 
 /// Trim hsp65 amplification primers from a sequencing read.
@@ -142,7 +150,8 @@ pub fn trim_hsp65_primers(seq: &[u8]) -> Vec<u8> {
 /// `Mycobacteriaceae[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN]
 /// AND type_material[Filter]` (`fetch_myco_sequences()` in `build.rs`), plus the hsp65
 /// sequences found in [ntm-db](https://github.com/pathogen-profiler/ntm-db)
-/// (`extract_ntm_db_sequences()` in `build.rs`).
+/// (`extract_species_gff_sequences()` in `build.rs`), plus the committed TB11/TB12 amplicons
+/// ([`REF_AMPLICON_HSP65`]).
 pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
     let query = trim_hsp65_primers(query);
     let query = query.as_slice();
@@ -164,13 +173,12 @@ pub fn identify_sequence_hsp65(query: &[u8]) -> Vec<SeqIdHit> {
                 (fwd, false)
             };
             let ga = trim_alignment_ends(ga);
-            let kansasii_gastri_snp_calls = if KANSASII_GASTRI_ACCS.contains(&accession.as_str()) {
+            let kansasii_gastri_snp_calls = if is_ref_of(&KANSASII_GASTRI, &accession) {
                 call_kansasii_gastri_snps(&ga)
             } else {
                 vec![]
             };
-            let marinum_ulcerans_snp_calls = if MARINUM_ULCERANS_ACCS.contains(&accession.as_str())
-            {
+            let marinum_ulcerans_snp_calls = if is_ref_of(&MARINUM_ULCERANS, &accession) {
                 call_marinum_ulcerans_snps(&ga)
             } else {
                 vec![]
@@ -270,5 +278,58 @@ impl MarinumUlceransSnpCall {
         } else {
             "?"
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every SNP coordinate reference must survive into `HSP65_REFS` (i.e. not be removed by
+    /// substring dedup), with the expected length and the expected allele at every position.
+    #[test]
+    fn snp_refs_survive_dedup_and_match_alleles() {
+        for pair in HSP65_SNP_PAIRS {
+            for (i, snp_ref) in pair.refs.iter().enumerate() {
+                let (_, desc, seq) = HSP65_REFS
+                    .iter()
+                    .find(|(acc, _, _)| acc.split('.').next() == Some(snp_ref.accession))
+                    .unwrap_or_else(|| panic!("{} missing from HSP65_REFS", snp_ref.accession));
+                assert_eq!(desc, snp_ref.species, "{}", snp_ref.accession);
+                assert_eq!(seq.len(), snp_ref.len, "{}", snp_ref.accession);
+                for &(pos, a0, a1) in pair.snps {
+                    let expected = if i == 0 { a0 } else { a1 };
+                    assert_eq!(
+                        seq[pos].to_ascii_uppercase(),
+                        expected,
+                        "{} pos {pos}",
+                        snp_ref.accession
+                    );
+                }
+            }
+        }
+    }
+
+    /// Each reference, aligned against itself, must call its own species at every position.
+    #[test]
+    fn snp_refs_call_their_own_species() {
+        let seq_of = |acc: &str| {
+            HSP65_REFS
+                .iter()
+                .find(|(a, _, _)| a.split('.').next() == Some(acc))
+                .map(|(_, _, s)| s.clone())
+                .unwrap()
+        };
+        let gastri = seq_of(KANSASII_GASTRI.refs[0].accession);
+        let ga = align_to_ref(&gastri, &gastri);
+        let calls = call_kansasii_gastri_snps(&ga);
+        assert_eq!(calls.len(), KANSASII_GASTRI_SNPS.len());
+        assert!(calls.iter().all(KansasiiGastriSnpCall::is_gastri));
+
+        let ulcerans = seq_of(MARINUM_ULCERANS.refs[1].accession);
+        let ga = align_to_ref(&ulcerans, &ulcerans);
+        let calls = call_marinum_ulcerans_snps(&ga);
+        assert_eq!(calls.len(), MARINUM_ULCERANS_SNPS.len());
+        assert!(calls.iter().all(MarinumUlceransSnpCall::is_ulcerans));
     }
 }
