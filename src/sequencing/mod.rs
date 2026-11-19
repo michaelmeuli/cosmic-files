@@ -29,6 +29,7 @@
 //! `myco_erm41.fasta` is generated at build time but unused; erm41 identification uses
 //! per-subspecies references (`erm41_abscessus_ATCC_19977.fasta`, `erm41_bolletii_CIP_108541.fasta`, `erm41_massiliense_CCUG_48898.fasta`) instead.
 
+pub mod ab1_filename;
 pub mod batch;
 pub mod bed;
 pub mod erm41;

@@ -17,6 +17,7 @@ use std::sync::{LazyLock, Mutex, PoisonError, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+pub use super::ab1_filename::{Ab1Gene, parse_ab1_filename};
 use super::{
     DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
@@ -94,57 +95,11 @@ pub struct SampleSusceptibilityRecord {
     pub seq_id_hits: Vec<SeqIdHit>,
 }
 
-/// Find the first run of exactly 10 consecutive ASCII digits starting with "20"
-/// (the lab's sample ID convention) that is not embedded inside a longer digit run.
-fn find_sample_id(s: &str) -> Option<&str> {
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i + 10 <= bytes.len() {
-        if bytes[i..i + 2] == *b"20" && bytes[i..i + 10].iter().all(|b| b.is_ascii_digit()) {
-            let before_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
-            let after_ok = i + 10 == bytes.len() || !bytes[i + 10].is_ascii_digit();
-            if before_ok && after_ok {
-                return Some(&s[i..i + 10]);
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Extract `(sample_id, gene)` from an AB1 filename.
-///
-/// `sample_id` is the first token of 10 digits starting with "20", or a
-/// fallback of the full stem when no such token is found.
-/// Gene is inferred from keywords anywhere in the lowercase filename.
-pub fn parse_ab1_filename(name: &str) -> (String, Option<String>) {
-    let stem = std::path::Path::new(name)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(name);
-
-    let sample_id = find_sample_id(stem).unwrap_or(stem).to_string();
-
-    let lower_name = name.to_ascii_lowercase();
-    let gene = if lower_name.contains("erm41") || lower_name.contains("erm") {
-        Some("erm(41)".to_string())
-    } else if lower_name.contains("hsp65") || lower_name.contains("65kda") {
-        Some("hsp65".to_string())
-    } else if lower_name.contains("rpob") || lower_name.contains("rpo") {
-        Some("rpoB".to_string())
-    } else if lower_name.contains("mbak14") || lower_name.contains("mbak-14") {
-        Some("16S".to_string())
-    } else if lower_name.contains("1098s") || lower_name.contains("1525a") {
-        Some("16S 3'-End".to_string())
-    } else if lower_name.contains("rrl") || lower_name.contains("mclr") {
-        Some("rrl".to_string())
-    } else if lower_name.contains("pnca") {
-        Some("pncA".to_string())
-    } else {
-        None
-    };
-
-    (sample_id, gene)
+/// `true` if a disk-cached record still carries the gene the current filename parser assigns,
+/// so records written by an older parser (e.g. `erm39` labelled erm(41), or Mtb RRDR reads
+/// labelled rpoB) are re-analysed instead of reused.
+fn cached_gene_matches(record: &SampleSusceptibilityRecord) -> bool {
+    record.gene.as_deref() == parse_ab1_filename(&record.file_name).1.map(Ab1Gene::label)
 }
 
 /// For 16S hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
@@ -306,7 +261,10 @@ pub fn scan_ab1_directory(
 
         // Disk cache hit: mtime unchanged and seq_id_hits stored → reuse previous result.
         if let Some((cached_mtime, cached_record)) = disk_cache.get(&path_key) {
-            if *cached_mtime == mtime_secs && !cached_record.seq_id_hits.is_empty() {
+            if *cached_mtime == mtime_secs
+                && !cached_record.seq_id_hits.is_empty()
+                && cached_gene_matches(cached_record)
+            {
                 log::debug!(
                     "ab1_scan: disk cache hit for {} ({} hits, canonical={})",
                     path.display(),
@@ -318,10 +276,11 @@ pub fn scan_ab1_directory(
                 continue;
             } else {
                 log::debug!(
-                    "ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={})",
+                    "ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={}, gene_match={})",
                     path.display(),
                     *cached_mtime == mtime_secs,
-                    cached_record.seq_id_hits.len()
+                    cached_record.seq_id_hits.len(),
+                    cached_gene_matches(cached_record)
                 );
             }
         } else {
@@ -391,42 +350,28 @@ fn analyse_ab1_file(
 
     // Dispatch on the gene `parse_ab1_filename` inferred, so the gene label in the record and
     // the analysis that runs can never disagree (it is the single source of keyword matching).
-    let gene_is = |name: &str| gene.as_deref() == Some(name);
-    let is_erm41 = gene_is("erm(41)");
-    let is_hsp65 = gene_is("hsp65");
-    let is_rpob = gene_is("rpoB");
-    let is_16s = gene_is("16S");
-    let is_16s3end = gene_is("16S 3'-End");
-    let is_23s_ntm = gene_is("rrl");
-    let is_pnca = gene_is("pncA");
+    let is_16s = gene == Some(Ab1Gene::Rrs16S);
 
     let ab1_seq = parse_ab1_sequence(&bytes);
     let ab1_qual = parse_ab1_quality(&bytes);
 
-    let mut seq_id_hits = if let Some(seq) = ab1_seq.as_ref() {
-        let trimmed: &[u8] = match &ab1_qual {
-            Some(qual) => trim_to_min_quality(seq, qual, 20).unwrap_or(seq.as_slice()),
-            None => seq.as_slice(),
-        };
-        if is_erm41 {
-            identify_sequence_erm41(trimmed)
-        } else if is_hsp65 {
-            identify_sequence_hsp65(trimmed)
-        } else if is_rpob {
-            identify_sequence_rpob(trimmed)
-        } else if is_23s_ntm {
-            identify_sequence_rrl_ntm(trimmed)
-        } else if is_16s {
-            identify_sequence_16s(trimmed)
-        } else if is_16s3end {
-            identify_sequence_16s3end(trimmed)
-        } else if is_pnca {
-            identify_sequence_pnca(trimmed)
-        } else {
-            Vec::new()
+    let mut seq_id_hits = match (ab1_seq.as_ref(), gene) {
+        (Some(seq), Some(gene)) => {
+            let trimmed: &[u8] = match &ab1_qual {
+                Some(qual) => trim_to_min_quality(seq, qual, 20).unwrap_or(seq.as_slice()),
+                None => seq.as_slice(),
+            };
+            match gene {
+                Ab1Gene::Erm41 => identify_sequence_erm41(trimmed),
+                Ab1Gene::Hsp65 => identify_sequence_hsp65(trimmed),
+                Ab1Gene::RpoB => identify_sequence_rpob(trimmed),
+                Ab1Gene::Rrl => identify_sequence_rrl_ntm(trimmed),
+                Ab1Gene::Rrs16S => identify_sequence_16s(trimmed),
+                Ab1Gene::Rrs3End => identify_sequence_16s3end(trimmed),
+                Ab1Gene::PncA => identify_sequence_pnca(trimmed),
+            }
         }
-    } else {
-        Vec::new()
+        _ => Vec::new(),
     };
     // Each identify_sequence_* function returns hits already sorted descending by identity;
     // keep only the top 10 before cloning into the long-lived caches below, since scanning
@@ -533,19 +478,16 @@ fn analyse_ab1_file(
 
     let record = SampleSusceptibilityRecord {
         sample_id,
-        gene,
+        gene: gene.map(|g| g.label().to_string()),
         file_name,
         file_path: path.to_path_buf(),
         file_created,
         susceptibility_calls,
-        species: if is_16s {
-            species_from_16s_hits(&seq_id_hits)
-        } else if is_16s3end {
-            species_from_16s3end(&seq_id_hits)
-        } else if is_rpob {
-            species_from_rpob_hits(&seq_id_hits)
-        } else {
-            seq_id_hits.first().map(|h| h.description.clone())
+        species: match gene {
+            Some(Ab1Gene::Rrs16S) => species_from_16s_hits(&seq_id_hits),
+            Some(Ab1Gene::Rrs3End) => species_from_16s3end(&seq_id_hits),
+            Some(Ab1Gene::RpoB) => species_from_rpob_hits(&seq_id_hits),
+            _ => seq_id_hits.first().map(|h| h.description.clone()),
         },
         identity: seq_id_hits.first().map(|h| h.identity),
         is_susceptible,
@@ -560,7 +502,7 @@ fn insert_cached_record(canonical_path: PathBuf, record: &SampleSusceptibilityRe
     if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
         guard.insert(canonical_path, record.seq_id_hits.clone());
     }
-    if record.gene.as_deref() == Some("16S")
+    if record.gene.as_deref() == Some(Ab1Gene::Rrs16S.label())
         && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
     {
         guard.insert(record.sample_id.clone(), record.seq_id_hits.clone());
@@ -619,6 +561,7 @@ pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<Seq
         if let Some((_, disk_cache)) = guard.as_ref()
             && let Some((cached_mtime, record)) = disk_cache.get(&path_key)
             && *cached_mtime == mtime_secs
+            && cached_gene_matches(record)
         {
             log::debug!("ab1_preview: disk cache hit for {}", path.display());
             let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -1007,17 +950,6 @@ fn days_to_ymd(days: u32) -> (u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_ab1_filename() {
-        let (id, gene) = parse_ab1_filename("2026311072 rrl R 2.4.26_MCLR 21R.ab1");
-        assert_eq!(id, "2026311072");
-        assert_eq!(gene.as_deref(), Some("rrl"));
-
-        let (id, gene) = parse_ab1_filename("12345.ab1");
-        assert_eq!(id, "12345");
-        assert_eq!(gene, None);
-    }
 
     #[test]
     fn test_system_time_to_iso8601() {

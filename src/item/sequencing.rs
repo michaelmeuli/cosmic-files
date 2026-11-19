@@ -8,7 +8,7 @@ use std::path::Path;
 use super::{Item, ItemMetadata};
 use crate::fl;
 use crate::location::Location;
-use crate::sequencing::batch::parse_ab1_filename;
+use crate::sequencing::batch::{Ab1Gene, parse_ab1_filename};
 use crate::sequencing::rrl::{
     RrlSusceptibilityCalls, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare,
 };
@@ -204,29 +204,34 @@ impl Item {
         lower.ends_with(".fasta") || lower.ends_with(".fa")
     }
 
+    /// Gene inferred from the file name by the same parser the batch scan uses, so the preview
+    /// shows the analysis the scan ran. FASTA files get no gene preview.
+    fn ab1_gene(&self) -> Option<Ab1Gene> {
+        if self.is_fasta() {
+            None
+        } else {
+            parse_ab1_filename(&self.name).1
+        }
+    }
+
     pub fn is_erm41(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("erm41") || lower.contains("erm"))
+        self.ab1_gene() == Some(Ab1Gene::Erm41)
     }
 
     pub fn is_hsp65(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("hsp65") || lower.contains("65kda"))
+        self.ab1_gene() == Some(Ab1Gene::Hsp65)
     }
 
     pub fn is_rpob_ntm(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("2573f") || lower.contains("3337r")
+        self.ab1_gene() == Some(Ab1Gene::RpoB)
     }
 
     pub fn is_16s(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("mbak14") || lower.contains("mbak-14")
+        self.ab1_gene() == Some(Ab1Gene::Rrs16S)
     }
 
     pub fn is_16s3end(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("1098s") || lower.contains("1525a")
+        self.ab1_gene() == Some(Ab1Gene::Rrs3End)
     }
 
     /// Returns the sample's 16S seq_id_hits, first by looking for a sibling 16S AB1 in the
@@ -295,13 +300,11 @@ impl Item {
     }
 
     pub fn is_rrl_ntm(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && (lower.contains("mclr"))
+        self.ab1_gene() == Some(Ab1Gene::Rrl)
     }
 
     pub fn is_pnca(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        !self.is_fasta() && lower.contains("pnca")
+        self.ab1_gene() == Some(Ab1Gene::PncA)
     }
 
     pub fn preview_tbprofiler_json(&self) -> Element<'_, Message> {

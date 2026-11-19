@@ -19,7 +19,8 @@ are the optional Microsynth download (`microsynth.rs`) and the ntfy push (`ntfy_
 | File | Role |
 |---|---|
 | [`mod.rs`](mod.rs) | Shared core: AB1 parsing (`parse_ab1_sequence`, `parse_ab1_quality`, `Ab1Channels::from_bytes`), quality trimming (`trim_to_min_quality`), primer trimming (`trim_start_end`), `reverse_complement`, alignment (`align_to_ref`, `trim_alignment_ends`, `base_at_ref_pos`), FASTA parsing, the embedded reference FASTAs, the key types (`SeqIdHit`, `SeqData`, `SusceptibilityCalls`), and the PDF report (`build_report_pdf`). |
-| [`batch.rs`](batch.rs) | Directory scanning (`scan_ab1_directory`), per-file pipeline (`analyse_ab1_file`), filename parsing (`parse_ab1_filename`), in-memory and on-disk caches, preview analysis (`analyse_ab1_for_preview`), CSV export (`write_ab1_csv`, `write_rare_mutations_csv`). |
+| [`ab1_filename.rs`](ab1_filename.rs) | Filename parsing (`parse_ab1_filename`): lab number → `sample_id`, marker keywords → `Ab1Gene` (see §3). |
+| [`batch.rs`](batch.rs) | Directory scanning (`scan_ab1_directory`), per-file pipeline (`analyse_ab1_file`), in-memory and on-disk caches, preview analysis (`analyse_ab1_for_preview`), CSV export (`write_ab1_csv`, `write_rare_mutations_csv`). |
 | [`erm41.rs`](erm41.rs) | erm(41) for the *M. abscessus* complex: subspecies ID plus position 28 and loss-of-function (LOF) SNP calls, which predict inducible macrolide resistance. |
 | [`rrl.rs`](rrl.rs) | 23S rRNA: species ID plus macrolide resistance at *E. coli* positions 2058/2059 and catalogue SNPs. |
 | [`rrs.rs`](rrs.rs) | 16S rRNA: species ID plus aminoglycoside-resistance SNPs. |
@@ -105,17 +106,17 @@ flowchart TD
     F[".ab1 file"] --> P1["parse_ab1_sequence()<br/>PBAS basecalls"]
     F --> P2["parse_ab1_quality()<br/>PCON Phred scores"]
     P1 & P2 --> TQ["trim_to_min_quality(seq, qual, 20)"]
-    F --> FN["parse_ab1_filename()<br/>sample_id = 10 digits starting with '20'<br/>gene from filename keywords"]
+    F --> FN["ab1_filename::parse_ab1_filename()<br/>sample_id = lab number (YYYY + 6-digit counter)<br/>gene from marker-part keywords"]
 
-    TQ --> D{"filename keyword"}
-    D -- "erm / erm41" --> E["erm41::identify_sequence_erm41"]
-    D -- "hsp65 / 65kda" --> H["hsp65::identify_sequence_hsp65"]
-    D -- "rpob / rpo" --> RP["rpob::identify_sequence_rpob"]
-    D -- "mbak14 / mbak-14" --> S16["rrs::identify_sequence_16s"]
-    D -- "1098s / 1525a" --> S3["rrs3end::identify_sequence_16s3end"]
-    D -- "rrl / mclr" --> RL["rrl::identify_sequence_rrl_ntm"]
-    D -- pnca --> PN["pnca::identify_sequence_pnca"]
-    D -- none --> X["no hits"]
+    TQ --> D{"Ab1Gene"}
+    D -- "Erm41: erm, erm41*, ermprom (not erm39)" --> E["erm41::identify_sequence_erm41"]
+    D -- "Hsp65: hsp65, 65kDa, TB-11, TB-12(w)" --> H["hsp65::identify_sequence_hsp65"]
+    D -- "RpoB: rpoB NTM region only (2573f/3337r or no primer)" --> RP["rpob::identify_sequence_rpob"]
+    D -- "Rrs16S: Mbak*" --> S16["rrs::identify_sequence_16s"]
+    D -- "Rrs3End: 1098s, 1525a, rrs, #289, #261" --> S3["rrs3end::identify_sequence_16s3end"]
+    D -- "Rrl: rrl, mclr, clr, 23S, SP1, SP2" --> RL["rrl::identify_sequence_rrl_ntm"]
+    D -- "PncA: pncA" --> PN["pnca::identify_sequence_pnca"]
+    D -- "None (incl. Mtb rpoB: TR1/TR2b, 81bp, Tb176, Xpert)" --> X["no hits"]
 
     E & H & RP & RL & S16 & S3 & PN --> HITS["Vec&lt;SeqIdHit&gt;<br/>sorted by identity, keep top 10"]
     HITS --> MC["AB1_SEQ_CACHE[path]<br/>(16S also: SIXTEEN_S_HITS_CACHE[sample_id])"]
@@ -124,10 +125,22 @@ flowchart TD
     SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores top 5 hits)"]
 ```
 
-`parse_ab1_filename` is the only place keywords are matched. It checks them in the order shown,
-and the first match wins. `analyse_ab1_file` picks the analysis from the gene it returns, so
-the gene label and the analysis always agree. A file that matches no
-keyword still gets a record, but with no hits, species or calls.
+`parse_ab1_filename` ([`ab1_filename.rs`](ab1_filename.rs)) is the only place keywords are
+matched; both the batch scan and the preview pane (`Item::is_*`) use it. It finds the lab number
+(`YYYYNNNNNN`, or the older `YYYY_NNNNNN` / `NNNNNN-YY`, normalised to 10 digits) and then
+matches keywords only in the marker part of the name: the lab number, `_Peaktraced` and the run
+suffix (`_YYYY-MM-DD_hh-mm-ss_A01`) are removed first, so their digits never trigger a rule.
+Rules are checked in the order shown, and the first match wins. A file selected as rpoB
+follows the region rules of
+[SANGER_RPOB.md](https://github.com/michaelmeuli/kansasii-docs/blob/master/docs/SANGER_RPOB.md):
+only the NTM species-ID region is analysed. Sources:
+[SANGER_LABNUMBERS.md](https://github.com/michaelmeuli/kansasii-docs/blob/master/docs/SANGER_LABNUMBERS.md),
+[PRIMERS.md](https://github.com/michaelmeuli/cosmic-seq/blob/master/docs/PRIMERS.md).
+
+`analyse_ab1_file` picks the analysis from the `Ab1Gene` it returns, so the gene label and the
+analysis always agree. A file that matches no keyword still gets a record, but with no hits,
+species or calls. A disk-cached record whose gene differs from what the current parser
+returns is re-analysed.
 
 ---
 
