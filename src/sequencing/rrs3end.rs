@@ -8,9 +8,9 @@
 //! [`SeqIdHit`] fields (`rrs_snp_calls` vs `rrs_snp_calls_3end`) are kept independent.
 
 use super::{
-    GappedAlignment, REF_AMPLICON_RRS3END, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R, SeqIdHit, align_to_ref,
-    base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta, reverse_complement,
-    trim_alignment_ends,
+    GappedAlignment, REF_AMPLICON_RRS3END, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R,
+    SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta,
+    reverse_complement, trim_alignment_ends,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -170,12 +170,11 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
 });
 
 /// Parsed and substring-deduplicated rrs reference sequences, initialised once.
-static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| {
-        let mut refs = parse_multi_fasta(REF_MYCO_RRS);
-        refs.extend(parse_multi_fasta(REF_AMPLICON_RRS3END));
-        dedup_substring_same_desc(refs)
-    });
+static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
+    let mut refs = parse_multi_fasta(REF_MYCO_RRS);
+    refs.extend(parse_multi_fasta(REF_AMPLICON_RRS3END));
+    dedup_substring_same_desc(refs)
+});
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall3End {

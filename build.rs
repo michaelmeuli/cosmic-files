@@ -817,7 +817,11 @@ fn read_fasta_records(text: &str) -> Vec<(String, String, Vec<u8>)> {
             let id = words.next().unwrap_or("").to_string();
             let genus = words.next().unwrap_or("");
             let species = words.next().unwrap_or("");
-            out.push((id, format!("{genus} {species}").trim().to_string(), Vec::new()));
+            out.push((
+                id,
+                format!("{genus} {species}").trim().to_string(),
+                Vec::new(),
+            ));
         } else if let Some((_, _, seq)) = out.last_mut() {
             seq.extend(line.trim().bytes().map(|b| b.to_ascii_uppercase()));
         }

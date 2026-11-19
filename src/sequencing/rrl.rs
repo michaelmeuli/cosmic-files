@@ -221,12 +221,11 @@ fn parse_rrl_resistance_snps(csv: &str) -> RrlSnpMap {
 }
 
 /// Parsed and substring-deduplicated rrl reference sequences, initialised once.
-static RRL_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| {
-        let mut refs = parse_multi_fasta(REF_MYCO_RRL);
-        refs.extend(parse_multi_fasta(REF_AMPLICON_RRL));
-        dedup_substring_same_desc(refs)
-    });
+static RRL_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
+    let mut refs = parse_multi_fasta(REF_MYCO_RRL);
+    refs.extend(parse_multi_fasta(REF_AMPLICON_RRL));
+    dedup_substring_same_desc(refs)
+});
 
 /// Resistance SNP maps per species description, parsed once from each species' ntm-db
 /// `variants.csv`.

@@ -85,16 +85,15 @@ fn call_marinum_ulcerans_snps(ga: &GappedAlignment) -> Vec<MarinumUlceransSnpCal
 /// The SNP coordinate references are kept out of dedup. A longer same-species entry that
 /// contains one of them (e.g. a 441 bp TB11/TB12 amplicon around a 424 bp GenBank entry) would
 /// otherwise remove it, and SNP calls would silently disappear.
-static HSP65_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| {
-        let mut refs = parse_multi_fasta(REF_MYCO_HSP65);
-        refs.extend(parse_multi_fasta(REF_AMPLICON_HSP65));
-        let (mut snp_refs, others): (Vec<_>, Vec<_>) = refs
-            .into_iter()
-            .partition(|(acc, _, _)| is_snp_ref_accession(acc));
-        snp_refs.extend(dedup_substring_same_desc(others));
-        snp_refs
-    });
+static HSP65_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
+    let mut refs = parse_multi_fasta(REF_MYCO_HSP65);
+    refs.extend(parse_multi_fasta(REF_AMPLICON_HSP65));
+    let (mut snp_refs, others): (Vec<_>, Vec<_>) = refs
+        .into_iter()
+        .partition(|(acc, _, _)| is_snp_ref_accession(acc));
+    snp_refs.extend(dedup_substring_same_desc(others));
+    snp_refs
+});
 
 /// Trim hsp65 amplification primers from a sequencing read.
 ///

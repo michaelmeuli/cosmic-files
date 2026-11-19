@@ -103,12 +103,11 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
 });
 
 /// Parsed and substring-deduplicated rrs reference sequences, initialised once.
-static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> =
-    LazyLock::new(|| {
-        let mut refs = parse_multi_fasta(REF_MYCO_RRS);
-        refs.extend(parse_multi_fasta(REF_AMPLICON_RRS));
-        dedup_substring_same_desc(refs)
-    });
+static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
+    let mut refs = parse_multi_fasta(REF_MYCO_RRS);
+    refs.extend(parse_multi_fasta(REF_AMPLICON_RRS));
+    dedup_substring_same_desc(refs)
+});
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall {
