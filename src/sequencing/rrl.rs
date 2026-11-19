@@ -442,6 +442,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls_3end: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
+                rpob_snp_calls: vec![],
                 aligned_query: ga.gapped_query,
                 aligned_ref: ga.gapped_ref,
                 ref_start: ga.ref_start,

@@ -24,6 +24,7 @@ use crate::sequencing::{
     erm41::{Erm41SusceptibilityCalls, is_susceptible_erm41},
     parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
+    rpob::is_susceptible_rpob,
     tb_data::{DrVariant, TB_ECOLI_MAPPING},
     trim_to_min_quality,
 };
@@ -101,7 +102,8 @@ pub(super) fn load_seq_data(path: &Path, bytes: &[u8]) -> SeqData {
 
 /// Combined susceptibility verdict and per-gene calls for an AB1 file's alignment hits.
 ///
-/// The verdict takes the first gene that yields one, in the order erm41 → rrl → rrs → pncA.
+/// The verdict takes the first gene that yields one, in the order erm41 → rrl → rrs → pncA →
+/// rpoB (rifampicin).
 pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCalls) {
     let Some(hit) = hits.first() else {
         return (None, SusceptibilityCalls::default());
@@ -119,7 +121,8 @@ pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCal
                 )
             })
             .or_else(|| is_susceptible_rrs(&rrs_hit.rrs_snp_calls))
-            .or_else(|| is_susceptible_pnca(&hit.pnca_snp_calls));
+            .or_else(|| is_susceptible_pnca(&hit.pnca_snp_calls))
+            .or_else(|| is_susceptible_rpob(&hit.rpob_snp_calls));
 
     let susceptibility_calls = SusceptibilityCalls {
         erm41: Erm41SusceptibilityCalls {
@@ -159,6 +162,7 @@ pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCal
             snp_calls: hit.pnca_snp_calls.clone(),
             is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
         },
+        rpob: crate::sequencing::batch::rpob_susceptibility_calls(hit),
     };
     (is_susceptible, susceptibility_calls)
 }
@@ -876,10 +880,61 @@ impl Item {
                         .padding(0),
                 );
             }
+
+            if region.is_mtb() {
+                details = self.push_rifampicin_calls(details);
+            }
         }
 
         column = column.push(details);
         column.into()
+    }
+
+    /// Rifampicin-resistance block of the rpoB preview (Mtb regions): called sites, the
+    /// verdict, and a warning when the species isn't *M. tuberculosis*.
+    fn push_rifampicin_calls<'a>(
+        &self,
+        mut details: widget::Column<'a, Message, cosmic::Theme>,
+    ) -> widget::Column<'a, Message, cosmic::Theme> {
+        let rpob = &self.metadata.susceptibility_calls().rpob;
+        details = details.push(widget::text::body(""));
+        details = details.push(widget::text::heading("Rifampicin resistance calls"));
+        details = details.push(widget::text::body("(rpoB, WHO mutation catalogue):"));
+        if rpob.snp_calls.is_empty() {
+            details = details.push(widget::text::body(
+                "Read does not align to the M. tuberculosis rpoB gene.",
+            ));
+            return details;
+        }
+        let called: Vec<_> = rpob
+            .snp_calls
+            .iter()
+            .filter(|c| !c.call_tag().is_empty())
+            .collect();
+        if called.is_empty() {
+            details = details.push(widget::text::body("No mutation at a catalogued site."));
+        }
+        for call in called {
+            details = details.push(widget::text::body(format!(
+                "    {}: {}",
+                call.site_label(),
+                call.call_tag()
+            )));
+        }
+        details = details.push(widget::text::heading(match rpob.is_susceptible {
+            Some(true) => "RRDR (codons 426-452) wild type. Predicted rifampicin susceptible.",
+            Some(false) => {
+                "rpoB mutation meets WHO-catalogue resistance confidence. Predicted rifampicin resistance."
+            }
+            None => "No rifampicin verdict: RRDR (codons 426-452) not fully covered or unclear.",
+        }));
+        if !rpob.species_validated {
+            details = details.push(widget::text::body(
+                "Warning: best species hit is not M. tuberculosis; the WHO catalogue is validated \
+                 only for the M. tuberculosis complex.",
+            ));
+        }
+        details
     }
 
     pub fn preview_16s(&self) -> Element<'_, Message> {

@@ -58,6 +58,14 @@ output          = "pnca/pnca_canettii_CIPT_140010059.fasta"
 
 
 
+# --- rpoB (rifampicin resistance) ---
+
+[[genome]]
+accession = "NC_000962.3"      # Mycobacterium tuberculosis H37Rv complete genome
+locus_tag = "Rv0667"           # rpoB CDS — WHO catalogue codon numbering (RRDR = codons 426–452)
+output    = "rpob/rpob_h37rv.fasta"
+
+
 # Direct accession (no locus_tag / coordinates) — fetches the accession as-is:
 # [[genome]]
 # accession = "AB123456.1"   # M. example strain — hsp65

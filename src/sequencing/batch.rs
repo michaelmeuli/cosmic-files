@@ -24,7 +24,7 @@ use super::{
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
-    rpob::identify_sequence_rpob,
+    rpob::{RpobSusceptibilityCalls, identify_sequence_rpob, is_susceptible_rpob},
     rrl::{
         RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl,
         is_susceptible_rrl_by_snp_calls_rare,
@@ -93,13 +93,33 @@ pub struct SampleSusceptibilityRecord {
     /// panel can be populated from disk cache without re-running alignment.
     #[serde(default)]
     pub seq_id_hits: Vec<SeqIdHit>,
+    /// [`ANALYSIS_VERSION`] the record was produced with; 0 for records cached before
+    /// versioning, which are therefore re-analysed.
+    #[serde(default)]
+    pub analysis_version: u32,
 }
 
-/// `true` if a disk-cached record still carries the gene the current filename parser assigns,
-/// so records written by an older parser (e.g. `erm39` labelled erm(41), or Mtb RRDR reads
-/// labelled rpoB) are re-analysed instead of reused.
-fn cached_gene_matches(record: &SampleSusceptibilityRecord) -> bool {
-    record.gene.as_deref() == parse_ab1_filename(&record.file_name).1.map(Ab1Gene::label)
+/// Version of the per-file analysis stored in disk-cached records. Bump it whenever the calls
+/// a record carries change (new gene calls, catalogue logic), so cached records are redone.
+/// 1: rpoB rifampicin (RRDR) calls.
+const ANALYSIS_VERSION: u32 = 1;
+
+/// `true` if a disk-cached record can be reused: it was written by the current
+/// [`ANALYSIS_VERSION`] and still carries the gene the current filename parser assigns (so
+/// records written by an older parser, e.g. `erm39` labelled erm(41), are re-analysed).
+fn cached_record_current(record: &SampleSusceptibilityRecord) -> bool {
+    record.analysis_version == ANALYSIS_VERSION
+        && record.gene.as_deref() == parse_ab1_filename(&record.file_name).1.map(Ab1Gene::label)
+}
+
+/// rpoB rifampicin calls for the summary record, flagged when the read's species isn't
+/// *M. tuberculosis* (the WHO catalogue applies only to the MTB complex).
+pub(crate) fn rpob_susceptibility_calls(hit: &SeqIdHit) -> RpobSusceptibilityCalls {
+    RpobSusceptibilityCalls {
+        snp_calls: hit.rpob_snp_calls.clone(),
+        is_susceptible: is_susceptible_rpob(&hit.rpob_snp_calls),
+        species_validated: hit.description.starts_with("Mycobacterium tuberculosis"),
+    }
 }
 
 /// For 16S hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
@@ -263,7 +283,7 @@ pub fn scan_ab1_directory(
         if let Some((cached_mtime, cached_record)) = disk_cache.get(&path_key) {
             if *cached_mtime == mtime_secs
                 && !cached_record.seq_id_hits.is_empty()
-                && cached_gene_matches(cached_record)
+                && cached_record_current(cached_record)
             {
                 log::debug!(
                     "ab1_scan: disk cache hit for {} ({} hits, canonical={})",
@@ -276,11 +296,11 @@ pub fn scan_ab1_directory(
                 continue;
             } else {
                 log::debug!(
-                    "ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={}, gene_match={})",
+                    "ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={}, current={})",
                     path.display(),
                     *cached_mtime == mtime_secs,
                     cached_record.seq_id_hits.len(),
-                    cached_gene_matches(cached_record)
+                    cached_record_current(cached_record)
                 );
             }
         } else {
@@ -417,6 +437,7 @@ fn analyse_ab1_file(
             return rrs_result;
         }
         is_susceptible_pnca(&hit.pnca_snp_calls)
+            .or_else(|| is_susceptible_rpob(&hit.rpob_snp_calls))
     });
 
     let susceptibility_calls = seq_id_hits
@@ -472,6 +493,7 @@ fn analyse_ab1_file(
                     snp_calls: hit.pnca_snp_calls.clone(),
                     is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
                 },
+                rpob: rpob_susceptibility_calls(hit),
             }
         })
         .unwrap_or_default();
@@ -492,6 +514,7 @@ fn analyse_ab1_file(
         identity: seq_id_hits.first().map(|h| h.identity),
         is_susceptible,
         seq_id_hits: seq_id_hits.iter().take(5).cloned().collect(),
+        analysis_version: ANALYSIS_VERSION,
     };
 
     Some((seq_id_hits, record))
@@ -561,7 +584,7 @@ pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<Seq
         if let Some((_, disk_cache)) = guard.as_ref()
             && let Some((cached_mtime, record)) = disk_cache.get(&path_key)
             && *cached_mtime == mtime_secs
-            && cached_gene_matches(record)
+            && cached_record_current(record)
         {
             log::debug!("ab1_preview: disk cache hit for {}", path.display());
             let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -613,7 +636,9 @@ pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<Seq
 /// Columns: `file_name, sample_id, gene, overall_susceptible, species, identity_pct,
 /// erm41_position_28, erm41_lof_snp_calls, erm41_susceptible, rrl_position_2058_2059,
 /// rrl_snp_calls, rrl_susceptible, rrs_snp_calls, rrs_susceptible, rrs3end_position_1248,
-/// rrs3end_snp_calls, rrs3end_susceptible, pnca_snp_calls, pnca_susceptible, file_created`
+/// rrs3end_snp_calls, rrs3end_susceptible, pnca_snp_calls, pnca_susceptible, file_created,
+/// rpob_snp_calls, rpob_susceptible, rpob_species_validated` (the rpoB columns are appended
+/// after `file_created` so existing column positions stay stable).
 pub fn write_ab1_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
@@ -646,6 +671,9 @@ pub fn write_ab1_csv(
         "pnca_snp_calls",
         "pnca_susceptible",
         "file_created",
+        "rpob_snp_calls",
+        "rpob_susceptible",
+        "rpob_species_validated",
     ])?;
 
     for rec in records {
@@ -724,6 +752,16 @@ pub fn write_ab1_csv(
         let pnca_sus = fmt_susceptible(rec.susceptibility_calls.pnca.is_susceptible);
         let pnca_snps = pnca_snp_calls_str(&rec.susceptibility_calls.pnca.snp_calls);
 
+        let rpob = &rec.susceptibility_calls.rpob;
+        let rpob_sus = fmt_susceptible(rpob.is_susceptible);
+        let rpob_snps = rpob_snp_calls_str(&rpob.snp_calls);
+        // Only meaningful when rifampicin calls were made at all.
+        let rpob_validated = match (rpob.snp_calls.is_empty(), rpob.species_validated) {
+            (true, _) => "",
+            (false, true) => "true",
+            (false, false) => "false",
+        };
+
         let overall = fmt_susceptible(rec.is_susceptible);
 
         wtr.write_record([
@@ -749,6 +787,9 @@ pub fn write_ab1_csv(
             pnca_snps.as_str(),
             pnca_sus.as_str(),
             file_created.as_str(),
+            rpob_snps.as_str(),
+            rpob_sus.as_str(),
+            rpob_validated,
         ])?;
     }
 
@@ -902,6 +943,15 @@ fn snp_calls_str(calls: impl Iterator<Item = (usize, String)>) -> String {
 /// semicolon-separated CSV cell, e.g. `"p.Ala102Pro: (pyrazinamide, Assoc w R)"`. Sites matching
 /// wildtype (empty tag) are omitted.
 fn pnca_snp_calls_str(calls: &[super::pnca::PncaSnpCall]) -> String {
+    calls
+        .iter()
+        .filter(|c| !c.call_tag().is_empty())
+        .map(|c| format!("{}: {}", c.site_label(), c.call_tag()))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn rpob_snp_calls_str(calls: &[super::rpob::RpobSnpCall]) -> String {
     calls
         .iter()
         .filter(|c| !c.call_tag().is_empty())

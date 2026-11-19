@@ -54,6 +54,7 @@ use serde::{Deserialize, Serialize};
 use erm41::{Erm41LofCall, Erm41Position28, Erm41SusceptibilityCalls};
 use hsp65::{KansasiiGastriSnpCall, MarinumUlceransSnpCall};
 use pnca::{PncaSnpCall, PncaSusceptibilityCalls};
+use rpob::{RpobSnpCall, RpobSusceptibilityCalls};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
 use rrs3end::{Rrs3EndPosition1248, RrsSnpCall3End, RrsSusceptibilityCalls3End};
@@ -152,6 +153,10 @@ const REF_PNCA: &str = concat!(
     include_str!("../../res/sequences/pnca/pnca_canettii_CIPT_140010059.fasta"),
 );
 
+/// *M. tuberculosis* H37Rv rpoB CDS (Rv0667, 3519 bp), fetched from NCBI at build time. The
+/// WHO catalogue's rpoB codon numbering (RRDR = codons 426–452) is relative to this sequence.
+const REF_RPOB_H37RV: &str = include_str!("../../res/sequences/rpob/rpob_h37rv.fasta");
+
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SusceptibilityCalls {
@@ -160,6 +165,8 @@ pub struct SusceptibilityCalls {
     pub rrs: RrsSusceptibilityCalls,
     pub rrs3end: RrsSusceptibilityCalls3End,
     pub pnca: PncaSusceptibilityCalls,
+    #[serde(default)]
+    pub rpob: RpobSusceptibilityCalls,
 }
 
 impl std::fmt::Display for SusceptibilityCalls {
@@ -225,6 +232,20 @@ impl std::fmt::Display for SusceptibilityCalls {
             .collect();
         if !pnca.is_empty() {
             parts.push(pnca.join(", ").to_string());
+        }
+
+        let mut rpob: Vec<String> = self
+            .rpob
+            .snp_calls
+            .iter()
+            .filter(|c| !c.call_tag().is_empty())
+            .map(|c| format!("{} {}", c.site_label(), c.call_tag()))
+            .collect();
+        if !self.rpob.snp_calls.is_empty() && !self.rpob.species_validated {
+            rpob.push("[catalogue not validated for this species]".to_string());
+        }
+        if !rpob.is_empty() {
+            parts.push(rpob.join(", "));
         }
 
         write!(f, "{}", parts.join(" | "))
@@ -1063,6 +1084,10 @@ pub struct SeqIdHit {
     pub erm41_snp_calls: Vec<Erm41LofCall>,
     /// Calls at each pncA pyrazinamide-resistance nucleotide/codon position.
     pub pnca_snp_calls: Vec<PncaSnpCall>,
+    /// rpoB rifampicin-resistance calls (RRDR codons 426–452, V170, I491, RRDR indels) against
+    /// the H37Rv rpoB CDS; set only on the top hit of an Mtb-region rpoB read.
+    #[serde(default)]
+    pub rpob_snp_calls: Vec<RpobSnpCall>,
     /// Gapped query sequence (forward or RC, whichever scored best). `'-'` marks deletions.
     pub aligned_query: Vec<u8>,
     /// Gapped reference sequence for the aligned span. Same length as `aligned_query`.
@@ -1380,6 +1405,7 @@ mod tests {
             rrs_snp_calls_3end: vec![],
             erm41_snp_calls: vec![],
             pnca_snp_calls: vec![],
+            rpob_snp_calls: vec![],
             aligned_query: aref.to_vec(),
             aligned_ref: aref.to_vec(),
             ref_start: 0,

@@ -5,7 +5,8 @@ This module turns Sanger capillary reads (`.ab1` chromatogram files) into two re
 1. **Species identification.** The closest mycobacterial reference, found by aligning the read
    against reference databases for one marker gene: 16S rRNA, hsp65, rpoB, 23S rRNA or erm(41).
 2. **Resistance prediction.** Susceptible / resistant / undetermined calls for macrolides
-   (erm(41), rrl), aminoglycosides (rrs) and pyrazinamide (pncA). Each call comes from reading
+   (erm(41), rrl), aminoglycosides (rrs), pyrazinamide (pncA) and rifampicin (rpoB, *M.
+   tuberculosis* regions). Each call comes from reading
    specific diagnostic positions out of the alignment.
 
 All reference sequences and mutation catalogues are compiled into the binary with
@@ -26,7 +27,7 @@ are the optional Microsynth download (`microsynth.rs`) and the ntfy push (`ntfy_
 | [`rrs.rs`](rrs.rs) | 16S rRNA: species ID plus aminoglycoside-resistance SNPs. |
 | [`rrs3end.rs`](rrs3end.rs) | 16S rRNA 3′ end: position 1248 (*M. marinum* A vs *M. ulcerans* G) plus the same aminoglycoside SNP logic as `rrs.rs`. |
 | [`hsp65.rs`](hsp65.rs) | hsp65/groEL2: species ID, primer trimming, kansasii/gastri and marinum/ulcerans diagnostic SNPs. |
-| [`rpob.rs`](rpob.rs) | rpoB: species ID only, with no SNP calls. |
+| [`rpob.rs`](rpob.rs) | rpoB: species ID per region; for the Mtb regions also rifampicin resistance (RRDR) from the WHO catalogue. |
 | [`pnca.rs`](pnca.rs) | pncA (*M. tuberculosis* complex): pyrazinamide resistance from the WHO catalogue. |
 | [`tb_data.rs`](tb_data.rs) | TBProfiler `*.results.json` deserialization, `confidence_rank`, and the TB → *E. coli* coordinate map. |
 | [`bed.rs`](bed.rs) | Parser for 5-column subspecies barcode BED files. |
@@ -218,7 +219,7 @@ top hit's species.
 | **rrs** | `myco_rrs.fasta` (≥ 1200 bp) | Aminoglycoside resistance SNPs (e.g. `n.1401A>G`) from ntm-db `variants.csv` | `Vec<RrsSnpCall>` |
 | **rrs3end** | `myco_rrs.fasta` | Anchor call at **1248** (A = *M. marinum*, G = *M. ulcerans*) plus the same SNP logic as `rrs`, stored in `rrs_snp_calls_3end` | `Rrs3EndPosition1248`, `Vec<RrsSnpCall3End>` |
 | **hsp65** | `myco_hsp65.fasta` | Trims Telenti and Patel primer sets. For kansasii/gastri hits: 8 diagnostic SNPs. For marinum/ulcerans hits: 5 diagnostic SNPs. A majority vote decides (`*_snp_species_call`). | `KansasiiGastriSnpCall`, `MarinumUlceransSnpCall` |
-| **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter | Species ID only | — |
+| **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter. Rifampicin calls: `rpob/rpob_h37rv.fasta` (H37Rv Rv0667 CDS) | Species ID; for the Mtb regions the read is also aligned to H37Rv and every RRDR codon (426–452), the catalogued codons outside it (V170F, I491F) and RRDR indels are called against the WHO catalogue | `Vec<RpobSnpCall>` (top hit only) |
 | **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site. | `Vec<PncaSnpCall>` |
 
 **pncA verdict (`is_susceptible_pnca`):**
@@ -230,6 +231,19 @@ top hit's species.
   evidence is weak.
 
 Ranks come from `tb_data::confidence_rank`, on a scale from 0 (strongest) to 5.
+
+**rpoB rifampicin verdict (`is_susceptible_rpob`):**
+
+- **Resistant** if a catalogued alt at rank < 2 is seen (e.g. S450L, V170F, I491F), if any
+  missense change hits an RRDR codon (catalogue rule `missense_variant_p.426_452`), or if there
+  is an in-frame indel in the RRDR (c.1276–1356).
+- **Susceptible** only if all 27 RRDR codons are covered and wildtype (synonymous changes
+  allowed) and nothing unclear was seen.
+- Otherwise **undetermined**: the RRDR isn't fully covered (e.g. a Tb176 5′-region read), a
+  frameshift or stop codon (probable read error), or an uncatalogued change outside the RRDR.
+- `RpobSusceptibilityCalls::species_validated` is `false` when the best species hit isn't
+  *M. tuberculosis* (e.g. TR1/TR2b run on an NTM). The calls are still made but flagged in
+  the preview, the CSV (`rpob_species_validated`) and the "Calls" column.
 
 ---
 
@@ -250,8 +264,13 @@ flowchart TD
     R -- None --> S{"is_susceptible_rrs"}
     S -- Some --> OUT3(["rrs verdict"])
     S -- None --> P{"is_susceptible_pnca"}
-    P --> OUT4(["pncA verdict or undetermined"])
+    P -- Some --> OUT4(["pncA verdict"])
+    P -- None --> RB{"is_susceptible_rpob"}
+    RB --> OUT5(["rpoB (rifampicin) verdict or undetermined"])
 ```
+
+Disk-cached records carry `analysis_version`. A record whose version differs from
+`batch::ANALYSIS_VERSION` is re-analysed, so bump the constant when the calls change.
 
 `SusceptibilityCalls` stores the full evidence for each gene, not only the verdict. The UI,
 CSV and PDF show it (its `Display` output is the "Calls" column).
@@ -344,10 +363,11 @@ All files are embedded at compile time from `res/sequences/` (see the `REF_*` co
   describes how [cosmic-seq](https://github.com/michaelmeuli/cosmic-seq) generates amplicon
   references from GTDB r232 species-representative genomes using in-silico PCR with the lab's
   primer pairs.
-- `erm41/*.fasta` and `pnca/*.fasta`: per-subspecies or per-strain references.
+- `erm41/*.fasta`, `pnca/*.fasta` and `rpob/rpob_h37rv.fasta`: per-subspecies or per-strain
+  references (the last is the coordinate system for rifampicin calls).
   (`myco_erm41.fasta` is generated but not used.)
 - Mutation catalogues: `ntm-db/db/<species>/variants.csv` (erm41, rrl, rrs) and
-  `tbprofiler/mutations.csv` (pncA, WHO catalogue).
+  `tbprofiler/mutations.csv` (pncA and rpoB, WHO catalogue).
 - `res/tb_ecoli_mapping.csv`: TB → *E. coli* coordinates for display.
 
 Lazily initialised `LazyLock` statics parse these files on first use: `RRS_REFS`, `RRL_REFS`,

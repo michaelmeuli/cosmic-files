@@ -32,29 +32,29 @@ type PncaNtSnpMap = BTreeMap<isize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 type PncaAaSnpMap = BTreeMap<usize, (String, BTreeMap<String, (Vec<String>, String)>)>;
 
 /// Standard 3-letter amino acid codes used by the WHO catalogue `p.` notation.
-const AA3: [&str; 20] = [
+pub(super) const AA3: [&str; 20] = [
     "Ala", "Arg", "Asn", "Asp", "Cys", "Gln", "Glu", "Gly", "His", "Ile", "Leu", "Lys", "Met",
     "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val",
 ];
 
 /// One row of `tbprofiler/mutations.csv` (the WHO resistance catalogue).
 #[derive(Debug, Deserialize, Clone)]
-struct MutationRow {
+pub(super) struct MutationRow {
     #[serde(rename = "Gene")]
-    gene: String,
+    pub(super) gene: String,
     #[serde(rename = "Mutation")]
-    mutation: String,
+    pub(super) mutation: String,
     #[serde(rename = "drug")]
-    drug: String,
+    pub(super) drug: String,
     /// WHO confidence label; empty means this row carries no resistance evidence and is
     /// skipped (see [`confidence_rank`]).
     #[serde(rename = "confidence")]
-    confidence: String,
+    pub(super) confidence: String,
 }
 
 /// Translate a single codon to its 3-letter amino acid code (`"*"` for a stop codon).
 /// Returns `None` for incomplete codons or non-ACGT bytes.
-fn translate_codon(codon: &[u8]) -> Option<&'static str> {
+pub(super) fn translate_codon(codon: &[u8]) -> Option<&'static str> {
     let c = [
         codon.first()?.to_ascii_uppercase(),
         codon.get(1)?.to_ascii_uppercase(),
@@ -87,7 +87,7 @@ fn translate_codon(codon: &[u8]) -> Option<&'static str> {
 }
 
 /// 0-based index into `REF_PNCA` of a signed HGVS coding-sequence position. There is no
-/// `c.0` — `c.-1` sits immediately before `c.1` (the `A` of the start codon).
+/// `c.0` â€” `c.-1` sits immediately before `c.1` (the `A` of the start codon).
 fn nt_pos_to_ref_idx(c_pos: isize) -> Option<usize> {
     let offset = if c_pos > 0 { c_pos - 1 } else { c_pos };
     let idx = UPSTREAM_FLANK + offset;
@@ -104,7 +104,7 @@ fn codon_to_ref_idx(codon: usize) -> Option<usize> {
 /// acid substitution / nonsense call (`p.WtNNNAlt` / `p.WtNNN*`).
 ///
 /// Frameshifts, in-frame indels, delins, and stop-codon extensions (`fs`, `del`, `dup`,
-/// `delins`, `ext`) are not positioned by this simple gapless-alignment model and are skipped —
+/// `delins`, `ext`) are not positioned by this simple gapless-alignment model and are skipped â€”
 /// same limitation as the rest of this codebase, which only calls substitutions, not indels.
 fn parse_pnca_resistance_snps(csv: &str) -> (PncaNtSnpMap, PncaAaSnpMap) {
     static NT_SNP_RE: LazyLock<Regex> =
@@ -281,7 +281,7 @@ impl PncaSnpCall {
     }
 
     /// Classifies the allele observed at this site, or `None` when the read doesn't cover it
-    /// at all (as opposed to covering it and finding wildtype — those are not the same thing).
+    /// at all (as opposed to covering it and finding wildtype â€” those are not the same thing).
     fn evidence(&self) -> Option<PncaEvidence> {
         let (observed, wt) = match &self.kind {
             PncaCallKind::Nucleotide {
@@ -307,9 +307,9 @@ impl PncaSnpCall {
 
 /// What the read showed at one diagnostic pncA site, for [`is_susceptible_pnca`].
 enum PncaEvidence {
-    /// Matches the wildtype allele — positive evidence of susceptibility at this site.
+    /// Matches the wildtype allele â€” positive evidence of susceptibility at this site.
     Wildtype,
-    /// Differs from wildtype but isn't in the WHO catalogue — neither confirms nor rules out
+    /// Differs from wildtype but isn't in the WHO catalogue â€” neither confirms nor rules out
     /// resistance, but does confirm the site was covered.
     Uncatalogued,
     /// Matches a catalogued resistance-conferring alt, at this confidence rank
@@ -360,7 +360,7 @@ pub fn is_susceptible_pnca(snp_calls: &[PncaSnpCall]) -> Option<bool> {
 /// Collect 3 consecutive non-deleted query bases at reference positions `ref_pos..ref_pos+3`.
 /// Returns `None` if the position is outside the aligned region or any of the 3 ref positions
 /// has a deletion in the query (consistent with the existing policy of skipping frameshifts).
-fn codon_at_ref_pos(
+pub(super) fn codon_at_ref_pos(
     gapped_query: &[u8],
     gapped_ref: &[u8],
     ref_start: usize,
@@ -440,7 +440,7 @@ fn call_pnca_aa_snps(map: &PncaAaSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCal
 
 /// Database is `REF_PNCA`: the pncA CDS plus a 50bp upstream promoter flank for each
 /// *M. tuberculosis* complex member with a distinct sequence (H37Rv `Rv2043c`, bovis AF2122/97,
-/// canettii — see `res/sequences/sequences.toml` for the rest, including the bovis BCG
+/// canettii â€” see `res/sequences/sequences.toml` for the rest, including the bovis BCG
 /// Pasteur/africanum/mungi/orygis references that were tried and dropped as exact duplicates
 /// of one of these three), fetched from NCBI at build time (via `fetch_sequences_from_toml()`
 /// in build.rs).
@@ -483,6 +483,7 @@ pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls_3end: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls,
+                rpob_snp_calls: vec![],
                 aligned_query: ga.gapped_query,
                 aligned_ref: ga.gapped_ref,
                 ref_start: ga.ref_start,
@@ -601,7 +602,7 @@ mod tests {
 
     #[test]
     fn test_is_susceptible_pnca() {
-        // No calls at all → unknown (nothing was covered).
+        // No calls at all â†’ unknown (nothing was covered).
         assert_eq!(is_susceptible_pnca(&[]), None);
 
         let resistance_alts = || {
@@ -611,7 +612,7 @@ mod tests {
             )])
         };
 
-        // A site that the read simply didn't cover → unknown, same as no calls at all.
+        // A site that the read simply didn't cover â†’ unknown, same as no calls at all.
         let uncovered_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide {
@@ -622,7 +623,7 @@ mod tests {
         };
         assert_eq!(is_susceptible_pnca(&[uncovered_call]), None);
 
-        // Wildtype observed → susceptible. A fully wildtype pncA read is real evidence of
+        // Wildtype observed â†’ susceptible. A fully wildtype pncA read is real evidence of
         // susceptibility, not an absence of information.
         let wt_call = PncaSnpCall {
             ref_pos: 0,
@@ -637,7 +638,7 @@ mod tests {
             Some(true)
         );
 
-        // Strong resistance evidence observed → resistant, even alongside wildtype calls
+        // Strong resistance evidence observed â†’ resistant, even alongside wildtype calls
         // elsewhere (the strongest evidence wins).
         let resistant_call = PncaSnpCall {
             ref_pos: 0,
@@ -652,7 +653,7 @@ mod tests {
             Some(false)
         );
 
-        // Weak/uncertain catalogue entry → unknown (not enough to call susceptible or resistant).
+        // Weak/uncertain catalogue entry â†’ unknown (not enough to call susceptible or resistant).
         let uncertain_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide {
@@ -669,7 +670,7 @@ mod tests {
         };
         assert_eq!(is_susceptible_pnca(&[uncertain_call]), None);
 
-        // A non-wildtype allele with no catalogue entry at all → uncatalogued, unknown.
+        // A non-wildtype allele with no catalogue entry at all â†’ uncatalogued, unknown.
         let uncatalogued_call = PncaSnpCall {
             ref_pos: 0,
             kind: PncaCallKind::Nucleotide {
