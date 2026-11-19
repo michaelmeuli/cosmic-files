@@ -208,8 +208,8 @@ pub fn is_susceptible_rrs_by_snp_calls_rare(snp_calls: &[RrsSnpCall]) -> Option<
     is_susceptible_rrs(snp_calls)
 }
 
-/// Maps each known resistance SNP position to the base observed in the query sequence,
-/// adjusting for the alignment offset between reference and query coordinates.
+/// Maps each known resistance SNP position to the query base aligned to it in `ga`
+/// (via [`base_at_ref_pos`]).
 fn call_rrs_snps(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall> {
     snps.iter()
         .map(|(&ref_pos, (wt_base, alt_to_drugs))| {
@@ -235,11 +235,12 @@ fn call_rrs_snps(snps: &RrsSnpMap, ga: &GappedAlignment) -> Vec<RrsSnpCall> {
 ///
 /// 1. **Strand**: both forward and reverse-complement alignments are scored via
 ///    [`align_to_ref`]; the strand with the higher identity wins.
-/// 2. **Identity**: gapless (shift-only) alignment — the shorter sequence is slid along the longer
-///    and the best-matching offset is chosen. Identity = matching bases / shorter length.
+/// 2. **Identity**: semiglobal gapped alignment (see [`align_to_ref`]), then low-identity ends
+///    are removed by [`trim_alignment_ends`]. Identity = matching bases / aligned reference
+///    span.
 /// 3. **SNP calls**: for species that have an entry in [`RRS_RESISTANCE_SNPS`] (accession
-///    contains `':'`), aminoglycoside-resistance SNPs are mapped from reference coordinates to
-///    query coordinates using the alignment offset.
+///    contains `':'`), each aminoglycoside-resistance SNP's reference position is looked up in
+///    the gapped alignment via [`base_at_ref_pos`] to get the query base aligned there.
 pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
     let rc = reverse_complement(query);
     let mut hits: Vec<SeqIdHit> = RRS_REFS

@@ -379,7 +379,6 @@ fn analyse_ab1_file(
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
-    let lower_name = file_name.to_ascii_lowercase();
     let (sample_id, gene) = parse_ab1_filename(&file_name);
 
     let bytes = match std::fs::read(path) {
@@ -390,13 +389,16 @@ fn analyse_ab1_file(
         }
     };
 
-    let is_erm41 = lower_name.contains("erm41") || lower_name.contains("erm");
-    let is_hsp65 = lower_name.contains("hsp65") || lower_name.contains("65kda");
-    let is_rpob = lower_name.contains("rpob") || lower_name.contains("rpo");
-    let is_16s = lower_name.contains("mbak14") || lower_name.contains("mbak-14");
-    let is_16s3end = lower_name.contains("1098s") || lower_name.contains("1525a");
-    let is_23s_ntm = lower_name.contains("rrl") || lower_name.contains("mclr");
-    let is_pnca = lower_name.contains("pnca");
+    // Dispatch on the gene `parse_ab1_filename` inferred, so the gene label in the record and
+    // the analysis that runs can never disagree (it is the single source of keyword matching).
+    let gene_is = |name: &str| gene.as_deref() == Some(name);
+    let is_erm41 = gene_is("erm(41)");
+    let is_hsp65 = gene_is("hsp65");
+    let is_rpob = gene_is("rpoB");
+    let is_16s = gene_is("16S");
+    let is_16s3end = gene_is("16S 3'-End");
+    let is_23s_ntm = gene_is("rrl");
+    let is_pnca = gene_is("pncA");
 
     let ab1_seq = parse_ab1_sequence(&bytes);
     let ab1_qual = parse_ab1_quality(&bytes);

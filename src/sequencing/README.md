@@ -111,9 +111,9 @@ flowchart TD
     D -- "erm / erm41" --> E["erm41::identify_sequence_erm41"]
     D -- "hsp65 / 65kda" --> H["hsp65::identify_sequence_hsp65"]
     D -- "rpob / rpo" --> RP["rpob::identify_sequence_rpob"]
-    D -- "rrl / mclr" --> RL["rrl::identify_sequence_rrl_ntm"]
     D -- "mbak14 / mbak-14" --> S16["rrs::identify_sequence_16s"]
     D -- "1098s / 1525a" --> S3["rrs3end::identify_sequence_16s3end"]
+    D -- "rrl / mclr" --> RL["rrl::identify_sequence_rrl_ntm"]
     D -- pnca --> PN["pnca::identify_sequence_pnca"]
     D -- none --> X["no hits"]
 
@@ -124,7 +124,9 @@ flowchart TD
     SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores top 5 hits)"]
 ```
 
-The keywords are checked in the order shown, and the first match wins. A file that matches no
+`parse_ab1_filename` is the only place keywords are matched. It checks them in the order shown,
+and the first match wins. `analyse_ab1_file` picks the analysis from the gene it returns, so
+the gene label and the analysis always agree. A file that matches no
 keyword still gets a record, but with no hits, species or calls.
 
 ---
