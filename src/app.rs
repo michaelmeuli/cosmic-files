@@ -2466,8 +2466,8 @@ impl App {
                                         Some(item.preview_erm41())
                                     } else if item.is_hsp65() {
                                         Some(item.preview_hsp65(items))
-                                    } else if item.is_rpob_ntm() {
-                                        Some(item.preview_rpob_ntm(items))
+                                    } else if let Some(region) = item.rpob_region() {
+                                        Some(item.preview_rpob(items, region))
                                     } else if item.is_16s() {
                                         Some(item.preview_16s())
                                     } else if item.is_16s3end() {

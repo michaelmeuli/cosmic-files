@@ -15,6 +15,8 @@
 use std::ops::Range;
 use std::path::Path;
 
+pub use super::rpob::RpoBRegion;
+
 /// Gene/amplicon an AB1 read was sequenced for, i.e. which `identify_sequence_*` analysis it gets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ab1Gene {
@@ -22,8 +24,8 @@ pub enum Ab1Gene {
     Erm41,
     /// hsp65 / groEL2 (TB-11 / TB-12(w), "65kDa").
     Hsp65,
-    /// rpoB NTM species-ID region (rpoB-2573f / 3337r); not the Mtb rifampicin regions.
-    RpoB,
+    /// rpoB, with the region the read covers (NTM 2573f/3337r or one of the Mtb regions).
+    RpoB(RpoBRegion),
     /// 16S rRNA 5' part (Mbak283f/264r/259r, sequenced with Mbak14).
     Rrs16S,
     /// 16S rRNA 3' end (Bact-1098s / 1525a, Mtb rrs #289 / #261).
@@ -41,7 +43,7 @@ impl Ab1Gene {
         match self {
             Self::Erm41 => "erm(41)",
             Self::Hsp65 => "hsp65",
-            Self::RpoB => "rpoB",
+            Self::RpoB(region) => region.label(),
             Self::Rrs16S => "16S",
             Self::Rrs3End => "16S 3'-End",
             Self::Rrl => "rrl",
@@ -55,7 +57,8 @@ impl Ab1Gene {
 /// `sample_id` is the normalised 10-digit lab number (`YYYY` + 6-digit counter, see
 /// [`find_lab_number`]), or the whole file stem when the name carries none.
 /// `gene` is inferred from keywords in the marker part of the name (see [`gene_from_marker`]);
-/// `None` means no analysis applies (unknown marker, or e.g. an Mtb rifampicin rpoB read).
+/// `None` means no analysis applies (unknown marker, or an rpoB read of a region without
+/// references, e.g. the *M. abscessus* MAB amplicon).
 pub fn parse_ab1_filename(name: &str) -> (String, Option<Ab1Gene>) {
     let stem = Path::new(name)
         .file_stem()
@@ -195,31 +198,35 @@ fn has_xpert_primer(s: &str) -> bool {
     })
 }
 
-/// Classify an rpoB-selected marker part (SANGER_RPOB.md, parser rules 4–5). Only the NTM
-/// species-ID region (rpoB-2573f / 3337r, or no primer token at all) maps to
-/// [`Ab1Gene::RpoB`]; the Mtb rifampicin regions, the *M. abscessus* / *M. marinum* amplicons
-/// and other genera have no matching references and return `None`.
+/// Classify an rpoB-selected marker part (SANGER_RPOB.md, parser rules 4–5, first match
+/// wins). The NTM species-ID region and the three Mtb rifampicin regions each map to their
+/// [`RpoBRegion`]; the *M. abscessus* (MAB) and *M. marinum* (RPO F/R) amplicons and other
+/// genera have no references and return `None`.
 ///
 /// Not covered (needs folder context): bare `rpoB-R` in the August 2018 GeneXpert runs, which
 /// is the Xpert reverse primer but is classified here as NTM.
 fn rpob_region(m: &str) -> Option<Ab1Gene> {
-    let other_genus = m.contains("strep") || m.contains("univ") || m.contains("grpob");
-    let mab = m.contains("mab");
-    let marinum = m.contains("marinum");
-    let tb176 = contains_not_before_digit(m, "tb176");
-    let xpert = m.contains("genexpert") || has_xpert_primer(m);
-    let rrdr = has_standalone_num(m, "81")
+    let region = if m.contains("strep") || m.contains("univ") || m.contains("grpob") {
+        return None; // other genus
+    } else if m.contains("mab") || m.contains("marinum") {
+        return None; // M. abscessus / M. marinum amplicons, 2015 only
+    } else if contains_not_before_digit(m, "tb176") {
+        RpoBRegion::Mtb5Prime
+    } else if m.contains("genexpert") || has_xpert_primer(m) {
+        RpoBRegion::MtbXpert
+    } else if has_standalone_num(m, "81")
         || has_tr_primer(m)
         || m.contains("core")
         || m.contains("mut")
-        || m.contains("rpobc");
-    if other_genus || mab || marinum || tb176 || xpert || rrdr {
-        None
+        || m.contains("rpobc")
+    {
+        RpoBRegion::MtbRrdr
     } else {
         // NTM 2573f/3337r (`25[67][2-5]`, `573f`, `258f`, `3?337r`, `myco`) or no primer token,
         // which the corpus shows is the NTM species-ID assay as well (rule 5).
-        Some(Ab1Gene::RpoB)
-    }
+        RpoBRegion::Ntm
+    };
+    Some(Ab1Gene::RpoB(region))
 }
 
 /// Infer the gene from the marker part. Rules are checked in this order; the first match wins.
@@ -299,6 +306,8 @@ mod tests {
     use super::Ab1Gene::*;
     use super::*;
 
+    const NTM: Option<Ab1Gene> = Some(RpoB(RpoBRegion::Ntm));
+
     #[track_caller]
     fn check(name: &str, id: &str, gene: Option<Ab1Gene>) {
         let (got_id, got_gene) = parse_ab1_filename(name);
@@ -313,8 +322,8 @@ mod tests {
             "2014500121",
             Some(Rrl),
         );
-        check("2010_500249_rpoB.ab1", "2010500249", Some(RpoB));
-        check("176104-08_rpoB.ab1", "2008176104", Some(RpoB));
+        check("2010_500249_rpoB.ab1", "2010500249", NTM);
+        check("176104-08_rpoB.ab1", "2008176104", NTM);
         check("12345.ab1", "12345", None);
         // Not inside a longer digit run.
         check("120250012345 x.ab1", "120250012345 x", None);
@@ -331,32 +340,44 @@ mod tests {
         check(
             "2016339219_rpoB_2573f_2016-09-22_14-50-52_D07.ab1",
             "2016339219",
-            Some(RpoB),
+            NTM,
         );
-        check("2025500747 rpoB_rpoB-2573f.ab1", "2025500747", Some(RpoB));
+        check("2025500747 rpoB_rpoB-2573f.ab1", "2025500747", NTM);
     }
 
     #[test]
     fn rpob_regions() {
         // `81` inside the lab number must not be read as the RRDR marker.
-        check("2026338109 rpoB_rpoB-2573f.ab1", "2026338109", Some(RpoB));
-        check("2025500100 rpoBs.ab1", "2025500100", Some(RpoB));
-        check("2025500100 rpoB_F.ab1", "2025500100", Some(RpoB));
-        check("2025500100 rpoB_R.ab1", "2025500100", Some(RpoB));
-        check("2025500100 rpoB_MycoR2.ab1", "2025500100", Some(RpoB));
-        for name in [
-            "2025342747 rpoB 81 r_TR2b.ab1",
-            "2023186001_TR1_x.ab1",
-            "2025500100 rpoB_R_TR2b.ab1",
-            "2025500100 Tb176-r.ab1",
-            "2025500100 rpoB-F2.ab1",
-            "2025500100 rpoB_MAB_F.ab1",
-            "2025500100 M.marinum_RPO_F.ab1",
-            "2025500100 rpoB-univ-FW.ab1",
-            "2025500100 rpoB_GeneXpert.ab1",
+        check("2026338109 rpoB_rpoB-2573f.ab1", "2026338109", NTM);
+        check("2025500100 rpoBs.ab1", "2025500100", NTM);
+        check("2025500100 rpoB_F.ab1", "2025500100", NTM);
+        check("2025500100 rpoB_R.ab1", "2025500100", NTM);
+        check("2025500100 rpoB_MycoR2.ab1", "2025500100", NTM);
+        for (name, gene) in [
+            (
+                "2025342747 rpoB 81 r_TR2b.ab1",
+                Some(RpoB(RpoBRegion::MtbRrdr)),
+            ),
+            ("2023186001_TR1_x.ab1", Some(RpoB(RpoBRegion::MtbRrdr))),
+            (
+                "2025500100 rpoB_R_TR2b.ab1",
+                Some(RpoB(RpoBRegion::MtbRrdr)),
+            ),
+            ("2025500100 rpoBc.ab1", Some(RpoB(RpoBRegion::MtbRrdr))),
+            ("2025500100 Tb176-r.ab1", Some(RpoB(RpoBRegion::Mtb5Prime))),
+            ("2025500100 rpoB-F2.ab1", Some(RpoB(RpoBRegion::MtbXpert))),
+            (
+                "2025500100 rpoB_GeneXpert.ab1",
+                Some(RpoB(RpoBRegion::MtbXpert)),
+            ),
+            ("2025500100 rpoB_MAB_F.ab1", None),
+            ("2025500100 M.marinum_RPO_F.ab1", None),
+            ("2025500100 rpoB-univ-FW.ab1", None),
         ] {
-            assert_eq!(parse_ab1_filename(name).1, None, "gene of {name:?}");
+            assert_eq!(parse_ab1_filename(name).1, gene, "gene of {name:?}");
         }
+        assert_eq!(RpoB(RpoBRegion::Ntm).label(), "rpoB");
+        assert_eq!(RpoB(RpoBRegion::MtbRrdr).label(), "rpoB RRDR");
     }
 
     #[test]

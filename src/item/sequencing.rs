@@ -8,7 +8,7 @@ use std::path::Path;
 use super::{Item, ItemMetadata};
 use crate::fl;
 use crate::location::Location;
-use crate::sequencing::batch::{Ab1Gene, parse_ab1_filename};
+use crate::sequencing::batch::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use crate::sequencing::rrl::{
     RrlSusceptibilityCalls, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare,
 };
@@ -222,8 +222,12 @@ impl Item {
         self.ab1_gene() == Some(Ab1Gene::Hsp65)
     }
 
-    pub fn is_rpob_ntm(&self) -> bool {
-        self.ab1_gene() == Some(Ab1Gene::RpoB)
+    /// rpoB region of this read (NTM species ID or one of the Mtb rifampicin regions), if any.
+    pub fn rpob_region(&self) -> Option<RpoBRegion> {
+        match self.ab1_gene() {
+            Some(Ab1Gene::RpoB(region)) => Some(region),
+            _ => None,
+        }
     }
 
     pub fn is_16s(&self) -> bool {
@@ -767,7 +771,7 @@ impl Item {
         column.into()
     }
 
-    pub fn preview_rpob_ntm(&self, items: &[Item]) -> Element<'_, Message> {
+    pub fn preview_rpob(&self, items: &[Item], region: RpoBRegion) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
             space_m,
@@ -778,9 +782,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(15).spacing(space_xxxs);
-        details = details.push(widget::text::heading(
-            "32.43504-3-Mykobakterien NTM rpob-seq",
-        ));
+        details = details.push(widget::text::heading(region.protocol()));
         if hits.is_empty()
             || self
                 .metadata

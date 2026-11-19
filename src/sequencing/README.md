@@ -111,12 +111,12 @@ flowchart TD
     TQ --> D{"Ab1Gene"}
     D -- "Erm41: erm, erm41*, ermprom (not erm39)" --> E["erm41::identify_sequence_erm41"]
     D -- "Hsp65: hsp65, 65kDa, TB-11, TB-12(w)" --> H["hsp65::identify_sequence_hsp65"]
-    D -- "RpoB: rpoB NTM region only (2573f/3337r or no primer)" --> RP["rpob::identify_sequence_rpob"]
+    D -- "RpoB(region): NTM 2573f/3337r, Mtb RRDR (TR1/TR2b), Mtb 5' (Tb176), Mtb Xpert" --> RP["rpob::identify_sequence_rpob<br/>(region-specific references)"]
     D -- "Rrs16S: Mbak*" --> S16["rrs::identify_sequence_16s"]
     D -- "Rrs3End: 1098s, 1525a, rrs, #289, #261" --> S3["rrs3end::identify_sequence_16s3end"]
     D -- "Rrl: rrl, mclr, clr, 23S, SP1, SP2" --> RL["rrl::identify_sequence_rrl_ntm"]
     D -- "PncA: pncA" --> PN["pnca::identify_sequence_pnca"]
-    D -- "None (incl. Mtb rpoB: TR1/TR2b, 81bp, Tb176, Xpert)" --> X["no hits"]
+    D -- "None (incl. rpoB MAB / marinum / other genus)" --> X["no hits"]
 
     E & H & RP & RL & S16 & S3 & PN --> HITS["Vec&lt;SeqIdHit&gt;<br/>sorted by identity, keep top 10"]
     HITS --> MC["AB1_SEQ_CACHE[path]<br/>(16S also: SIXTEEN_S_HITS_CACHE[sample_id])"]
@@ -132,8 +132,12 @@ matches keywords only in the marker part of the name: the lab number, `_Peaktrac
 suffix (`_YYYY-MM-DD_hh-mm-ss_A01`) are removed first, so their digits never trigger a rule.
 Rules are checked in the order shown, and the first match wins. A file selected as rpoB
 follows the region rules of
-[SANGER_RPOB.md](https://github.com/michaelmeuli/kansasii-docs/blob/master/docs/SANGER_RPOB.md):
-only the NTM species-ID region is analysed. Sources:
+[SANGER_RPOB.md](https://github.com/michaelmeuli/kansasii-docs/blob/master/docs/SANGER_RPOB.md)
+and gets an `RpoBRegion`: the NTM species-ID region (2573f/3337r, or no primer token), or one
+of the Mtb rifampicin regions: RRDR (TR1/TR2b, `81`, `core`, `mut`), 5′ region (Tb176) and
+Xpert (rpoB-F1/F2/R2, `GeneXpert`). `identify_sequence_rpob` aligns each region only against
+that region's references. MAB, marinum and other-genus rpoB reads have no references and get
+no gene. Sources:
 [SANGER_LABNUMBERS.md](https://github.com/michaelmeuli/kansasii-docs/blob/master/docs/SANGER_LABNUMBERS.md),
 [PRIMERS.md](https://github.com/michaelmeuli/cosmic-seq/blob/master/docs/PRIMERS.md).
 
@@ -214,7 +218,7 @@ top hit's species.
 | **rrs** | `myco_rrs.fasta` (≥ 1200 bp) | Aminoglycoside resistance SNPs (e.g. `n.1401A>G`) from ntm-db `variants.csv` | `Vec<RrsSnpCall>` |
 | **rrs3end** | `myco_rrs.fasta` | Anchor call at **1248** (A = *M. marinum*, G = *M. ulcerans*) plus the same SNP logic as `rrs`, stored in `rrs_snp_calls_3end` | `Rrs3EndPosition1248`, `Vec<RrsSnpCall3End>` |
 | **hsp65** | `myco_hsp65.fasta` | Trims Telenti and Patel primer sets. For kansasii/gastri hits: 8 diagnostic SNPs. For marinum/ulcerans hits: 5 diagnostic SNPs. A majority vote decides (`*_snp_species_call`). | `KansasiiGastriSnpCall`, `MarinumUlceransSnpCall` |
-| **rpob** | `myco_rpob.fasta` (≥ 400 bp) | Species ID only | — |
+| **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter | Species ID only | — |
 | **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site. | `Vec<PncaSnpCall>` |
 
 **pncA verdict (`is_susceptible_pnca`):**

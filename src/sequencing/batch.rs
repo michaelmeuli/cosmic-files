@@ -17,7 +17,7 @@ use std::sync::{LazyLock, Mutex, PoisonError, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
-pub use super::ab1_filename::{Ab1Gene, parse_ab1_filename};
+pub use super::ab1_filename::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use super::{
     DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
@@ -364,7 +364,7 @@ fn analyse_ab1_file(
             match gene {
                 Ab1Gene::Erm41 => identify_sequence_erm41(trimmed),
                 Ab1Gene::Hsp65 => identify_sequence_hsp65(trimmed),
-                Ab1Gene::RpoB => identify_sequence_rpob(trimmed),
+                Ab1Gene::RpoB(region) => identify_sequence_rpob(trimmed, region),
                 Ab1Gene::Rrl => identify_sequence_rrl_ntm(trimmed),
                 Ab1Gene::Rrs16S => identify_sequence_16s(trimmed),
                 Ab1Gene::Rrs3End => identify_sequence_16s3end(trimmed),
@@ -486,7 +486,7 @@ fn analyse_ab1_file(
         species: match gene {
             Some(Ab1Gene::Rrs16S) => species_from_16s_hits(&seq_id_hits),
             Some(Ab1Gene::Rrs3End) => species_from_16s3end(&seq_id_hits),
-            Some(Ab1Gene::RpoB) => species_from_rpob_hits(&seq_id_hits),
+            Some(Ab1Gene::RpoB(_)) => species_from_rpob_hits(&seq_id_hits),
             _ => seq_id_hits.first().map(|h| h.description.clone()),
         },
         identity: seq_id_hits.first().map(|h| h.identity),
