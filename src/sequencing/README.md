@@ -210,7 +210,9 @@ Two kinds of call recur:
 The `rrl`, `rrs` and `rrs3end` modules make catalogue calls only for ntm-db full-gene references,
 whose accession contains `:`. This is because the catalogue coordinates refer to those
 sequences. `best_snp_hit()` then finds the hit with SNP data among the hits that share the
-top hit's species.
+top hit's species. The hsp65 preview uses the same lookup for its kansasii/gastri and
+marinum/ulcerans calls, which exist only on the four GenBank coordinate entries in
+`hsp65_snp_refs.rs`.
 
 | Module | References | Diagnostic logic | Result |
 |---|---|---|---|

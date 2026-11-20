@@ -1173,13 +1173,14 @@ impl SeqIdHit {
     }
 }
 
-/// Finds the hit, among those sharing the top hit's (`hits[0]`) species description, that
-/// actually carries SNP data for a given target — the top hit by identity may itself be an
-/// NCBI partial-sequence hit for the winning species, which never carries SNP calls (rrl/rrs/
-/// rrs3end only compute them for the ntm-db full-gene hit, accession containing `':'`, since SNP
-/// positions are anchored to that reference's coordinates, not the NCBI one's).
-/// Each identify_sequence_* function gates whether it computes SNP calls at all:
-/// let *_snp_calls = if accession.contains(':') ...
+/// Finds the best hit, among those sharing the top hit's (`hits[0]`) species description, for
+/// which `has_calls` holds.
+///
+/// SNP calls are only computed for the references whose coordinates the SNP positions refer
+/// to: ntm-db full-gene entries (accession contains `':'`) for rrl/rrs/rrs3end, and the four
+/// GenBank coordinate entries in [`hsp65_snp_refs`] for hsp65. The top hit by identity is often
+/// a different reference of the same species (NCBI type material or a cosmic-seq amplicon),
+/// which carries none, so the calls are taken from the best same-species hit that has them.
 pub(crate) fn best_snp_hit<'a>(
     hits: &'a [SeqIdHit],
     has_calls: impl Fn(&SeqIdHit) -> bool,

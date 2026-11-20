@@ -621,12 +621,16 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
-        let (kansasii_gastri_n, marinum_ulcerans_n) = hits.first().map_or((0, 0), |best| {
-            (
-                best.kansasii_gastri_snp_calls.len(),
-                best.marinum_ulcerans_snp_calls.len(),
-            )
-        });
+        // The SNP coordinate references are short partial-cds entries, so a full-length or
+        // amplicon reference of the same species usually outranks them. Take the SNP calls from
+        // the best hit of the top hit's species that has them.
+        let kansasii_gastri_hit = best_snp_hit(&hits, |h| !h.kansasii_gastri_snp_calls.is_empty());
+        let marinum_ulcerans_hit =
+            best_snp_hit(&hits, |h| !h.marinum_ulcerans_snp_calls.is_empty());
+        let kansasii_gastri_n =
+            kansasii_gastri_hit.map_or(0, |h| h.kansasii_gastri_snp_calls.len());
+        let marinum_ulcerans_n =
+            marinum_ulcerans_hit.map_or(0, |h| h.marinum_ulcerans_snp_calls.len());
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details =
@@ -709,19 +713,19 @@ impl Item {
             }
 
             details = details.push(widget::text::body(""));
-            if best.is_kansasii() || best.is_gastri() {
-                let gastri_n = best
+            if let Some(snp_hit) = kansasii_gastri_hit {
+                let gastri_n = snp_hit
                     .kansasii_gastri_snp_calls
                     .iter()
                     .filter(|c| c.is_gastri())
                     .count();
-                let kansasii_n = best
+                let kansasii_n = snp_hit
                     .kansasii_gastri_snp_calls
                     .iter()
                     .filter(|c| c.is_kansasii())
                     .count();
-                let total = best.kansasii_gastri_snp_calls.len();
-                let species_call = best
+                let total = snp_hit.kansasii_gastri_snp_calls.len();
+                let species_call = snp_hit
                     .kansasii_gastri_snp_species_call()
                     .unwrap_or("Ambiguous");
                 details = details.push(widget::text::body("hsp65 kansasii/gastri SNP call:"));
@@ -729,7 +733,7 @@ impl Item {
                     "{} (M. gastri {}/{}, M. kansasii {}/{})",
                     species_call, gastri_n, total, kansasii_n, total,
                 )));
-                for snp in &best.kansasii_gastri_snp_calls {
+                for snp in &snp_hit.kansasii_gastri_snp_calls {
                     details = details.push(widget::text::body(format!(
                         "  pos {}: {} = {}",
                         snp.ref_pos + 1,
@@ -739,19 +743,19 @@ impl Item {
                 }
                 details = details.push(widget::text::body(""));
             }
-            if best.is_marinum() || best.is_ulcerans() {
-                let ulcerans_n = best
+            if let Some(snp_hit) = marinum_ulcerans_hit {
+                let ulcerans_n = snp_hit
                     .marinum_ulcerans_snp_calls
                     .iter()
                     .filter(|c| c.is_ulcerans())
                     .count();
-                let marinum_n = best
+                let marinum_n = snp_hit
                     .marinum_ulcerans_snp_calls
                     .iter()
                     .filter(|c| c.is_marinum())
                     .count();
-                let total = best.marinum_ulcerans_snp_calls.len();
-                let species_call = best
+                let total = snp_hit.marinum_ulcerans_snp_calls.len();
+                let species_call = snp_hit
                     .marinum_ulcerans_snp_species_call()
                     .unwrap_or("Ambiguous");
                 details = details.push(widget::text::body("hsp65 marinum/ulcerans SNP call:"));
@@ -759,7 +763,7 @@ impl Item {
                     "{} (M. ulcerans {}/{}, M. marinum {}/{})",
                     species_call, ulcerans_n, total, marinum_n, total,
                 )));
-                for snp in &best.marinum_ulcerans_snp_calls {
+                for snp in &snp_hit.marinum_ulcerans_snp_calls {
                     details = details.push(widget::text::body(format!(
                         "  pos {}: {} = {}",
                         snp.ref_pos + 1,
@@ -945,9 +949,9 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
-        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-        // for the winning species, since SNP positions are anchored to the gene start
-        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
+        // SNP calls exist only on ntm-db full-gene hits (accession contains ':'), whose
+        // coordinates the catalogue positions refer to; take them from the best such hit of
+        // the winning species.
         let best_snp_hit = hits.first().and_then(|best| {
             hits.iter()
                 .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
@@ -1058,9 +1062,9 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
-        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-        // for the winning species, since SNP positions are anchored to the gene start
-        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
+        // SNP calls exist only on ntm-db full-gene hits (accession contains ':'), whose
+        // coordinates the catalogue positions refer to; take them from the best such hit of
+        // the winning species.
         let best_snp_hit = hits.first().and_then(|best| {
             hits.iter()
                 .find(|h| h.description == best.description && !h.rrs_snp_calls_3end.is_empty())
@@ -1241,9 +1245,9 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
-        // For SNP calls, find the best ntm-db-sourced hit (accession contains ':')
-        // for the winning species, since SNP positions are anchored to the gene start
-        // in the ntm-db full-gene sequences, not to partial NCBI sequences.
+        // SNP calls exist only on ntm-db full-gene hits (accession contains ':'), whose
+        // coordinates the catalogue positions refer to; take them from the best such hit of
+        // the winning species.
         let best_snp_hit = hits.first().and_then(|best| {
             hits.iter()
                 .find(|h| h.description == best.description && !h.rrl_snp_calls.is_empty())
