@@ -104,6 +104,9 @@ features = [
     "tokio",
     "winit",
     "surface-message",
+    # GPU renderer (DX12/Vulkan). Without it iced falls back to CPU-only tiny-skia.
+    # ICED_BACKEND=tiny-skia still selects the software renderer at runtime.
+    "wgpu",
 ]
 
 # Default features - time + jiff
