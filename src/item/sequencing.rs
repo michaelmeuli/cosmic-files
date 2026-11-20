@@ -3,6 +3,7 @@
 
 use cosmic::iced::{Color, Length, Point, Rectangle};
 use cosmic::{Element, cosmic_theme, theme, widget};
+use std::borrow::Cow;
 use std::path::Path;
 
 use super::{Item, ItemMetadata};
@@ -170,22 +171,16 @@ pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCal
 impl Item {
     /// Returns seq_id_hits for preview, falling back to `AB1_SEQ_CACHE` when the item was
     /// created before the background scan ran (empty stored hits).
-    pub fn seq_id_hits_cached(&self) -> Vec<SeqIdHit> {
+    ///
+    /// Called from `view`, so the common case (hits stored on the item) borrows instead of
+    /// cloning every hit and its alignment strings.
+    pub fn seq_id_hits_cached(&self) -> Cow<'_, [SeqIdHit]> {
         let stored = self.metadata.seq_id_hits();
         if !stored.is_empty() {
-            log::debug!(
-                "seq_id_hits_cached({}): {} stored hits",
-                self.name,
-                stored.len()
-            );
-            return stored.to_vec();
+            return Cow::Borrowed(stored);
         }
-        let path = self.path_opt();
-        let cache_size = crate::sequencing::batch::AB1_SEQ_CACHE
-            .read()
-            .map(|g| g.len())
-            .unwrap_or(0);
-        let result = path
+        let result = self
+            .path_opt()
             .and_then(|p| {
                 crate::sequencing::batch::AB1_SEQ_CACHE
                     .read()
@@ -193,14 +188,12 @@ impl Item {
                     .and_then(|guard| guard.get(p).cloned())
             })
             .unwrap_or_default();
-        log::debug!(
-            "seq_id_hits_cached({}): path={:?}, cache_size={}, found {} hits",
+        log::trace!(
+            "seq_id_hits_cached({}): {} hits from AB1_SEQ_CACHE",
             self.name,
-            path,
-            cache_size,
             result.len()
         );
-        result
+        Cow::Owned(result)
     }
 
     fn is_fasta(&self) -> bool {
@@ -247,15 +240,16 @@ impl Item {
     /// [`SIXTEEN_S_HITS_CACHE`](crate::sequencing::batch::SIXTEEN_S_HITS_CACHE) populated by
     /// background `scan_ab1_directory` runs — so the sibling is found even when it lives in a
     /// different directory than the file being previewed.
-    fn sibling_16s_hits(&self, items: &[Item]) -> Option<Vec<SeqIdHit>> {
+    fn sibling_16s_hits<'a>(&self, items: &'a [Item]) -> Option<Cow<'a, [SeqIdHit]>> {
         let (sample_id, _) = parse_ab1_filename(&self.name);
-        if let Some(sibling) = items
-            .iter()
-            .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
-        {
+        // One filename parse per item (`is_16s` would parse it a second time).
+        if let Some(sibling) = items.iter().find(|it| {
+            let (id, gene) = parse_ab1_filename(&it.name);
+            gene == Some(Ab1Gene::Rrs16S) && id == sample_id && !it.is_fasta()
+        }) {
             return Some(sibling.seq_id_hits_cached());
         }
-        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id)
+        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id).map(Cow::Owned)
     }
 
     pub fn is_chelonae(&self, items: &[Item]) -> bool {
@@ -412,7 +406,8 @@ impl Item {
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata {
             if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
-                log::info!(
+                // Runs on every view; keep it out of info-level logs.
+                log::trace!(
                     "item is remote, showing download button: {}",
                     path.display()
                 );
@@ -1536,22 +1531,78 @@ struct ChromatogramProgram<'a> {
     highlighted_scans: Vec<u16>,
 }
 
+/// Everything the chromatogram geometry depends on besides the canvas size (which
+/// [`widget::canvas::Cache`] tracks itself). The geometry is rebuilt only when it changes.
+#[derive(Clone, PartialEq, Eq)]
+struct ChromatogramKey {
+    /// Identity of the trace data: address of the struct and of its first channel buffer.
+    data: (usize, usize),
+    lens: [usize; 4],
+    is_reverse: bool,
+    display_window: Option<(u16, u16)>,
+    highlighted_scans: Vec<u16>,
+}
+
+#[derive(Default)]
+struct ChromatogramState {
+    cache: widget::canvas::Cache<cosmic::Renderer>,
+    key: std::cell::RefCell<Option<ChromatogramKey>>,
+}
+
+impl ChromatogramProgram<'_> {
+    fn key(&self) -> ChromatogramKey {
+        let mut lens = [0; 4];
+        for (len, channel) in lens.iter_mut().zip(&self.chrom.channels) {
+            *len = channel.len();
+        }
+        ChromatogramKey {
+            data: (
+                std::ptr::from_ref(self.chrom) as usize,
+                self.chrom
+                    .channels
+                    .first()
+                    .map_or(0, |c| c.as_ptr() as usize),
+            ),
+            lens,
+            is_reverse: self.is_reverse,
+            display_window: self.display_window,
+            highlighted_scans: self.highlighted_scans.clone(),
+        }
+    }
+}
+
 impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
     for ChromatogramProgram<'a>
 {
-    type State = ();
+    type State = ChromatogramState;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &cosmic::Renderer,
         _theme: &cosmic::Theme,
         bounds: Rectangle,
         _cursor: cosmic::iced::mouse::Cursor,
     ) -> Vec<widget::canvas::Geometry<cosmic::Renderer>> {
-        use cosmic::iced::alignment;
-        use widget::canvas::{Frame, Path, Stroke};
+        let key = self.key();
+        if state.key.borrow().as_ref() != Some(&key) {
+            state.cache.clear();
+            *state.key.borrow_mut() = Some(key);
+        }
+        vec![
+            state
+                .cache
+                .draw(renderer, bounds.size(), |frame| self.draw_traces(frame)),
+        ]
+    }
+}
 
+impl ChromatogramProgram<'_> {
+    fn draw_traces(&self, frame: &mut widget::canvas::Frame<cosmic::Renderer>) {
+        use cosmic::iced::alignment;
+        use widget::canvas::{Path, Stroke};
+
+        let bounds = frame.size();
         let chrom = self.chrom;
         let is_rev = self.is_reverse;
 
@@ -1587,7 +1638,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             .max()
             .unwrap_or(1);
         if total_scans == 0 {
-            return vec![];
+            return;
         }
         let (scan_start, scan_end) = self
             .display_window
@@ -1638,8 +1689,6 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         };
         let intensity_to_y =
             |v: i16| -> f32 { top_margin + (1.0 - (v - y_min) as f32 / y_range) * plot_h };
-
-        let mut frame = Frame::new(renderer, bounds.size());
 
         // Draw each channel, restricted to [scan_start, scan_end].
         // For reverse reads the channel base is the complement of the plus-strand base,
@@ -1705,7 +1754,5 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
                 shaping: cosmic::iced::advanced::text::Shaping::Basic,
             });
         }
-
-        vec![frame.into_geometry()]
     }
 }
