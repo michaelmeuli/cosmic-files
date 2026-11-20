@@ -1532,22 +1532,78 @@ struct ChromatogramProgram<'a> {
     highlighted_scans: Vec<u16>,
 }
 
+/// Everything the chromatogram geometry depends on besides the canvas size (which
+/// [`widget::canvas::Cache`] tracks itself). The geometry is rebuilt only when it changes.
+#[derive(Clone, PartialEq, Eq)]
+struct ChromatogramKey {
+    /// Identity of the trace data: address of the struct and of its first channel buffer.
+    data: (usize, usize),
+    lens: [usize; 4],
+    is_reverse: bool,
+    display_window: Option<(u16, u16)>,
+    highlighted_scans: Vec<u16>,
+}
+
+#[derive(Default)]
+struct ChromatogramState {
+    cache: widget::canvas::Cache<cosmic::Renderer>,
+    key: std::cell::RefCell<Option<ChromatogramKey>>,
+}
+
+impl ChromatogramProgram<'_> {
+    fn key(&self) -> ChromatogramKey {
+        let mut lens = [0; 4];
+        for (len, channel) in lens.iter_mut().zip(&self.chrom.channels) {
+            *len = channel.len();
+        }
+        ChromatogramKey {
+            data: (
+                std::ptr::from_ref(self.chrom) as usize,
+                self.chrom
+                    .channels
+                    .first()
+                    .map_or(0, |c| c.as_ptr() as usize),
+            ),
+            lens,
+            is_reverse: self.is_reverse,
+            display_window: self.display_window,
+            highlighted_scans: self.highlighted_scans.clone(),
+        }
+    }
+}
+
 impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
     for ChromatogramProgram<'a>
 {
-    type State = ();
+    type State = ChromatogramState;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &cosmic::Renderer,
         _theme: &cosmic::Theme,
         bounds: Rectangle,
         _cursor: cosmic::iced::mouse::Cursor,
     ) -> Vec<widget::canvas::Geometry<cosmic::Renderer>> {
-        use cosmic::iced::alignment;
-        use widget::canvas::{Frame, Path, Stroke};
+        let key = self.key();
+        if state.key.borrow().as_ref() != Some(&key) {
+            state.cache.clear();
+            *state.key.borrow_mut() = Some(key);
+        }
+        vec![
+            state
+                .cache
+                .draw(renderer, bounds.size(), |frame| self.draw_traces(frame)),
+        ]
+    }
+}
 
+impl ChromatogramProgram<'_> {
+    fn draw_traces(&self, frame: &mut widget::canvas::Frame<cosmic::Renderer>) {
+        use cosmic::iced::alignment;
+        use widget::canvas::{Path, Stroke};
+
+        let bounds = frame.size();
         let chrom = self.chrom;
         let is_rev = self.is_reverse;
 
@@ -1583,7 +1639,7 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
             .max()
             .unwrap_or(1);
         if total_scans == 0 {
-            return vec![];
+            return;
         }
         let (scan_start, scan_end) = self
             .display_window
@@ -1634,8 +1690,6 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
         };
         let intensity_to_y =
             |v: i16| -> f32 { top_margin + (1.0 - (v - y_min) as f32 / y_range) * plot_h };
-
-        let mut frame = Frame::new(renderer, bounds.size());
 
         // Draw each channel, restricted to [scan_start, scan_end].
         // For reverse reads the channel base is the complement of the plus-strand base,
@@ -1701,7 +1755,5 @@ impl<'a> widget::canvas::Program<Message, cosmic::Theme, cosmic::Renderer>
                 shaping: cosmic::iced::advanced::text::Shaping::Basic,
             });
         }
-
-        vec![frame.into_geometry()]
     }
 }
