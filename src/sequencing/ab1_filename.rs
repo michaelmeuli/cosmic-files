@@ -282,12 +282,14 @@ fn gene_from_marker(m: &str) -> Option<Ab1Gene> {
         return Some(Ab1Gene::Rrs3End);
     }
 
-    // 23S: `rrl`, MCLR 19F / 21R, `clr`, `23S`, SP1 F / SP2 R mod. `16-23S-ITS` (ITS primers)
-    // becomes the token `1623sits…` and doesn't match.
+    // 23S: `rrl`, MCLR 19F / 21R (also typed `MCRL`), `clr`, SP1 F / SP2 R mod. A bare `23S`
+    // is not enough: in the routine corpus it only occurs on non-mycobacterial 23S reads
+    // (*H. pylori* `Hpy_23S_fw`, `23S ExoSAP_MN23SVDFn`), while every mycobacterial rrl read
+    // also names one of the primers above.
     if any_tok(&|t| {
         t.starts_with("rrl")
             || t.starts_with("mclr")
-            || t.starts_with("23s")
+            || t.starts_with("mcrl")
             || t == "clr"
             || ((t.starts_with("sp1") || t.starts_with("sp2")) && no_digit_at(t, 3))
     }) {
@@ -399,12 +401,87 @@ mod tests {
             ("rrs_#289", Some(Rrs3End)),
             ("SP2 R mod", Some(Rrl)),
             ("SP1 F", Some(Rrl)),
-            ("23S", Some(Rrl)),
+            ("23S", None),
+            ("MCRL 21R", Some(Rrl)),
             ("16-23S-ITS-1f", None),
             ("pncA-Ber-fw", Some(PncA)),
             ("LC3", None),
         ] {
             check(&format!("{id} {marker}.ab1"), id, gene);
+        }
+    }
+
+    /// Real file names from the routine Sanger archive ("Sequenzen MOL Routine", 2006–2026).
+    #[test]
+    fn routine_corpus() {
+        const RRDR: Option<Ab1Gene> = Some(RpoB(RpoBRegion::MtbRrdr));
+        for (name, id, gene) in [
+            // Non-mycobacterial 23S reads must not get the rrl analysis.
+            ("2026125196 Hp Mak_Hpy_23S_fw.ab1", "2026125196", None),
+            ("2024128865 HP 23S 10ul_Hpy_23S_rev.ab1", "2024128865", None),
+            ("2026126327 Hp Mak_Hpy-23S-rev.ab1", "2026126327", None),
+            ("2023124106 23S ExoSAP_MN23SVDFn.ab1", "2023124106", None),
+            // Mycobacterial rrl.
+            ("rrl_mcrl21f.ab1", "rrl_mcrl21f", Some(Rrl)),
+            ("2014500121 clr f_mclr19f.ab1", "2014500121", Some(Rrl)),
+            ("2024500100 rrl-r_SP2 R mod.ab1", "2024500100", Some(Rrl)),
+            // rpoB regions.
+            ("2023341228rpoB_rpoB-2573f.ab1", "2023341228", NTM),
+            ("2023333227_rpoBS_3337r.ab1", "2023333227", NTM),
+            ("2022340459_rpoB_10uL_r.ab1", "2022340459", NTM),
+            (
+                "2024340653 rpoB-81 coreregion f_TR1.ab1",
+                "2024340653",
+                RRDR,
+            ),
+            ("2024340653 rpoB 81bp 10ul_TR2b r.ab1", "2024340653", RRDR),
+            (
+                "2024500100 rpoB-5 f_Tb176-f.ab1",
+                "2024500100",
+                Some(RpoB(RpoBRegion::Mtb5Prime)),
+            ),
+            ("2019430890 Strep rpoB_rpoB-univ-FW.ab1", "2019430890", None),
+            // Other mycobacterial genes.
+            (
+                "2023334476_16S_Bact_1098s_2023-02-23_14-57-15_H10.ab1",
+                "2023334476",
+                Some(Rrs3End),
+            ),
+            (
+                "2024336969 16S rRNA 3'End_Bact-1098s.ab1",
+                "2024336969",
+                Some(Rrs3End),
+            ),
+            ("2023 335278 MTB A9_Mbak14.ab1", "2023335278", Some(Rrs16S)),
+            (
+                "176797_12w_hsp65_2010-03-19_16-38-37_E06.ab1",
+                "176797_12w_hsp65_2010-03-19_16-38-37_E06",
+                Some(Hsp65),
+            ),
+            (
+                "202300268 65kDa_Tb11.ab1",
+                "202300268 65kDa_Tb11",
+                Some(Hsp65),
+            ),
+            (
+                "ATCC_19977_erm41_f2_2023-01-27_11-50-48_E04.ab1",
+                "ATCC_19977_erm41_f2_2023-01-27_11-50-48_E04",
+                Some(Erm41),
+            ),
+            (
+                "QCCH_2023_1_500010_PZA100_pncA_F_2023-01-26_16-40-03_F03.ab1",
+                "QCCH_2023_1_500010_PZA100_pncA_F_2023-01-26_16-40-03_F03",
+                Some(PncA),
+            ),
+            // Assays without an analysis.
+            ("2026500201 inhA_inhA-rev.ab1", "2026500201", None),
+            ("2024500589 katG r_katG_core_rev.ab1", "2024500589", None),
+            ("2015179546 embB_embB-1r.ab1", "2015179546", None),
+            ("2026316065 K_Bak11w.ab1", "2026316065", None),
+            ("2023 121980 Eub_DPO-F.ab1", "2023121980", None),
+            ("2026120645 Hp -gyrA_gyrA-fw.ab1", "2026120645", None),
+        ] {
+            check(name, id, gene);
         }
     }
 }
