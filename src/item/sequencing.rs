@@ -3,6 +3,7 @@
 
 use cosmic::iced::{Color, Length, Point, Rectangle};
 use cosmic::{Element, cosmic_theme, theme, widget};
+use std::borrow::Cow;
 use std::path::Path;
 
 use super::{Item, ItemMetadata};
@@ -170,22 +171,16 @@ pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCal
 impl Item {
     /// Returns seq_id_hits for preview, falling back to `AB1_SEQ_CACHE` when the item was
     /// created before the background scan ran (empty stored hits).
-    pub fn seq_id_hits_cached(&self) -> Vec<SeqIdHit> {
+    ///
+    /// Called from `view`, so the common case (hits stored on the item) borrows instead of
+    /// cloning every hit and its alignment strings.
+    pub fn seq_id_hits_cached(&self) -> Cow<'_, [SeqIdHit]> {
         let stored = self.metadata.seq_id_hits();
         if !stored.is_empty() {
-            log::debug!(
-                "seq_id_hits_cached({}): {} stored hits",
-                self.name,
-                stored.len()
-            );
-            return stored.to_vec();
+            return Cow::Borrowed(stored);
         }
-        let path = self.path_opt();
-        let cache_size = crate::sequencing::batch::AB1_SEQ_CACHE
-            .read()
-            .map(|g| g.len())
-            .unwrap_or(0);
-        let result = path
+        let result = self
+            .path_opt()
             .and_then(|p| {
                 crate::sequencing::batch::AB1_SEQ_CACHE
                     .read()
@@ -193,14 +188,12 @@ impl Item {
                     .and_then(|guard| guard.get(p).cloned())
             })
             .unwrap_or_default();
-        log::debug!(
-            "seq_id_hits_cached({}): path={:?}, cache_size={}, found {} hits",
+        log::trace!(
+            "seq_id_hits_cached({}): {} hits from AB1_SEQ_CACHE",
             self.name,
-            path,
-            cache_size,
             result.len()
         );
-        result
+        Cow::Owned(result)
     }
 
     fn is_fasta(&self) -> bool {
@@ -247,15 +240,16 @@ impl Item {
     /// [`SIXTEEN_S_HITS_CACHE`](crate::sequencing::batch::SIXTEEN_S_HITS_CACHE) populated by
     /// background `scan_ab1_directory` runs — so the sibling is found even when it lives in a
     /// different directory than the file being previewed.
-    fn sibling_16s_hits(&self, items: &[Item]) -> Option<Vec<SeqIdHit>> {
+    fn sibling_16s_hits<'a>(&self, items: &'a [Item]) -> Option<Cow<'a, [SeqIdHit]>> {
         let (sample_id, _) = parse_ab1_filename(&self.name);
-        if let Some(sibling) = items
-            .iter()
-            .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
-        {
+        // One filename parse per item (`is_16s` would parse it a second time).
+        if let Some(sibling) = items.iter().find(|it| {
+            let (id, gene) = parse_ab1_filename(&it.name);
+            gene == Some(Ab1Gene::Rrs16S) && id == sample_id && !it.is_fasta()
+        }) {
             return Some(sibling.seq_id_hits_cached());
         }
-        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id)
+        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id).map(Cow::Owned)
     }
 
     pub fn is_chelonae(&self, items: &[Item]) -> bool {
