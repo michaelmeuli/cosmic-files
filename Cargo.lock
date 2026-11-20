@@ -753,6 +753,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bio"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3962,6 +3971,7 @@ dependencies = [
  "iced_accessibility",
  "iced_core",
  "iced_debug",
+ "iced_devtools",
  "iced_futures",
  "iced_program",
  "iced_renderer",
@@ -3981,6 +3991,21 @@ source = "git+https://github.com/pop-os/libcosmic.git#8fa46ccd444ca6521ce247ef62
 dependencies = [
  "accesskit",
  "accesskit_winit",
+]
+
+[[package]]
+name = "iced_beacon"
+version = "0.14.0"
+source = "git+https://github.com/pop-os/libcosmic.git#8fa46ccd444ca6521ce247ef62c63f9e207348e5"
+dependencies = [
+ "bincode",
+ "futures",
+ "iced_core",
+ "log",
+ "semver 1.0.28",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -4014,8 +4039,20 @@ name = "iced_debug"
 version = "0.14.0"
 source = "git+https://github.com/pop-os/libcosmic.git#8fa46ccd444ca6521ce247ef62c63f9e207348e5"
 dependencies = [
+ "iced_beacon",
  "iced_core",
  "iced_futures",
+ "log",
+]
+
+[[package]]
+name = "iced_devtools"
+version = "0.14.0"
+source = "git+https://github.com/pop-os/libcosmic.git#8fa46ccd444ca6521ce247ef62c63f9e207348e5"
+dependencies = [
+ "iced_debug",
+ "iced_program",
+ "iced_widget",
  "log",
 ]
 
@@ -8329,6 +8366,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
