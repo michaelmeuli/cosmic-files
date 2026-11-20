@@ -22,6 +22,7 @@ static THRESHOLD: LazyLock<Option<Duration>> = LazyLock::new(|| {
 });
 
 /// Slow-call threshold, or `None` when the logger is disabled.
+#[must_use]
 pub fn threshold() -> Option<Duration> {
     *THRESHOLD
 }
@@ -36,6 +37,8 @@ pub struct Timer {
 
 impl Timer {
     /// Starts a timer when the logger is enabled. `detail` is only evaluated then.
+    /// Bind the result (`let _perf = …`): dropping it ends the measurement.
+    #[must_use]
     pub fn start(label: &'static str, detail: impl FnOnce() -> String) -> Option<Self> {
         threshold().map(|threshold| Self {
             start: Instant::now(),
@@ -61,6 +64,7 @@ impl Drop for Timer {
 }
 
 /// `Debug`-formats `value`, stopping after `max` bytes so large payloads stay cheap.
+#[must_use]
 pub fn debug_prefix(value: &impl fmt::Debug, max: usize) -> String {
     struct Bounded {
         buf: String,
