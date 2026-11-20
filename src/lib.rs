@@ -35,6 +35,7 @@ pub mod mime_icon;
 mod mounter;
 mod mouse_area;
 pub mod operation;
+pub mod perf;
 pub mod russh;
 pub mod scan;
 pub mod sequencing;

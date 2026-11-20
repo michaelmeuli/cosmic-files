@@ -148,6 +148,8 @@ jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]
 wayland = ["libcosmic/wayland", "dep:cctk"]
 wgpu = ["libcosmic/wgpu"]
+# iced debug overlay (press F12): view/update/layout/draw/present timings
+debug = ["libcosmic/debug"]
 
 [profile.dev]
 opt-level = 1

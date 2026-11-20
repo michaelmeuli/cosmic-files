@@ -3396,6 +3396,7 @@ impl Application for App {
 
     /// Handle application events here.
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        let _perf = crate::perf::Timer::start("update", || crate::perf::debug_prefix(&message, 80));
         // Helper for updating config values efficiently
         macro_rules! config_set {
             ($name: ident, $value: expr) => {
@@ -8246,6 +8247,7 @@ impl Application for App {
 
     /// Creates a view after each update.
     fn view(&self) -> Element<'_, Self::Message> {
+        let _perf = crate::perf::Timer::start("view", String::new);
         let cosmic_theme::Spacing {
             space_xxs, space_s, ..
         } = theme::spacing();
@@ -8316,6 +8318,7 @@ impl Application for App {
     }
 
     fn view_window(&self, id: WindowId) -> Element<'_, Self::Message> {
+        let _perf = crate::perf::Timer::start("view_window", || format!("{id:?}"));
         let content = match self.windows.get(&id) {
             Some(window) => match &window.kind {
                 WindowKind::Desktop(entity) => {
