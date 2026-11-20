@@ -406,7 +406,8 @@ impl Item {
         #[cfg(feature = "russh")]
         if let ItemMetadata::RusshPath { .. } = &self.metadata {
             if let Some(Location::Remote(uri, _, Some(path))) = &self.location_opt {
-                log::info!(
+                // Runs on every view; keep it out of info-level logs.
+                log::trace!(
                     "item is remote, showing download button: {}",
                     path.display()
                 );
