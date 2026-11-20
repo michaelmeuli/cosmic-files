@@ -332,4 +332,40 @@ mod tests {
         assert_eq!(calls.len(), MARINUM_ULCERANS_SNPS.len());
         assert!(calls.iter().all(MarinumUlceransSnpCall::is_ulcerans));
     }
+
+    /// The committed TB11/TB12 *M. gastri* amplicon, as a read on either strand, must be
+    /// identified as *M. gastri* and get gastri alleles at every covered kansasii/gastri SNP.
+    #[test]
+    fn gastri_amplicon_identified_as_gastri() {
+        let (_, _, gastri) = parse_multi_fasta(REF_AMPLICON_HSP65)
+            .into_iter()
+            .find(|(acc, desc, _)| acc.starts_with("GCF_002102175") && desc.contains("gastri"))
+            .expect("M. gastri TB11/TB12 amplicon missing");
+
+        for read in [gastri.clone(), reverse_complement(&gastri)] {
+            let hits = identify_sequence_hsp65(&read);
+            let top = &hits[0];
+            assert!(
+                top.description.contains("gastri"),
+                "top hit: {} ({})",
+                top.description,
+                top.accession
+            );
+            assert!(top.identity > 0.99, "top identity {}", top.identity);
+
+            let snp_hit = hits
+                .iter()
+                .find(|h| h.is_gastri())
+                .expect("AF547836 hit missing");
+            assert!(!snp_hit.kansasii_gastri_snp_calls.is_empty());
+            assert!(
+                snp_hit
+                    .kansasii_gastri_snp_calls
+                    .iter()
+                    .all(KansasiiGastriSnpCall::is_gastri),
+                "{:?}",
+                snp_hit.kansasii_gastri_snp_calls
+            );
+        }
+    }
 }
