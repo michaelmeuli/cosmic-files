@@ -19,8 +19,9 @@ use walkdir::WalkDir;
 
 pub use super::ab1_filename::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use super::{
-    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, SeqIdHit, SusceptibilityCalls, best_snp_hit,
+    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, RefSource, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
+    hits_from,
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
@@ -37,7 +38,7 @@ use super::{
         RrsSusceptibilityCalls3End, identify_sequence_16s3end, is_susceptible_rrs_3end,
         is_susceptible_rrs_by_snp_calls_rare_3end,
     },
-    trim_to_min_quality,
+    trim_to_min_quality, truncate_per_source,
 };
 
 /// In-memory cache: maps each AB1 file path to the top 10 seq_id_hits (by identity) computed by
@@ -82,10 +83,16 @@ pub struct SampleSusceptibilityRecord {
     pub file_created: Option<SystemTime>,
     /// Per-gene susceptibility evidence, populated from the best (first) alignment hit.
     pub susceptibility_calls: SusceptibilityCalls,
-    /// Species/subspecies description of the best alignment hit.
+    /// Species call from the NCBI references ([`RefSource::Ncbi`]).
     pub species: Option<String>,
-    /// Alignment identity (%) of the best hit.
+    /// Alignment identity (%) of the best NCBI hit.
     pub identity: Option<f32>,
+    /// Species call from the GTDB amplicon references ([`RefSource::Gtdb`]).
+    #[serde(default)]
+    pub species_gtdb: Option<String>,
+    /// Alignment identity (%) of the best GTDB hit.
+    #[serde(default)]
+    pub identity_gtdb: Option<f32>,
     /// Combined susceptibility verdict across all genes (see [`scan_ab1_directory`]'s body for
     /// the gene-priority order: erm41 → rrl → rrs → pncA, first `Some` wins).
     pub is_susceptible: Option<bool>,
@@ -102,7 +109,30 @@ pub struct SampleSusceptibilityRecord {
 /// Version of the per-file analysis stored in disk-cached records. Bump it whenever the calls
 /// a record carries change (new gene calls, catalogue logic), so cached records are redone.
 /// 1: rpoB rifampicin (RRDR) calls.
-const ANALYSIS_VERSION: u32 = 1;
+/// 2: NCBI and GTDB references kept apart (hit `source`, per-source species/identity).
+const ANALYSIS_VERSION: u32 = 2;
+
+impl SampleSusceptibilityRecord {
+    /// Highest identity over both reference sources; the report filters on this, so targets
+    /// with only GTDB references (hsp65, Mtb rpoB regions) are still reported.
+    #[must_use]
+    pub fn best_identity(&self) -> Option<f32> {
+        match (self.identity, self.identity_gtdb) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        }
+    }
+}
+
+/// Species call for `gene` from the hits of one reference source.
+fn species_call(gene: Option<Ab1Gene>, hits: &[&SeqIdHit]) -> Option<String> {
+    match gene {
+        Some(Ab1Gene::Rrs16S) => species_from_16s_hits(hits),
+        Some(Ab1Gene::Rrs3End) => species_from_16s3end(hits),
+        Some(Ab1Gene::RpoB(_)) => species_from_rpob_hits(hits),
+        _ => hits.first().map(|h| h.description.clone()),
+    }
+}
 
 /// `true` if a disk-cached record can be reused: it was written by the current
 /// [`ANALYSIS_VERSION`] and still carries the gene the current filename parser assigns (so
@@ -123,7 +153,7 @@ pub(crate) fn rpob_susceptibility_calls(hit: &SeqIdHit) -> RpobSusceptibilityCal
 }
 
 /// For 16S hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
-pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
+pub(crate) fn species_from_16s_hits(hits: &[&SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
     if first.description.contains("abscessus") {
         return Some("M. chelonae / M. abscessus complex".to_string());
@@ -169,7 +199,7 @@ pub(crate) fn species_from_16s_hits(hits: &[SeqIdHit]) -> Option<String> {
 /// For 16S 3'-end hits, only *M. marinum*/*M. ulcerans* (the pair position 1248 discriminates)
 /// gets a species description; other species return an empty string since this amplicon isn't
 /// diagnostic for them.
-fn species_from_16s3end(hits: &[SeqIdHit]) -> Option<String> {
+fn species_from_16s3end(hits: &[&SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
     if !first.description.starts_with("Mycobacterium ulcerans")
         && !first.description.starts_with("Mycobacterium marinum")
@@ -180,7 +210,7 @@ fn species_from_16s3end(hits: &[SeqIdHit]) -> Option<String> {
 }
 
 /// For rpoB hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
-pub(crate) fn species_from_rpob_hits(hits: &[SeqIdHit]) -> Option<String> {
+pub(crate) fn species_from_rpob_hits(hits: &[&SeqIdHit]) -> Option<String> {
     let first = hits.first()?;
     if first.description.contains("abscessus") {
         return Some("M. abscessus complex".to_string());
@@ -394,10 +424,11 @@ fn analyse_ab1_file(
         _ => Vec::new(),
     };
     // Each identify_sequence_* function returns hits already sorted descending by identity;
-    // keep only the top 10 before cloning into the long-lived caches below, since scanning
-    // directories with many AB1 files otherwise accumulates one full (unbounded) hit list
-    // per file for the life of the process.
-    seq_id_hits.truncate(10);
+    // keep only the top 10 per reference source before cloning into the long-lived caches
+    // below, since scanning directories with many AB1 files otherwise accumulates one full
+    // (unbounded) hit list per file for the life of the process. Per source, so one database
+    // can't crowd the other out.
+    truncate_per_source(&mut seq_id_hits, 10);
 
     // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
     log::debug!(
@@ -498,6 +529,8 @@ fn analyse_ab1_file(
         })
         .unwrap_or_default();
 
+    let ncbi_hits = hits_from(&seq_id_hits, RefSource::Ncbi);
+    let gtdb_hits = hits_from(&seq_id_hits, RefSource::Gtdb);
     let record = SampleSusceptibilityRecord {
         sample_id,
         gene: gene.map(|g| g.label().to_string()),
@@ -505,15 +538,16 @@ fn analyse_ab1_file(
         file_path: path.to_path_buf(),
         file_created,
         susceptibility_calls,
-        species: match gene {
-            Some(Ab1Gene::Rrs16S) => species_from_16s_hits(&seq_id_hits),
-            Some(Ab1Gene::Rrs3End) => species_from_16s3end(&seq_id_hits),
-            Some(Ab1Gene::RpoB(_)) => species_from_rpob_hits(&seq_id_hits),
-            _ => seq_id_hits.first().map(|h| h.description.clone()),
-        },
-        identity: seq_id_hits.first().map(|h| h.identity),
+        species: species_call(gene, &ncbi_hits),
+        identity: ncbi_hits.first().map(|h| h.identity),
+        species_gtdb: species_call(gene, &gtdb_hits),
+        identity_gtdb: gtdb_hits.first().map(|h| h.identity),
         is_susceptible,
-        seq_id_hits: seq_id_hits.iter().take(5).cloned().collect(),
+        seq_id_hits: {
+            let mut top = seq_id_hits.clone();
+            truncate_per_source(&mut top, 5);
+            top
+        },
         analysis_version: ANALYSIS_VERSION,
     };
 
@@ -629,7 +663,8 @@ pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<Seq
 
 /// Write `records` to a CSV file at `out_path`.
 ///
-/// Filters the same way [`super::build_report_pdf`] does: `gene` must be known, `identity` must
+/// Filters the same way [`super::build_report_pdf`] does: `gene` must be known, the best
+/// identity of either reference source ([`SampleSusceptibilityRecord::best_identity`]) must
 /// meet [`MIN_SEQ_ID_IDENTITY`], and `file_created` (when known) must fall within
 /// `report_max_age_days`.
 ///
@@ -637,8 +672,9 @@ pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<Seq
 /// erm41_position_28, erm41_lof_snp_calls, erm41_susceptible, rrl_position_2058_2059,
 /// rrl_snp_calls, rrl_susceptible, rrs_snp_calls, rrs_susceptible, rrs3end_position_1248,
 /// rrs3end_snp_calls, rrs3end_susceptible, pnca_snp_calls, pnca_susceptible, file_created,
-/// rpob_snp_calls, rpob_susceptible, rpob_species_validated` (the rpoB columns are appended
-/// after `file_created` so existing column positions stay stable).
+/// rpob_snp_calls, rpob_susceptible, rpob_species_validated, species_gtdb, identity_gtdb_pct`.
+/// `species`/`identity_pct` are the NCBI call; later additions (rpoB, GTDB) are appended so
+/// existing column positions stay stable.
 pub fn write_ab1_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
@@ -674,13 +710,15 @@ pub fn write_ab1_csv(
         "rpob_snp_calls",
         "rpob_susceptible",
         "rpob_species_validated",
+        "species_gtdb",
+        "identity_gtdb_pct",
     ])?;
 
     for rec in records {
         if rec.gene.is_none() {
             continue;
         }
-        if rec.identity.is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
+        if rec.best_identity().is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
             continue;
         }
         if !rec
@@ -790,6 +828,10 @@ pub fn write_ab1_csv(
             rpob_snps.as_str(),
             rpob_sus.as_str(),
             rpob_validated,
+            rec.species_gtdb.as_deref().unwrap_or(""),
+            &rec.identity_gtdb
+                .map(|i| format!("{:.1}", i))
+                .unwrap_or_default(),
         ])?;
     }
 
@@ -798,8 +840,9 @@ pub fn write_ab1_csv(
 }
 
 /// Write records that flag a rare resistance mutation (`is_susceptible_rare == Some(false)` for
-/// rrl or rrs) to `out_path`. Same columns as `write_ab1_csv` plus `rrl_susceptible_rare` and
-/// `rrs_susceptible_rare`.
+/// rrl or rrs) to `out_path`. Same leading columns as `write_ab1_csv` plus
+/// `rrl_susceptible_rare` and `rrs_susceptible_rare`, then `file_created, species_gtdb,
+/// identity_gtdb_pct`.
 pub fn write_rare_mutations_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
@@ -808,7 +851,9 @@ pub fn write_rare_mutations_csv(
         .iter()
         .filter(|rec| {
             rec.gene.is_some()
-                && rec.identity.is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY)
+                && rec
+                    .best_identity()
+                    .is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY)
                 && (rec.susceptibility_calls.rrl.is_susceptible_rare == Some(false)
                     || rec.susceptibility_calls.rrs.is_susceptible_rare == Some(false))
         })
@@ -839,6 +884,8 @@ pub fn write_rare_mutations_csv(
         "rrs_susceptible",
         "rrs_susceptible_rare",
         "file_created",
+        "species_gtdb",
+        "identity_gtdb_pct",
     ])?;
 
     for rec in &rare {
@@ -913,6 +960,10 @@ pub fn write_rare_mutations_csv(
             rrs_sus.as_str(),
             rrs_sus_rare.as_str(),
             file_created.as_str(),
+            rec.species_gtdb.as_deref().unwrap_or(""),
+            &rec.identity_gtdb
+                .map(|i| format!("{:.1}", i))
+                .unwrap_or_default(),
         ])?;
     }
 

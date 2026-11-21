@@ -8,8 +8,8 @@
 
 use super::reverse_complement;
 use super::{
-    GappedAlignment, SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc,
-    parse_multi_fasta, trim_alignment_ends,
+    GappedAlignment, RefPool, SeqIdHit, align_to_ref, base_at_ref_pos, ref_pool,
+    trim_alignment_ends,
 };
 use super::{REF_AMPLICON_RRL, REF_MYCO_RRL, RRL_ANCHOR_L, RRL_ANCHOR_R};
 use serde::{Deserialize, Serialize};
@@ -221,11 +221,8 @@ fn parse_rrl_resistance_snps(csv: &str) -> RrlSnpMap {
 }
 
 /// Parsed and substring-deduplicated rrl reference sequences, initialised once.
-static RRL_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
-    let mut refs = parse_multi_fasta(REF_MYCO_RRL);
-    refs.extend(parse_multi_fasta(REF_AMPLICON_RRL));
-    dedup_substring_same_desc(refs)
-});
+static RRL_REFS: LazyLock<RefPool> =
+    LazyLock::new(|| ref_pool(&[REF_MYCO_RRL], &[REF_AMPLICON_RRL], |_| true));
 
 /// Resistance SNP maps per species description, parsed once from each species' ntm-db
 /// `variants.csv`.
@@ -413,7 +410,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
 
     let mut hits: Vec<SeqIdHit> = RRL_REFS
         .iter()
-        .map(|(accession, description, refseq)| {
+        .map(|(source, accession, description, refseq)| {
             let fwd = align_to_ref(query, refseq);
             let rev = align_to_ref(&rc, refseq);
             let (ga, is_reverse) = if rev.identity > fwd.identity {
@@ -433,10 +430,9 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
             SeqIdHit {
                 accession: accession.clone(),
                 description: description.clone(),
+                source: *source,
                 identity: ga.identity,
                 is_reverse,
-                kansasii_gastri_snp_calls: vec![],
-                marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls,
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end: vec![],

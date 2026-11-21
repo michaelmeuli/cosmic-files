@@ -60,8 +60,6 @@ The NCBI Taxonomy Database (http://www.ncbi.nlm.nih.gov/taxonomy) now includes a
   
 <ins>myco_rrs.fasta:</ins>   
 Mycobacteriaceae[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]        
-<ins>myco_hsp65.fasta:</ins>   
-Mycobacteriaceae[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]  
 <ins>myco_rpoB.fasta:</ins>   
 Mycobacteriaceae[Organism] AND rpoB[Gene Name] AND 400:3000[SLEN] AND type_material[Filter]  
 <ins>myco_erm41.fasta:</ins>   

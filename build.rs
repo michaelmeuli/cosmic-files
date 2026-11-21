@@ -292,10 +292,6 @@ fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
             "myco_rpob.fasta",
         ),
         (
-            "Mycobacteriales[Organism] AND (hsp65[Gene Name] OR groEL2[Gene Name]) AND 400:3000[SLEN] AND type_material[Filter]",
-            "myco_hsp65.fasta",
-        ),
-        (
             "Mycobacteriales[Organism] AND (16S[Title] OR rrs[Gene Name]) AND 1200:3500[SLEN] AND type_material[Filter]",
             "myco_rrs.fasta",
         ),
@@ -547,34 +543,8 @@ fn gff_feature_matches(f: &GffFeature, gene: &str) -> bool {
         "rrl" => name == "rrl" || (f.ftype == "rRNA" && product.contains("23S ribosomal RNA")),
         "rpoB" => name == "rpoB" || gene_kv == "rpoB",
         "erm" => !name.is_empty() && name.to_ascii_lowercase().contains("erm"),
-        // PGAP annotates both mycobacterial GroEL paralogs identically as gene=groL /
-        // product="chaperonin GroEL" — this only narrows to *candidates*; is_hsp65_paralog2()
-        // below picks the standalone one (hsp65/groEL2), discarding the groES-operonic one
-        // (groEL1).
-        "hsp65" => {
-            gene_kv.eq_ignore_ascii_case("groL")
-                || gene_kv.eq_ignore_ascii_case("groEL2")
-                || gene_kv.eq_ignore_ascii_case("hsp65")
-                || product.to_ascii_lowercase().contains("chaperonin groel")
-        }
         _ => false,
     }
-}
-
-/// Mycobacteria carry two GroEL paralogs: groEL1, co-transcribed in an operon immediately
-/// downstream/upstream of groES, and groEL2 (a.k.a. "hsp65", the gene used diagnostically for
-/// mycobacterial species ID) standing alone elsewhere in the genome. PGAP gives both the same
-/// gene=groL / product="chaperonin GroEL" annotation, so gff_feature_matches() alone can't tell
-/// them apart — this rejects any groL candidate sitting near a groES gene on the same contig.
-fn is_hsp65_paralog2(features: &[GffFeature], candidate: &GffFeature) -> bool {
-    const OPERON_WINDOW: usize = 5000;
-    !features.iter().any(|g| {
-        let gene_kv = g.attrs.get("gene").map(String::as_str).unwrap_or("");
-        let name = g.attrs.get("Name").map(String::as_str).unwrap_or("");
-        g.seqname == candidate.seqname
-            && (gene_kv.eq_ignore_ascii_case("groES") || name.eq_ignore_ascii_case("groES"))
-            && candidate.start.abs_diff(g.start) < OPERON_WINDOW
-    })
 }
 
 /// Walks `db_dir` for per-species `<Genus>_<species>/{genome.gff,genome.fasta}` pairs (the
@@ -599,10 +569,6 @@ fn extract_species_gff_sequences(
         Target {
             gene: "rpoB",
             fasta: "myco_rpob.fasta",
-        },
-        Target {
-            gene: "hsp65",
-            fasta: "myco_hsp65.fasta",
         },
         Target {
             gene: "rrs",
@@ -652,9 +618,6 @@ fn extract_species_gff_sequences(
             let mut seen: HashSet<(String, usize, usize)> = HashSet::new();
             for feature in &features {
                 if !gff_feature_matches(feature, target.gene) {
-                    continue;
-                }
-                if target.gene == "hsp65" && !is_hsp65_paralog2(&features, feature) {
                     continue;
                 }
                 let coord_key = (feature.seqname.clone(), feature.start, feature.stop);
@@ -723,13 +686,6 @@ fn extract_species_gff_sequences(
             }
         }
     }
-}
-
-/// hsp65 SNP-reference accessions + positions, shared verbatim with the crate
-/// (`sequencing::hsp65_snp_refs`) so build-time validation can't drift from runtime dispatch.
-#[allow(dead_code)]
-mod hsp65_snp_refs {
-    include!("src/sequencing/hsp65_snp_refs.rs");
 }
 
 /// Species that must appear as descriptions in myco_rrl.fasta for RRL_RESISTANCE_SNPS lookups
@@ -807,97 +763,6 @@ fn check_rrs_integrity(seq_dir: &std::path::Path) {
     }
 }
 
-/// Minimal multi-FASTA reader mirroring `parse_multi_fasta()`'s `(id, "Genus species", seq)`
-/// split (without its subspecies folding, which none of the hsp65 SNP species need).
-fn read_fasta_records(text: &str) -> Vec<(String, String, Vec<u8>)> {
-    let mut out: Vec<(String, String, Vec<u8>)> = Vec::new();
-    for line in text.lines() {
-        if let Some(header) = line.strip_prefix('>') {
-            let mut words = header.splitn(4, ' ');
-            let id = words.next().unwrap_or("").to_string();
-            let genus = words.next().unwrap_or("");
-            let species = words.next().unwrap_or("");
-            out.push((
-                id,
-                format!("{genus} {species}").trim().to_string(),
-                Vec::new(),
-            ));
-        } else if let Some((_, _, seq)) = out.last_mut() {
-            seq.extend(line.trim().bytes().map(|b| b.to_ascii_uppercase()));
-        }
-    }
-    out
-}
-
-/// Validates the hsp65 SNP coordinate references (`src/sequencing/hsp65_snp_refs.rs`) against
-/// the pooled references the app will actually load (`myco_hsp65.fasta` + the TB11/TB12
-/// amplicons):
-/// - each reference accession is present with the expected length (coordinates are offsets into
-///   that exact entry);
-/// - each reference carries its own species' allele at every SNP position;
-/// - no reference is an exact substring of a longer same-species entry (runtime dedup exempts
-///   SNP refs, but this flags the situation explicitly if data ever changes).
-fn check_hsp65_integrity(seq_dir: &std::path::Path) {
-    use hsp65_snp_refs::HSP65_SNP_PAIRS;
-
-    const AMPLICON_HSP65: &str = "references/hsp65_TB11_TB12.fasta";
-    println!("cargo:rerun-if-changed=src/sequencing/hsp65_snp_refs.rs");
-    println!("cargo:rerun-if-changed=res/sequences/{AMPLICON_HSP65}");
-
-    let mut records = Vec::new();
-    for file in ["myco_hsp65.fasta", AMPLICON_HSP65] {
-        let text = fs::read_to_string(seq_dir.join(file))
-            .unwrap_or_else(|e| panic!("cannot read {file}: {e}"));
-        records.extend(read_fasta_records(&text));
-    }
-
-    for pair in HSP65_SNP_PAIRS {
-        for (i, snp_ref) in pair.refs.iter().enumerate() {
-            let acc = snp_ref.accession;
-            let (_, desc, seq) = records
-                .iter()
-                .find(|(id, _, _)| id.split('.').next() == Some(acc))
-                .unwrap_or_else(|| {
-                    panic!("myco_hsp65.fasta is missing SNP reference {acc} — SNP dispatch will not work")
-                });
-            assert_eq!(
-                desc, snp_ref.species,
-                "hsp65 SNP reference {acc}: header species is \"{desc}\", expected \"{}\"",
-                snp_ref.species
-            );
-            assert_eq!(
-                seq.len(),
-                snp_ref.len,
-                "hsp65 SNP reference {acc}: length {} != expected {} — record revised? SNP positions may be shifted",
-                seq.len(),
-                snp_ref.len
-            );
-            for &(pos, allele0, allele1) in pair.snps {
-                let expected = if i == 0 { allele0 } else { allele1 };
-                let actual = seq.get(pos).copied();
-                assert_eq!(
-                    actual,
-                    Some(expected),
-                    "hsp65 SNP reference {acc} ({}): base at 0-based pos {pos} is {:?}, table expects '{}'",
-                    snp_ref.species,
-                    actual.map(char::from),
-                    char::from(expected)
-                );
-            }
-            if let Some((other, _, _)) = records.iter().find(|(id, d, s)| {
-                id.split('.').next() != Some(acc)
-                    && d == desc
-                    && s.len() > seq.len()
-                    && s.windows(seq.len()).any(|w| w == seq.as_slice())
-            }) {
-                println!(
-                    "cargo:warning=hsp65 SNP reference {acc} is a substring of {other}; kept only because HSP65_REFS exempts SNP references from dedup"
-                );
-            }
-        }
-    }
-}
-
 fn main() {
     let seq_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("res/sequences");
     println!("cargo:rerun-if-env-changed=NCBI_API_KEY");
@@ -906,7 +771,6 @@ fn main() {
     fetch_myco_sequences(&seq_dir, Some(api_key.as_str()));
     fetch_sequences_from_toml(&seq_dir, Some(api_key.as_str()));
     extract_species_gff_sequences(&seq_dir, &seq_dir.join("ntm-db/db"), "ntm-db");
-    check_hsp65_integrity(&seq_dir);
     check_rrl_integrity(&seq_dir);
     check_rrs_integrity(&seq_dir);
 

@@ -26,7 +26,7 @@ are the optional Microsynth download (`microsynth.rs`) and the ntfy push (`ntfy_
 | [`rrl.rs`](rrl.rs) | 23S rRNA: species ID plus macrolide resistance at *E. coli* positions 2058/2059 and catalogue SNPs. |
 | [`rrs.rs`](rrs.rs) | 16S rRNA: species ID plus aminoglycoside-resistance SNPs. |
 | [`rrs3end.rs`](rrs3end.rs) | 16S rRNA 3′ end: position 1248 (*M. marinum* A vs *M. ulcerans* G) plus the same aminoglycoside SNP logic as `rrs.rs`. |
-| [`hsp65.rs`](hsp65.rs) | hsp65/groEL2: species ID, primer trimming, kansasii/gastri and marinum/ulcerans diagnostic SNPs. |
+| [`hsp65.rs`](hsp65.rs) | hsp65/groEL2: species ID (TB11/TB12 amplicons only) and primer trimming. |
 | [`rpob.rs`](rpob.rs) | rpoB: species ID per region; for the Mtb regions also rifampicin resistance (RRDR) from the WHO catalogue. |
 | [`pnca.rs`](pnca.rs) | pncA (*M. tuberculosis* complex): pyrazinamide resistance from the WHO catalogue. |
 | [`tb_data.rs`](tb_data.rs) | TBProfiler `*.results.json` deserialization, `confidence_rank`, and the TB → *E. coli* coordinate map. |
@@ -210,9 +210,7 @@ Two kinds of call recur:
 The `rrl`, `rrs` and `rrs3end` modules make catalogue calls only for ntm-db full-gene references,
 whose accession contains `:`. This is because the catalogue coordinates refer to those
 sequences. `best_snp_hit()` then finds the hit with SNP data among the hits that share the
-top hit's species. The hsp65 preview uses the same lookup for its kansasii/gastri and
-marinum/ulcerans calls, which exist only on the four GenBank coordinate entries in
-`hsp65_snp_refs.rs`.
+top hit's species.
 
 | Module | References | Diagnostic logic | Result |
 |---|---|---|---|
@@ -220,7 +218,7 @@ marinum/ulcerans calls, which exist only on the four GenBank coordinate entries 
 | **rrl** | `myco_rrl.fasta` (≥ 1200 bp) | Anchor call at **2058/2059**: A/A = wildtype (susceptible), any other base = resistance → catalogue SNPs from ntm-db `variants.csv` (abscessus, avium, intracellulare). Any resistance allele gives resistant. A wildtype 2058/2059 combined with a resistance SNP elsewhere is reported as a **rare** mutation. | `RrlPosition2058_2059`, `Vec<RrlSnpCall>` |
 | **rrs** | `myco_rrs.fasta` (≥ 1200 bp) | Aminoglycoside resistance SNPs (e.g. `n.1401A>G`) from ntm-db `variants.csv` | `Vec<RrsSnpCall>` |
 | **rrs3end** | `myco_rrs.fasta` | Anchor call at **1248** (A = *M. marinum*, G = *M. ulcerans*) plus the same SNP logic as `rrs`, stored in `rrs_snp_calls_3end` | `Rrs3EndPosition1248`, `Vec<RrsSnpCall3End>` |
-| **hsp65** | `myco_hsp65.fasta` | Trims Telenti and Patel primer sets. For kansasii/gastri hits: 8 diagnostic SNPs. For marinum/ulcerans hits: 5 diagnostic SNPs. A majority vote decides (`*_snp_species_call`). | `KansasiiGastriSnpCall`, `MarinumUlceransSnpCall` |
+| **hsp65** | `references/hsp65_TB11_TB12.fasta` | Trims Telenti and Patel primer sets, then species ID only (no SNP calls). | — |
 | **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter. Rifampicin calls: `rpob/rpob_h37rv.fasta` (H37Rv Rv0667 CDS) | Species ID; for the Mtb regions the read is also aligned to H37Rv and every RRDR codon (426–452), the catalogued codons outside it (V170F, I491F) and RRDR indels are called against the WHO catalogue | `Vec<RpobSnpCall>` (top hit only) |
 | **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site. | `Vec<PncaSnpCall>` |
 
@@ -288,11 +286,12 @@ classDiagram
         gene: Option~String~
         file_name / file_path
         file_created: Option~SystemTime~
-        species: Option~String~
-        identity: Option~f32~
+        species: Option~String~ (NCBI)
+        identity: Option~f32~ (NCBI)
+        species_gtdb / identity_gtdb
         is_susceptible: Option~bool~
         susceptibility_calls: SusceptibilityCalls
-        seq_id_hits: Vec~SeqIdHit~ (top 5)
+        seq_id_hits: Vec~SeqIdHit~ (top 5 per source)
     }
     class SusceptibilityCalls {
         erm41: Erm41SusceptibilityCalls
@@ -303,6 +302,7 @@ classDiagram
     }
     class SeqIdHit {
         accession / description
+        source: RefSource (Ncbi or Gtdb)
         identity: f32
         is_reverse: bool
         aligned_query / aligned_ref / ref_start
@@ -329,7 +329,7 @@ classDiagram
         *_view_state_opt
     }
     SampleSusceptibilityRecord --> SusceptibilityCalls
-    SampleSusceptibilityRecord --> "0..5" SeqIdHit
+    SampleSusceptibilityRecord --> "0..10" SeqIdHit
     SeqData --> Ab1Channels
     SeqData --> "*" SeqIdHit
     GappedAlignment ..> SeqIdHit : copied into
@@ -346,7 +346,7 @@ classDiagram
 
 | Cache | Key → value | Where | Purpose |
 |---|---|---|---|
-| `AB1_SEQ_CACHE` | canonical path → top 10 `SeqIdHit` | memory | The preview panel reads hits without aligning on the UI thread. |
+| `AB1_SEQ_CACHE` | canonical path → top 10 `SeqIdHit` per reference source | memory | The preview panel reads hits without aligning on the UI thread. |
 | `SIXTEEN_S_HITS_CACHE` | sample_id → 16S hits | memory | Another file from the same sample can show its 16S species, even if the files are in different directories. |
 | `ab1_scan_cache.json` / `ab1_scan_cache_2.json` | path → (mtime, record) | disk (`ab1_cache_path`, or the scan dir) | Rescanning unchanged files skips alignment. |
 | `ab1_preview_cache.json` | path → (mtime, record) | disk | Same, for files opened outside the scan directories. |
@@ -359,7 +359,7 @@ classDiagram
 All files are embedded at compile time from `res/sequences/` (see the `REF_*` constants in
 `mod.rs`):
 
-- `myco_rrs.fasta`, `myco_rrl.fasta`, `myco_hsp65.fasta`, `myco_rpob.fasta`: pooled
+- `myco_rrs.fasta`, `myco_rrl.fasta`, `myco_rpob.fasta`: pooled
   Mycobacteriaceae reference FASTAs. `build.rs` assembles them from NCBI fetches
   (`sequences.toml`), the `ntm-db` submodule and `kansasii-complex/`. The `mod.rs` header also
   describes how [cosmic-seq](https://github.com/michaelmeuli/cosmic-seq) generates amplicon
@@ -373,8 +373,19 @@ All files are embedded at compile time from `res/sequences/` (see the `REF_*` co
 - `res/tb_ecoli_mapping.csv`: TB → *E. coli* coordinates for display.
 
 Lazily initialised `LazyLock` statics parse these files on first use: `RRS_REFS`, `RRL_REFS`,
-`HSP65_REFS`, `RPOB_REFS`, `PNCA_RESISTANCE_SNPS` and others. `dedup_substring_same_desc` removes
-any reference that is a substring of another reference with the same species name.
+`HSP65_REFS`, `RPOB_REFS`, `PNCA_RESISTANCE_SNPS` and others. `ref_pool` builds each
+species-identification pool from two sources, kept apart end to end:
+
+- **NCBI** (`RefSource::Ncbi`): `myco_*.fasta` (NCBI type material, `sequences.toml`, ntm-db).
+- **GTDB** (`RefSource::Gtdb`): the cosmic-seq amplicons in `references/`. These are the only
+  references for hsp65 and the Mtb rpoB regions.
+
+Within each source, `dedup_substring_same_desc` removes any reference that is a substring of
+another reference with the same species name. Every `SeqIdHit` carries its `source`. The batch
+scan keeps the top hits per source (`truncate_per_source`) and makes one species call per
+source (`species` / `species_gtdb` in the record, CSV and PDF). The preview shows one section
+per source. Resistance SNP calls come from the ntm-db entries, which are NCBI, so `best_snp_hit`
+anchors on the best NCBI species.
 
 ---
 

@@ -78,8 +78,8 @@ output    = "rpob/rpob_h37rv.fasta"
 
 # Direct accession example:
 # [[append]]
-# accession = "AB123456.1"   # M. example strain — hsp65
-# fasta     = "myco_hsp65.fasta"
+# accession = "AB123456.1"   # M. example strain — rpoB
+# fasta     = "myco_rpob.fasta"
 
 # Genome / locus_tag example:
 # [[append]]

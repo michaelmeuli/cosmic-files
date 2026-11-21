@@ -9,8 +9,8 @@
 
 use super::{
     GappedAlignment, REF_AMPLICON_RRS3END, REF_MYCO_RRS, RRS3END_ANCHOR_L, RRS3END_ANCHOR_R,
-    SeqIdHit, align_to_ref, base_at_ref_pos, dedup_substring_same_desc, parse_multi_fasta,
-    reverse_complement, trim_alignment_ends,
+    RefPool, SeqIdHit, align_to_ref, base_at_ref_pos, ref_pool, reverse_complement,
+    trim_alignment_ends,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -170,11 +170,8 @@ static RRS_RESISTANCE_SNPS: LazyLock<BTreeMap<&'static str, RrsSnpMap>> = LazyLo
 });
 
 /// Parsed and substring-deduplicated rrs reference sequences, initialised once.
-static RRS_REFS: LazyLock<Vec<(String, String, Vec<u8>)>> = LazyLock::new(|| {
-    let mut refs = parse_multi_fasta(REF_MYCO_RRS);
-    refs.extend(parse_multi_fasta(REF_AMPLICON_RRS3END));
-    dedup_substring_same_desc(refs)
-});
+static RRS_REFS: LazyLock<RefPool> =
+    LazyLock::new(|| ref_pool(&[REF_MYCO_RRS], &[REF_AMPLICON_RRS3END], |_| true));
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RrsSnpCall3End {
@@ -349,7 +346,7 @@ pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
 
     let mut hits: Vec<SeqIdHit> = RRS_REFS
         .iter()
-        .map(|(accession, description, refseq)| {
+        .map(|(source, accession, description, refseq)| {
             let fwd = align_to_ref(query, refseq);
             let rev = align_to_ref(&rc, refseq);
             let (ga, is_reverse) = if rev.identity > fwd.identity {
@@ -369,10 +366,9 @@ pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
             SeqIdHit {
                 accession: accession.clone(),
                 description: description.clone(),
+                source: *source,
                 identity: ga.identity,
                 is_reverse,
-                kansasii_gastri_snp_calls: vec![],
-                marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end,

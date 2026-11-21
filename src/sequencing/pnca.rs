@@ -474,10 +474,9 @@ pub fn identify_sequence_pnca(query: &[u8]) -> Vec<SeqIdHit> {
             SeqIdHit {
                 accession,
                 description,
+                source: super::RefSource::Ncbi,
                 identity: ga.identity,
                 is_reverse,
-                kansasii_gastri_snp_calls: vec![],
-                marinum_ulcerans_snp_calls: vec![],
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end: vec![],

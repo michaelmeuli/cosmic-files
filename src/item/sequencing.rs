@@ -21,9 +21,9 @@ use crate::sequencing::rrs3end::{
     is_susceptible_rrs_by_snp_calls_rare_3end,
 };
 use crate::sequencing::{
-    Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
+    Ab1Channels, RefSource, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41SusceptibilityCalls, is_susceptible_erm41},
-    parse_ab1_quality, parse_ab1_sequence,
+    hits_from, parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
     rpob::is_susceptible_rpob,
     tb_data::{DrVariant, TB_ECOLI_MAPPING},
@@ -99,6 +99,61 @@ pub(super) fn load_seq_data(path: &Path, bytes: &[u8]) -> SeqData {
         trimmed_length,
         trimmed_avg_quality_opt,
     }
+}
+
+type Details<'a> = widget::Column<'a, Message, cosmic::Theme>;
+
+/// Pushes one species-call line per reference source in `sources`, e.g.
+/// `16S (NCBI): M. kansasii complex`. `species_for` gives the call of a source (`None`: no
+/// species identified).
+fn push_species_calls<'a>(
+    mut details: Details<'a>,
+    gene: &str,
+    sources: &[RefSource],
+    species_for: impl Fn(RefSource) -> Option<String>,
+) -> Details<'a> {
+    details = details.push(widget::text::body(""));
+    for &source in sources {
+        let label = source.label();
+        details = details.push(widget::text::heading(match species_for(source) {
+            Some(species) => format!("{gene} ({label}): {species}"),
+            None => format!("{gene} ({label}): No species identified from {gene} hits."),
+        }));
+    }
+    details
+}
+
+/// Pushes the species-identification section of one reference source: heading, best-hit
+/// identity, and the top `max` hits as links to their alignments. Sources without hits (no
+/// references of that source for this target, e.g. NCBI for hsp65) are left out.
+fn push_source_section<'a>(
+    mut details: Details<'a>,
+    hits: &[SeqIdHit],
+    source: RefSource,
+    gene: &str,
+    max: usize,
+) -> Details<'a> {
+    let hits = hits_from(hits, source);
+    let Some(best) = hits.first() else {
+        return details;
+    };
+    details = details.push(widget::text::heading(""));
+    details = details.push(widget::text::heading(format!(
+        "Species identification ({gene}, {} database):",
+        source.label()
+    )));
+    details = details.push(widget::text::body(format!(
+        "Sequence identity to {}: {:.1}%",
+        best.description, best.identity
+    )));
+    for hit in hits.iter().take(max) {
+        details = details.push(
+            widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
+                .on_press(Message::OpenSeqAlignment(Box::new((*hit).clone())))
+                .padding(0),
+        );
+    }
+    details
 }
 
 /// Combined susceptibility verdict and per-gene calls for an AB1 file's alignment hits.
@@ -292,13 +347,19 @@ impl Item {
         marinum_ulcerans && self.metadata.rrs3endposition_call() == Rrs3EndPosition1248::G1248
     }
 
-    pub fn species_from_16s_sibling(&self, items: &[Item]) -> Option<String> {
-        self.sibling_16s_hits(items)
-            .and_then(|hits| crate::sequencing::batch::species_from_16s_hits(&hits))
+    /// Species call of the sample's sibling 16S read from the `source` references.
+    pub fn species_from_16s_sibling(&self, items: &[Item], source: RefSource) -> Option<String> {
+        self.sibling_16s_hits(items).and_then(|hits| {
+            crate::sequencing::batch::species_from_16s_hits(&hits_from(&hits, source))
+        })
     }
 
-    pub fn species_from_rpob_hits(&self) -> Option<String> {
-        crate::sequencing::batch::species_from_rpob_hits(&self.seq_id_hits_cached())
+    /// Species call of this rpoB read from the `source` references.
+    pub fn species_from_rpob_hits(&self, source: RefSource) -> Option<String> {
+        crate::sequencing::batch::species_from_rpob_hits(&hits_from(
+            &self.seq_id_hits_cached(),
+            source,
+        ))
     }
 
     pub fn is_rrl_ntm(&self) -> bool {
@@ -616,21 +677,9 @@ impl Item {
         } = theme::active().cosmic().spacing;
 
         let hits = self.seq_id_hits_cached();
-        // The SNP coordinate references are short partial-cds entries, so a full-length or
-        // amplicon reference of the same species usually outranks them. Take the SNP calls from
-        // the best hit of the top hit's species that has them.
-        let kansasii_gastri_hit = best_snp_hit(&hits, |h| !h.kansasii_gastri_snp_calls.is_empty());
-        let marinum_ulcerans_hit =
-            best_snp_hit(&hits, |h| !h.marinum_ulcerans_snp_calls.is_empty());
-        let kansasii_gastri_n =
-            kansasii_gastri_hit.map_or(0, |h| h.kansasii_gastri_snp_calls.len());
-        let marinum_ulcerans_n =
-            marinum_ulcerans_hit.map_or(0, |h| h.marinum_ulcerans_snp_calls.len());
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details =
-            widget::column::with_capacity(18 + kansasii_gastri_n + marinum_ulcerans_n)
-                .spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(16).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43505-2-Mykobakterien NTM 65kDa"));
 
         if hits.is_empty()
@@ -664,11 +713,6 @@ impl Item {
                 )));
             }
         } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
             if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Trimmed sequence length: {}",
@@ -682,91 +726,12 @@ impl Item {
                 )));
             }
 
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
+            details = push_species_calls(details, "16S", &RefSource::ALL, |source| {
+                self.species_from_16s_sibling(items, source)
+            });
 
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (hsp65 database):",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
-
-            details = details.push(widget::text::body(""));
-            if let Some(snp_hit) = kansasii_gastri_hit {
-                let gastri_n = snp_hit
-                    .kansasii_gastri_snp_calls
-                    .iter()
-                    .filter(|c| c.is_gastri())
-                    .count();
-                let kansasii_n = snp_hit
-                    .kansasii_gastri_snp_calls
-                    .iter()
-                    .filter(|c| c.is_kansasii())
-                    .count();
-                let total = snp_hit.kansasii_gastri_snp_calls.len();
-                let species_call = snp_hit
-                    .kansasii_gastri_snp_species_call()
-                    .unwrap_or("Ambiguous");
-                details = details.push(widget::text::body("hsp65 kansasii/gastri SNP call:"));
-                details = details.push(widget::text::body(format!(
-                    "{} (M. gastri {}/{}, M. kansasii {}/{})",
-                    species_call, gastri_n, total, kansasii_n, total,
-                )));
-                for snp in &snp_hit.kansasii_gastri_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "  pos {}: {} = {}",
-                        snp.ref_pos + 1,
-                        snp.query_base as char,
-                        snp.species_tag(),
-                    )));
-                }
-                details = details.push(widget::text::body(""));
-            }
-            if let Some(snp_hit) = marinum_ulcerans_hit {
-                let ulcerans_n = snp_hit
-                    .marinum_ulcerans_snp_calls
-                    .iter()
-                    .filter(|c| c.is_ulcerans())
-                    .count();
-                let marinum_n = snp_hit
-                    .marinum_ulcerans_snp_calls
-                    .iter()
-                    .filter(|c| c.is_marinum())
-                    .count();
-                let total = snp_hit.marinum_ulcerans_snp_calls.len();
-                let species_call = snp_hit
-                    .marinum_ulcerans_snp_species_call()
-                    .unwrap_or("Ambiguous");
-                details = details.push(widget::text::body("hsp65 marinum/ulcerans SNP call:"));
-                details = details.push(widget::text::body(format!(
-                    "{} (M. ulcerans {}/{}, M. marinum {}/{})",
-                    species_call, ulcerans_n, total, marinum_n, total,
-                )));
-                for snp in &snp_hit.marinum_ulcerans_snp_calls {
-                    details = details.push(widget::text::body(format!(
-                        "  pos {}: {} = {}",
-                        snp.ref_pos + 1,
-                        snp.query_base as char,
-                        snp.species_tag(),
-                    )));
-                }
-                details = details.push(widget::text::body(""));
+            for source in RefSource::ALL {
+                details = push_source_section(details, &hits, source, "hsp65", 3);
             }
         }
 
@@ -817,11 +782,6 @@ impl Item {
                 )));
             }
         } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
             if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Trimmed sequence length: {}",
@@ -835,31 +795,18 @@ impl Item {
                 )));
             }
 
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
+            details = push_species_calls(details, "16S", &RefSource::ALL, |source| {
+                self.species_from_16s_sibling(items, source)
+            });
 
-            match self.species_from_rpob_hits() {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("rpoB: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "rpoB: No species identified from rpoB hits.",
-                    ));
-                }
-            }
+            // The Mtb regions have GTDB references only; don't report a missing NCBI call.
+            let rpob_sources: Vec<RefSource> = RefSource::ALL
+                .into_iter()
+                .filter(|&s| hits.iter().any(|h| h.source == s))
+                .collect();
+            details = push_species_calls(details, "rpoB", &rpob_sources, |source| {
+                self.species_from_rpob_hits(source)
+            });
 
             if self.is_chelonae(items) {
                 details = details.push(widget::text::body(""));
@@ -868,16 +815,8 @@ impl Item {
                 ));
             }
 
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (rpoB database):",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
+            for source in RefSource::ALL {
+                details = push_source_section(details, &hits, source, "rpoB", 3);
             }
 
             if region.is_mtb() {
@@ -946,15 +885,12 @@ impl Item {
         let hits = self.seq_id_hits_cached();
         // SNP calls exist only on ntm-db full-gene hits (accession contains ':'), whose
         // coordinates the catalogue positions refer to; take them from the best such hit of
-        // the winning species.
-        let best_snp_hit = hits.first().and_then(|best| {
-            hits.iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls.is_empty())
-        });
+        // the winning NCBI species.
+        let best_snp_hit = best_snp_hit(&hits, |h| !h.rrs_snp_calls.is_empty());
         let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls.len());
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(19 + rrs_snp_count).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(32 + rrs_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43501-1-Mtb-NTM Kulturen-LC"));
 
         if hits.is_empty()
@@ -988,11 +924,6 @@ impl Item {
                 )));
             }
         } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
             if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Trimmed sequence length: {}",
@@ -1006,30 +937,11 @@ impl Item {
                 )));
             }
 
-            match crate::sequencing::batch::species_from_16s_hits(&hits) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
+            details = push_species_calls(details, "16S", &RefSource::ALL, |source| {
+                crate::sequencing::batch::species_from_16s_hits(&hits_from(&hits, source))
+            });
 
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (16S database):",
-            ));
-            for hit in &hits[..hits.len().min(8)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
-            }
+            details = push_source_section(details, &hits, RefSource::Ncbi, "16S", 8);
             if let Some(snp_hit) = best_snp_hit {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
@@ -1043,6 +955,7 @@ impl Item {
                     details = details.push(widget::text::body(snp.call_tag().to_string()));
                 }
             }
+            details = push_source_section(details, &hits, RefSource::Gtdb, "16S", 8);
         }
 
         column = column.push(details);
@@ -1059,15 +972,12 @@ impl Item {
         let hits = self.seq_id_hits_cached();
         // SNP calls exist only on ntm-db full-gene hits (accession contains ':'), whose
         // coordinates the catalogue positions refer to; take them from the best such hit of
-        // the winning species.
-        let best_snp_hit = hits.first().and_then(|best| {
-            hits.iter()
-                .find(|h| h.description == best.description && !h.rrs_snp_calls_3end.is_empty())
-        });
+        // the winning NCBI species.
+        let best_snp_hit = best_snp_hit(&hits, |h| !h.rrs_snp_calls_3end.is_empty());
         let rrs_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrs_snp_calls_3end.len());
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(29 + rrs_snp_count).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(42 + rrs_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading("32.43506-1-16SEnd"));
 
         if hits.is_empty()
@@ -1114,18 +1024,9 @@ impl Item {
                 )));
             }
 
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
+            details = push_species_calls(details, "16S", &RefSource::ALL, |source| {
+                self.species_from_16s_sibling(items, source)
+            });
 
             if self.is_marinum(items) {
                 details = details.push(widget::text::body(""));
@@ -1215,16 +1116,8 @@ impl Item {
                 }
             }
 
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification only using 16S 3'-End sequencing:",
-            ));
-            for hit in &hits[..hits.len().min(8)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
+            for source in RefSource::ALL {
+                details = push_source_section(details, &hits, source, "16S 3'-End only", 8);
             }
         }
 
@@ -1242,15 +1135,12 @@ impl Item {
         let hits = self.seq_id_hits_cached();
         // SNP calls exist only on ntm-db full-gene hits (accession contains ':'), whose
         // coordinates the catalogue positions refer to; take them from the best such hit of
-        // the winning species.
-        let best_snp_hit = hits.first().and_then(|best| {
-            hits.iter()
-                .find(|h| h.description == best.description && !h.rrl_snp_calls.is_empty())
-        });
+        // the winning NCBI species.
+        let best_snp_hit = best_snp_hit(&hits, |h| !h.rrl_snp_calls.is_empty());
         let rrl_snp_count = best_snp_hit.map_or(0, |snp_hit| snp_hit.rrl_snp_calls.len());
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
-        let mut details = widget::column::with_capacity(21 + rrl_snp_count).spacing(space_xxxs);
+        let mut details = widget::column::with_capacity(30 + rrl_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading(
             "32.43605-1-PCR - NTM 23S CLR-Sequenzierung",
         ));
@@ -1286,11 +1176,6 @@ impl Item {
                 )));
             }
         } else {
-            let best = &hits[0];
-            details = details.push(widget::text::body(format!(
-                "Sequence identity to {}: {:.1}%",
-                best.description, best.identity
-            )));
             if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
                 details = details.push(widget::text::body(format!(
                     "Trimmed sequence length: {}",
@@ -1304,29 +1189,12 @@ impl Item {
                 )));
             }
 
-            match self.species_from_16s_sibling(items) {
-                Some(species) => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(format!("16S: {}", species)));
-                }
-                None => {
-                    details = details.push(widget::text::body(""));
-                    details = details.push(widget::text::heading(
-                        "16S: No species identified from 16S hits.",
-                    ));
-                }
-            }
+            details = push_species_calls(details, "16S", &RefSource::ALL, |source| {
+                self.species_from_16s_sibling(items, source)
+            });
 
-            details = details.push(widget::text::heading(""));
-            details = details.push(widget::text::heading(
-                "Species identification (rrl database):",
-            ));
-            for hit in &hits[..hits.len().min(3)] {
-                details = details.push(
-                    widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
-                        .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
-                        .padding(0),
-                );
+            for source in RefSource::ALL {
+                details = push_source_section(details, &hits, source, "rrl", 3);
             }
             details = details.push(widget::text::body(""));
             if let Some(snp_hit) = best_snp_hit {
