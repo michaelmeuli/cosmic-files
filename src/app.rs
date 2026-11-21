@@ -6673,22 +6673,13 @@ impl Application for App {
                 let max_age_days = self.config.tb_config.report_max_age_days;
                 return Task::future(async move {
                     let records = tokio::task::spawn_blocking(move || {
-                        let cache_path = if !ab1_cache_path.is_empty() {
-                            let p = std::path::PathBuf::from(ab1_cache_path);
-                            Some(if p.is_dir() {
-                                p.join("ab1_scan_cache.json")
-                            } else {
-                                p
-                            })
-                        } else {
-                            Some(
-                                std::path::PathBuf::from(scan_path.clone())
-                                    .join("ab1_scan_cache.json"),
-                            )
-                        };
+                        let cache_path = crate::sequencing::batch::scan_cache_file(
+                            &ab1_cache_path,
+                            "ab1_scan_cache.sqlite",
+                        );
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
-                            cache_path,
+                            Some(cache_path),
                             max_age_days,
                         )
                     })
@@ -6775,22 +6766,13 @@ impl Application for App {
                 let max_age_days = self.config.tb_config.report_max_age_days;
                 return Task::future(async move {
                     let records = tokio::task::spawn_blocking(move || {
-                        let cache_path = if !ab1_cache_path.is_empty() {
-                            let p = std::path::PathBuf::from(ab1_cache_path);
-                            Some(if p.is_dir() {
-                                p.join("ab1_scan_cache_2.json")
-                            } else {
-                                p
-                            })
-                        } else {
-                            Some(
-                                std::path::PathBuf::from(scan_path.clone())
-                                    .join("ab1_scan_cache_2.json"),
-                            )
-                        };
+                        let cache_path = crate::sequencing::batch::scan_cache_file(
+                            &ab1_cache_path,
+                            "ab1_scan_cache_2.sqlite",
+                        );
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
-                            cache_path,
+                            Some(cache_path),
                             max_age_days,
                         )
                     })

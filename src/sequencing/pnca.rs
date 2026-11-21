@@ -94,6 +94,12 @@ fn nt_pos_to_ref_idx(c_pos: isize) -> Option<usize> {
     if idx < 0 { None } else { Some(idx as usize) }
 }
 
+/// Inverse of [`nt_pos_to_ref_idx`]: the signed HGVS position of a 0-based `REF_PNCA` index.
+fn ref_idx_to_nt_pos(ref_idx: usize) -> Option<isize> {
+    let offset = isize::try_from(ref_idx).ok()? - UPSTREAM_FLANK;
+    Some(if offset >= 0 { offset + 1 } else { offset })
+}
+
 /// 0-based index into `REF_PNCA` of the first base of a 1-based codon number.
 fn codon_to_ref_idx(codon: usize) -> Option<usize> {
     nt_pos_to_ref_idx(((codon - 1) * 3 + 1) as isize)
@@ -199,6 +205,7 @@ pub enum PncaCallKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "PncaSnpCallStored")]
 pub struct PncaSnpCall {
     /// 0-based position in the pncA reference sequence: the substituted base for nucleotide
     /// calls, or the first base of the codon for codon calls.
@@ -206,7 +213,57 @@ pub struct PncaSnpCall {
     pub kind: PncaCallKind,
     /// Maps each resistance-conferring alt (a 1-character base string, or an amino acid
     /// 3-letter code / `"*"`) to `(drugs, WHO confidence label)`.
+    ///
+    /// Not serialised: it is a copy of the catalogue entry for this site (a pncA hit carries
+    /// ~190 calls, so storing it dominated the disk cache). Deserialisation looks it up again
+    /// from [`PNCA_RESISTANCE_SNPS`] via [`PncaSnpCallStored`].
+    #[serde(skip_serializing)]
     pub resistance_alts: BTreeMap<String, (Vec<String>, String)>,
+}
+
+/// On-disk form of [`PncaSnpCall`]. `resistance_alts` is accepted (and ignored) so caches
+/// written before it stopped being serialised still load.
+#[derive(Deserialize)]
+struct PncaSnpCallStored {
+    ref_pos: usize,
+    kind: PncaCallKind,
+    #[serde(default, rename = "resistance_alts")]
+    _resistance_alts: serde::de::IgnoredAny,
+}
+
+impl From<PncaSnpCallStored> for PncaSnpCall {
+    fn from(s: PncaSnpCallStored) -> Self {
+        let resistance_alts = catalogue_alts(s.ref_pos, &s.kind);
+        Self {
+            ref_pos: s.ref_pos,
+            kind: s.kind,
+            resistance_alts,
+        }
+    }
+}
+
+/// The catalogued resistance alts for one site, keyed as in [`PncaSnpCall::resistance_alts`].
+fn catalogue_alts(ref_pos: usize, kind: &PncaCallKind) -> BTreeMap<String, (Vec<String>, String)> {
+    let (nt_map, aa_map) = &*PNCA_RESISTANCE_SNPS;
+    match kind {
+        PncaCallKind::Nucleotide { .. } => ref_idx_to_nt_pos(ref_pos)
+            .and_then(|c_pos| nt_map.get(&c_pos))
+            .map(|(_, alts)| nt_alts_to_strings(alts))
+            .unwrap_or_default(),
+        PncaCallKind::Codon { codon, .. } => aa_map
+            .get(codon)
+            .map(|(_, alts)| alts.clone())
+            .unwrap_or_default(),
+    }
+}
+
+/// Re-keys a nucleotide site's alts by 1-character base string.
+fn nt_alts_to_strings(
+    alts: &BTreeMap<u8, (Vec<String>, String)>,
+) -> BTreeMap<String, (Vec<String>, String)> {
+    alts.iter()
+        .map(|(&b, v)| ((b as char).to_string(), v.clone()))
+        .collect()
 }
 
 impl PncaSnpCall {
@@ -401,10 +458,7 @@ fn call_pnca_nt_snps(map: &PncaNtSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCal
             let ref_pos = nt_pos_to_ref_idx(c_pos)?;
             let query_base =
                 base_at_ref_pos(&ga.gapped_query, &ga.gapped_ref, ga.ref_start, ref_pos);
-            let resistance_alts = alts
-                .iter()
-                .map(|(&b, v)| ((b as char).to_string(), v.clone()))
-                .collect();
+            let resistance_alts = nt_alts_to_strings(alts);
             Some(PncaSnpCall {
                 ref_pos,
                 kind: PncaCallKind::Nucleotide {
@@ -692,5 +746,55 @@ mod tests {
         let hit = &hits[0];
         assert!(hit.identity > 99.0);
         assert!(!hit.is_reverse);
+    }
+
+    #[test]
+    fn ref_idx_to_nt_pos_inverts_nt_pos_to_ref_idx() {
+        for c_pos in [-50, -11, -1, 1, 2, 300, 561] {
+            let idx = nt_pos_to_ref_idx(c_pos).unwrap();
+            assert_eq!(ref_idx_to_nt_pos(idx), Some(c_pos), "c.{c_pos}");
+        }
+    }
+
+    #[test]
+    fn serde_round_trip_restores_catalogue_alts() {
+        let (_, _, refseq) = parse_multi_fasta(REF_PNCA).into_iter().next().unwrap();
+        let calls = identify_sequence_pnca(&refseq)
+            .swap_remove(0)
+            .pnca_snp_calls;
+        assert!(calls.iter().any(|c| !c.resistance_alts.is_empty()));
+
+        let json = serde_json::to_string(&calls).unwrap();
+        assert!(
+            !json.contains("resistance_alts"),
+            "catalogue copy not stored"
+        );
+        let back: Vec<PncaSnpCall> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back.len(), calls.len());
+        for (a, b) in calls.iter().zip(&back) {
+            assert_eq!(a.ref_pos, b.ref_pos);
+            assert_eq!(
+                a.resistance_alts,
+                b.resistance_alts,
+                "site {}",
+                a.site_label()
+            );
+            assert_eq!(a.call_tag(), b.call_tag());
+        }
+        assert_eq!(is_susceptible_pnca(&calls), is_susceptible_pnca(&back));
+    }
+
+    #[test]
+    fn deserializes_records_that_still_carry_resistance_alts() {
+        let old = r#"{"ref_pos":11,"kind":{"Nucleotide":{"wt_base":67,"query_base":67}},
+                      "resistance_alts":{"T":[["pyrazinamide"],"Uncertain significance"]}}"#;
+        let call: PncaSnpCall = serde_json::from_str(old).unwrap();
+        assert_eq!(call.ref_pos, 11);
+        assert_eq!(
+            call.resistance_alts,
+            catalogue_alts(11, &call.kind),
+            "taken from the catalogue, not the stored copy"
+        );
     }
 }

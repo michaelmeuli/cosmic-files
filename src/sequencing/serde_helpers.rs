@@ -27,6 +27,54 @@ pub mod u8_btree_map {
     }
 }
 
+/// (De)serializes a `Vec<u8>` of ASCII (e.g. a gapped alignment row) as a JSON string.
+///
+/// serde_json writes a plain `Vec<u8>` as an array of numbers (`[65,67,...]`, ~3.5 bytes per
+/// base). Deserialization also accepts that old array form, so existing caches still load.
+pub mod ascii_bytes {
+    use serde::de::{self, SeqAccess, Visitor};
+    use serde::{Deserializer, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        match std::str::from_utf8(bytes) {
+            Ok(text) => s.serialize_str(text),
+            // Not valid UTF-8: keep it lossless as a byte array (still readable below).
+            Err(_) => s.collect_seq(bytes),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        struct BytesVisitor;
+
+        impl<'de> Visitor<'de> for BytesVisitor {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string or an array of bytes")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Vec<u8>, E> {
+                Ok(v.as_bytes().to_vec())
+            }
+
+            fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Vec<u8>, E> {
+                Ok(v.to_vec())
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<u8>, A::Error> {
+                let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(b) = seq.next_element::<u8>()? {
+                    out.push(b);
+                }
+                Ok(out)
+            }
+        }
+
+        d.deserialize_any(BytesVisitor)
+    }
+}
+
 /// (De)serializes `Option<SystemTime>` as an optional Unix timestamp in whole seconds.
 ///
 /// `SystemTime` has no stable serde representation of its own; this truncates to second

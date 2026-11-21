@@ -5,13 +5,14 @@
 //! the gene-specific modules, and combines the resulting hits into one
 //! [`SampleSusceptibilityRecord`] per file — with both an in-memory cache
 //! ([`AB1_SEQ_CACHE`], shared with the interactive single-file view) and an optional on-disk
-//! JSON cache keyed by file mtime, so re-scanning an unchanged directory is cheap.
+//! SQLite cache ([`DiskCache`]) keyed by canonical path and checked against file mtime and size,
+//! so re-scanning an unchanged directory is cheap.
 //! [`analyse_ab1_for_preview`] runs the same per-file pipeline on demand for files outside the
-//! scan directories, with its own disk cache (`ab1_preview_cache.json`).
+//! scan directories, with its own disk cache (`ab1_preview_cache.sqlite`).
 //! [`write_ab1_csv`] and [`write_rare_mutations_csv`] export the results.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, PoisonError, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -20,6 +21,7 @@ use walkdir::WalkDir;
 pub use super::ab1_filename::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use super::{
     DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, RefSource, SeqIdHit, SusceptibilityCalls, best_snp_hit,
+    disk_cache::DiskCache,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hits_from,
     hsp65::identify_sequence_hsp65,
@@ -53,17 +55,50 @@ pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>
 pub(crate) static SIXTEEN_S_HITS_CACHE: LazyLock<RwLock<HashMap<String, Vec<SeqIdHit>>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
 
-/// On-disk JSON cache of analysed AB1 files: path string → (mtime secs, record).
-type DiskCache = HashMap<String, (u64, SampleSusceptibilityRecord)>;
-
 /// File name of the on-disk cache for AB1 files aligned on demand by the preview panel, kept
 /// separate from the scan caches so they only ever hold files from their own scan directory.
-const PREVIEW_CACHE_FILE_NAME: &str = "ab1_preview_cache.json";
+const PREVIEW_CACHE_FILE_NAME: &str = "ab1_preview_cache.sqlite";
 
-/// The preview disk cache, loaded on first use and tagged with the file it was read from so a
-/// changed `ab1_cache_path` setting triggers a reload.
-static PREVIEW_DISK_CACHE: LazyLock<Mutex<Option<(PathBuf, DiskCache)>>> =
-    LazyLock::new(|| Mutex::new(None));
+/// The preview disk cache, opened on first use. [`DiskCache::path`] tells whether a changed
+/// `ab1_cache_path` setting requires reopening.
+static PREVIEW_DISK_CACHE: LazyLock<Mutex<Option<DiskCache>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Default directory for the disk caches when no `ab1_cache_path` is configured: the local
+/// user cache dir, so the SQLite files stay out of (possibly cloud-synced) data folders.
+fn default_cache_dir() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("cosmic-files")
+}
+
+/// Location of a scan's disk cache for the `ab1_cache_path` setting, which may name a
+/// directory (the cache is `file_name` inside it) or a cache file. A legacy `.json` cache file
+/// name maps to the same name with `.sqlite`. Empty → [`default_cache_dir`].
+pub fn scan_cache_file(ab1_cache_path: &str, file_name: &str) -> PathBuf {
+    if ab1_cache_path.is_empty() {
+        return default_cache_dir().join(file_name);
+    }
+    let p = PathBuf::from(ab1_cache_path);
+    if p.is_dir() {
+        p.join(file_name)
+    } else if p
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    {
+        p.with_extension("sqlite")
+    } else {
+        p
+    }
+}
+
+/// Size and mtime (whole seconds; 0 if unknown) of a file, the disk cache's staleness key.
+fn file_stamp(meta: Option<&std::fs::Metadata>) -> (u64, u64) {
+    let mtime_secs = meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    (mtime_secs, meta.map_or(0, std::fs::Metadata::len))
+}
 
 /// Looks up the 16S seq_id_hits previously computed by a background [`scan_ab1_directory`] run
 /// for `sample_id`, regardless of which directory the 16S AB1 file lives in.
@@ -96,8 +131,8 @@ pub struct SampleSusceptibilityRecord {
     /// Combined susceptibility verdict across all genes (see [`scan_ab1_directory`]'s body for
     /// the gene-priority order: erm41 → rrl → rrs → pncA, first `Some` wins).
     pub is_susceptible: Option<bool>,
-    /// Top alignment hits — stored in disk cache (alignment strings stripped) so the preview
-    /// panel can be populated from disk cache without re-running alignment.
+    /// Top alignment hits, alignments included, stored in the disk cache so the preview panel
+    /// can be populated from it without re-running alignment.
     #[serde(default)]
     pub seq_id_hits: Vec<SeqIdHit>,
     /// [`ANALYSIS_VERSION`] the record was produced with; 0 for records cached before
@@ -110,7 +145,8 @@ pub struct SampleSusceptibilityRecord {
 /// a record carries change (new gene calls, catalogue logic), so cached records are redone.
 /// 1: rpoB rifampicin (RRDR) calls.
 /// 2: NCBI and GTDB references kept apart (hit `source`, per-source species/identity).
-const ANALYSIS_VERSION: u32 = 2;
+/// 3: slimmed records (pncA calls only on the top hit, catalogue alts not stored).
+pub(crate) const ANALYSIS_VERSION: u32 = 3;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -245,7 +281,8 @@ pub(crate) fn species_from_rpob_hits(hits: &[&SeqIdHit]) -> Option<String> {
 /// `SampleSusceptibilityRecord` per file sorted reverse-alphabetically by
 /// `sample_id` (highest first).
 ///
-/// `cache_path` — path to the JSON disk cache file; `None` disables disk caching.
+/// `cache_path` — the SQLite disk cache ([`DiskCache`], see [`scan_cache_file`]); `None`
+/// disables disk caching. Rows for files under `scan_path` that this scan didn't see are pruned.
 /// `max_age_days` — files whose creation time is older than this many days are skipped
 /// (mirrors the PDF report window). Pass `0` to disable age filtering.
 pub fn scan_ab1_directory(
@@ -260,18 +297,17 @@ pub fn scan_ab1_directory(
         cache_path
     );
 
-    let mut disk_cache: DiskCache = cache_path
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    log::debug!("ab1_scan: loaded {} disk cache entries", disk_cache.len());
+    let mut disk_cache = cache_path.as_deref().and_then(DiskCache::open);
+    if let Some(cache) = &mut disk_cache {
+        cache.begin_batch();
+    }
+    // Keys (canonical paths) of every file seen, for pruning the cache afterwards.
+    let mut seen: HashSet<String> = HashSet::new();
 
     let now = SystemTime::now();
     let max_age = (max_age_days > 0).then(|| Duration::from_secs(u64::from(max_age_days) * 86_400));
 
     let mut records = Vec::new();
-    let mut cache_dirty = false;
 
     for entry in WalkDir::new(&scan_path).into_iter().filter_map(Result::ok) {
         let path = entry.path();
@@ -297,44 +333,36 @@ pub fn scan_ab1_directory(
             continue;
         }
 
-        let mtime_secs: u64 = meta
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let path_key = path.to_string_lossy().into_owned();
+        let (mtime_secs, file_size) = file_stamp(meta.as_ref());
 
         // Canonicalize so the key matches the \\?\ -prefixed paths the file manager uses.
         let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let key = canonical_path.to_string_lossy().into_owned();
+        seen.insert(key.clone());
 
-        // Disk cache hit: mtime unchanged and seq_id_hits stored → reuse previous result.
-        if let Some((cached_mtime, cached_record)) = disk_cache.get(&path_key) {
-            if *cached_mtime == mtime_secs
-                && !cached_record.seq_id_hits.is_empty()
-                && cached_record_current(cached_record)
-            {
-                log::debug!(
-                    "ab1_scan: disk cache hit for {} ({} hits, canonical={})",
-                    path.display(),
-                    cached_record.seq_id_hits.len(),
-                    canonical_path.display()
-                );
-                insert_cached_record(canonical_path, cached_record);
-                records.push(cached_record.clone());
-                continue;
-            } else {
-                log::debug!(
-                    "ab1_scan: disk cache stale/no-hits for {} (mtime_match={}, hits={}, current={})",
-                    path.display(),
-                    *cached_mtime == mtime_secs,
-                    cached_record.seq_id_hits.len(),
-                    cached_record_current(cached_record)
-                );
+        // Disk cache hit: mtime/size unchanged and seq_id_hits stored → reuse previous result.
+        if let Some(cache) = &disk_cache {
+            match cache.get(&key, mtime_secs, file_size) {
+                Some(cached)
+                    if !cached.seq_id_hits.is_empty() && cached_record_current(&cached) =>
+                {
+                    log::debug!(
+                        "ab1_scan: disk cache hit for {} ({} hits)",
+                        path.display(),
+                        cached.seq_id_hits.len(),
+                    );
+                    insert_cached_record(canonical_path, &cached);
+                    records.push(cached);
+                    continue;
+                }
+                Some(_) => {
+                    log::debug!("ab1_scan: disk cache entry outdated for {}", path.display())
+                }
+                None => log::debug!(
+                    "ab1_scan: no current disk cache entry for {}",
+                    path.display()
+                ),
             }
-        } else {
-            log::debug!("ab1_scan: no disk cache entry for {}", path.display());
         }
 
         // Cache miss — run full alignment pipeline.
@@ -342,20 +370,20 @@ pub fn scan_ab1_directory(
             continue;
         };
 
-        disk_cache.insert(path_key, (mtime_secs, record.clone()));
-        cache_dirty = true;
+        if let Some(cache) = &mut disk_cache {
+            cache.put(&key, mtime_secs, file_size, &record);
+        }
         records.push(record);
     }
 
-    // Persist the updated disk cache.
-    if cache_dirty && let Some(cp) = &cache_path {
-        match serde_json::to_string(&disk_cache) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(cp, json) {
-                    log::warn!("ab1 scan: failed to write disk cache {}: {e}", cp.display());
-                }
-            }
-            Err(e) => log::warn!("ab1 scan: failed to serialise disk cache: {e}"),
+    if let Some(cache) = &mut disk_cache {
+        cache.commit_batch();
+        let root = scan_path
+            .canonicalize()
+            .unwrap_or_else(|_| scan_path.clone());
+        let pruned = cache.prune_under(&root, &seen);
+        if pruned > 0 {
+            log::debug!("ab1_scan: pruned {pruned} stale disk cache entries");
         }
     }
 
@@ -429,6 +457,11 @@ fn analyse_ab1_file(
     // (unbounded) hit list per file for the life of the process. Per source, so one database
     // can't crowd the other out.
     truncate_per_source(&mut seq_id_hits, 10);
+    // pncA calls (~190 catalogue sites per hit) are only ever read from the top hit — here and
+    // in the preview's `ab1_susceptibility` — so drop them from the rest before caching.
+    for hit in seq_id_hits.iter_mut().skip(1) {
+        hit.pnca_snp_calls = Vec::new();
+    }
 
     // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
     log::debug!(
@@ -571,10 +604,7 @@ fn insert_cached_record(canonical_path: PathBuf, record: &SampleSusceptibilityRe
 /// Falls back to the user cache directory when the setting is empty.
 pub(crate) fn preview_cache_file(ab1_cache_path: &str) -> PathBuf {
     if ab1_cache_path.is_empty() {
-        return dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("cosmic-files")
-            .join(PREVIEW_CACHE_FILE_NAME);
+        return default_cache_dir().join(PREVIEW_CACHE_FILE_NAME);
     }
     let p = PathBuf::from(ab1_cache_path);
     if p.is_dir() {
@@ -591,39 +621,24 @@ pub(crate) fn preview_cache_file(ab1_cache_path: &str) -> PathBuf {
 pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<SeqIdHit> {
     let meta = std::fs::metadata(path).ok();
     let file_created = meta.as_ref().and_then(|m| m.created().ok());
-    let mtime_secs: u64 = meta
-        .as_ref()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let path_key = path.to_string_lossy().into_owned();
+    let (mtime_secs, file_size) = file_stamp(meta.as_ref());
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let key = canonical_path.to_string_lossy().into_owned();
 
     {
         let mut guard = PREVIEW_DISK_CACHE
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if guard.as_ref().is_none_or(|(p, _)| p != cache_file) {
-            let disk_cache: DiskCache = std::fs::read_to_string(cache_file)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default();
-            log::debug!(
-                "ab1_preview: loaded {} disk cache entries from {}",
-                disk_cache.len(),
-                cache_file.display()
-            );
-            *guard = Some((cache_file.to_path_buf(), disk_cache));
+        if guard.as_ref().is_none_or(|c| c.path() != cache_file) {
+            *guard = DiskCache::open(cache_file);
         }
-        if let Some((_, disk_cache)) = guard.as_ref()
-            && let Some((cached_mtime, record)) = disk_cache.get(&path_key)
-            && *cached_mtime == mtime_secs
-            && cached_record_current(record)
+        if let Some(cache) = guard.as_ref()
+            && let Some(record) = cache.get(&key, mtime_secs, file_size)
+            && cached_record_current(&record)
         {
             log::debug!("ab1_preview: disk cache hit for {}", path.display());
-            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-            insert_cached_record(canonical_path, record);
-            return record.seq_id_hits.clone();
+            insert_cached_record(canonical_path, &record);
+            return record.seq_id_hits;
         }
     }
 
@@ -637,26 +652,10 @@ pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<Seq
     let mut guard = PREVIEW_DISK_CACHE
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    if let Some((loaded_from, disk_cache)) = guard.as_mut()
-        && loaded_from == cache_file
+    if let Some(cache) = guard.as_mut()
+        && cache.path() == cache_file
     {
-        disk_cache.insert(path_key, (mtime_secs, record));
-        if let Some(parent) = cache_file.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            log::warn!("ab1_preview: failed to create {}: {e}", parent.display());
-        }
-        match serde_json::to_string(disk_cache) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(cache_file, json) {
-                    log::warn!(
-                        "ab1_preview: failed to write disk cache {}: {e}",
-                        cache_file.display()
-                    );
-                }
-            }
-            Err(e) => log::warn!("ab1_preview: failed to serialise disk cache: {e}"),
-        }
+        cache.put(&key, mtime_secs, file_size, &record);
     }
     seq_id_hits
 }

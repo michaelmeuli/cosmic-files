@@ -74,6 +74,7 @@ atomic_float = "1.1.0"
 num_enum = "0.7.6"
 bstr = "1.13.1"
 bio = "1"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 
 # Completion-based IO runtime to enable io_uring / IOCP file IO support.
 [dependencies.compio]

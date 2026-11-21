@@ -1,28 +1,39 @@
 # Sequencing Cache Architecture
 
-## Layer 1 — Disk cache (JSON file)
+## Layer 1 — Disk cache (SQLite)
 
-`scan_ab1_directory` maintains a `HashMap<path_string, (mtime_secs, SampleSusceptibilityRecord)>` serialised to a JSON file (the `cache_path` argument).
+`scan_ab1_directory` and `analyse_ab1_for_preview` store one row per analysed AB1 file in an SQLite database (`DiskCache`, `disk_cache.rs`):
 
-**Hit condition:** `mtime_secs` of the file on disk matches the cached value **and** `seq_id_hits` is non-empty.
+| column | meaning |
+|---|---|
+| `path` | canonical path (primary key; same key as `AB1_SEQ_CACHE`) |
+| `mtime_secs`, `file_size` | staleness check |
+| `version` | `ANALYSIS_VERSION` the record was produced with |
+| `record` | `SampleSusceptibilityRecord` as serde_json text |
 
-**On hit:** loads the stored `SampleSusceptibilityRecord` directly — no alignment runs.
+**Hit condition:** mtime, size and version match, the record has non-empty `seq_id_hits`, and `cached_record_current` holds (the gene the filename parser assigns hasn't changed).
 
-**On miss/stale:** runs the full pipeline (AB1 parse → quality trim → k-mer alignment → resistance calls), then writes the new entry back.
+**On hit:** loads the stored record directly, without running alignment.
 
-**Dirty-write:** the JSON file is only rewritten when at least one entry changed (`cache_dirty` flag), so unchanged scans don't write to disk.
+**On miss or stale:** runs the full pipeline (AB1 parse → quality trim → alignment → resistance calls), then upserts the row. During a scan, upserts are committed in transactions of 20, so an interrupted first scan keeps most of its progress.
 
-The top 5 `SeqIdHit`s are stored in the record (`batch.rs:294`) — alignment strings are preserved so the preview panel can display them without re-running alignment.
+**Pruning:** after a scan, rows for paths under the scan directory that the scan didn't see are deleted. This covers deleted files, renamed files and files outside `report_max_age_days`. Rows outside the scan directory are kept, so one database can serve several scan directories.
+
+**Location:** `ab1_cache_path` (a directory, or a file; a legacy `*.json` name maps to `*.sqlite`), otherwise the user cache dir (`dirs::cache_dir()/cosmic-files`). Avoid cloud-synced folders: opening a database there logs a warning. A database that isn't readable is moved to `*.corrupt` and rebuilt.
+
+**What is stored:** the scan record keeps the top 5 `SeqIdHit`s per reference source (the preview cache keeps all 10), including the alignment rows (serialised as strings), so the preview panel can show alignments without re-running them. Two things are left out to keep rows small:
+- pncA calls on every hit but the top one; only the top hit is ever read.
+- `PncaSnpCall::resistance_alts`, which is a copy of the WHO catalogue entry and is looked up again on deserialisation.
 
 ---
 
 ## Layer 2 — In-memory cache (`AB1_SEQ_CACHE`)
 
-A static `LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>>` (`batch.rs:22-23`).
+A static `LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>>` in `batch.rs`.
 
-Populated **both** on a disk-cache hit (`batch.rs:165-166`) and after a fresh alignment (`batch.rs:230-231`). In both cases only the top 10 `SeqIdHit`s (already sorted descending by identity by each `identify_sequence_*` function) are kept — the full alignment result set for every reference in the FASTA database is never retained, since scanning directories with many AB1 files would otherwise accumulate one unbounded hit list per file for the life of the process.
+It is filled both on a disk-cache hit and after a fresh alignment. Only the top 10 `SeqIdHit`s per reference source are kept, already sorted by identity. The full hit list against every reference is never retained, because scanning many AB1 files would otherwise keep one unbounded hit list per file for the life of the process.
 
-The key is the **canonical path** (with `\\?\` prefix on Windows) so it matches what `item_from_entry` in `tab.rs:944` looks up when building file list items on the UI thread.
+The key is the **canonical path** (with the `\\?\` prefix on Windows), so it matches what `item_from_entry` in `tab.rs` looks up when building file list items on the UI thread.
 
 ---
 
@@ -31,7 +42,8 @@ The key is the **canonical path** (with `\\?\` prefix on Windows) so it matches 
 ```
 scan_ab1_directory()  (background thread)
   ├─ disk cache hit?  → populate AB1_SEQ_CACHE, return record
-  └─ miss             → align → populate AB1_SEQ_CACHE → write disk cache
+  ├─ miss             → align → populate AB1_SEQ_CACHE → upsert row
+  └─ end              → commit, prune unseen rows under the scan dir
 
 item_from_entry()     (UI thread, per file)
   └─ AB1_SEQ_CACHE.read().get(&canonical_path)
@@ -42,4 +54,4 @@ Tab::seq_id_hits_cached()  (preview panel)
   └─ else fall back to AB1_SEQ_CACHE lookup
 ```
 
-The key design constraint: alignment (Smith-Waterman + k-mer seeding) is too slow for the UI thread, so the background scan pre-computes results and the UI thread only does a hash map read.
+The key design constraint: alignment is too slow for the UI thread, so the background scan pre-computes results and the UI thread only does a hash map read.

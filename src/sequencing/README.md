@@ -33,7 +33,8 @@ are the optional Microsynth download (`microsynth.rs`) and the ntfy push (`ntfy_
 | [`bed.rs`](bed.rs) | Parser for 5-column subspecies barcode BED files. |
 | [`microsynth.rs`](microsynth.rs) | *(feature `russh`)* SFTP download of AB1 archives from Microsynth into the scan directory. |
 | [`ntfy_notify.rs`](ntfy_notify.rs) | Sends the finished PDF report to an ntfy topic. |
-| [`serde_helpers.rs`](serde_helpers.rs) | Serde adapters for the cache JSON (`BTreeMap<u8, _>`, `Option<SystemTime>`). |
+| [`disk_cache.rs`](disk_cache.rs) | SQLite on-disk cache of analysed files (`DiskCache`): per-file upserts, batched transactions, pruning (see §8). |
+| [`serde_helpers.rs`](serde_helpers.rs) | Serde adapters for the cached records (`BTreeMap<u8, _>`, `Option<SystemTime>`, alignment bytes as strings). |
 
 ```mermaid
 graph LR
@@ -79,12 +80,13 @@ flowchart TD
     W --> L["WalkDir: every *.ab1"]
     L --> AGE{"created within<br/>report_max_age_days?"}
     AGE -- no --> L
-    AGE -- yes --> C{"disk cache hit?<br/>(same mtime and has hits)"}
+    AGE -- yes --> C{"disk cache hit?<br/>(same mtime + size, current version, has hits)"}
     C -- yes --> R1["reuse cached record<br/>→ fill AB1_SEQ_CACHE"]
     C -- no --> A["analyse_ab1_file()<br/>(see §3)"]
-    A --> DC["update ab1_scan_cache.json"]
+    A --> DC["upsert row in ab1_scan_cache.sqlite"]
     R1 --> REC
     DC --> REC["Vec&lt;SampleSusceptibilityRecord&gt;<br/>sorted by sample_id, descending"]
+    REC --> PR["prune cache rows for files<br/>under the scan dir not seen"]
 
     REC --> DONE["Message::Ab1ScanComplete"]
     DONE --> CSV["write_ab1_csv()"]
@@ -96,7 +98,7 @@ flowchart TD
 **Interactive preview.** When a user selects an AB1 file in the file manager, `tab.rs` first
 looks for its hits in `AB1_SEQ_CACHE`. If the file is outside the scan directories, `tab.rs`
 calls `analyse_ab1_for_preview()`, which runs the same per-file pipeline but uses its own disk
-cache (`ab1_preview_cache.json`).
+cache (`ab1_preview_cache.sqlite`).
 
 ---
 
@@ -348,8 +350,16 @@ classDiagram
 |---|---|---|---|
 | `AB1_SEQ_CACHE` | canonical path → top 10 `SeqIdHit` per reference source | memory | The preview panel reads hits without aligning on the UI thread. |
 | `SIXTEEN_S_HITS_CACHE` | sample_id → 16S hits | memory | Another file from the same sample can show its 16S species, even if the files are in different directories. |
-| `ab1_scan_cache.json` / `ab1_scan_cache_2.json` | path → (mtime, record) | disk (`ab1_cache_path`, or the scan dir) | Rescanning unchanged files skips alignment. |
-| `ab1_preview_cache.json` | path → (mtime, record) | disk | Same, for files opened outside the scan directories. |
+| `ab1_scan_cache.sqlite` / `ab1_scan_cache_2.sqlite` | canonical path → (mtime, size, version, record JSON) | disk (`ab1_cache_path`, else the user cache dir) | Rescanning unchanged files skips alignment. Rows of files no longer found under the scan dir are pruned. |
+| `ab1_preview_cache.sqlite` | same | disk | Same, for files opened outside the scan directories. |
+
+The disk caches are `DiskCache` ([`disk_cache.rs`](disk_cache.rs)). A configured
+`ab1_cache_path` ending in `.json` (the old cache format) maps to the same name with
+`.sqlite`; the old JSON file is no longer read and can be deleted. Keep the cache outside
+cloud-synced folders (OneDrive, Dropbox, …): syncing an SQLite file mid-write can corrupt it,
+so opening one there logs a warning. An unreadable database is moved to `*.corrupt` and
+rebuilt. To keep rows small, only the top hit carries pncA calls, and the catalogue text of
+each pncA site (`PncaSnpCall::resistance_alts`) is looked up again on load, not stored.
 | `.microsynth_sync.json` | archives already extracted | disk (scan dir) | Avoids downloading the same Microsynth archives again. |
 
 ---

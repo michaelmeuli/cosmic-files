@@ -32,6 +32,7 @@
 pub mod ab1_filename;
 pub mod batch;
 pub mod bed;
+pub(crate) mod disk_cache;
 pub mod erm41;
 pub mod hsp65;
 #[cfg(feature = "russh")]
@@ -1138,8 +1139,10 @@ pub struct SeqIdHit {
     #[serde(default)]
     pub rpob_snp_calls: Vec<RpobSnpCall>,
     /// Gapped query sequence (forward or RC, whichever scored best). `'-'` marks deletions.
+    #[serde(with = "serde_helpers::ascii_bytes")]
     pub aligned_query: Vec<u8>,
     /// Gapped reference sequence for the aligned span. Same length as `aligned_query`.
+    #[serde(with = "serde_helpers::ascii_bytes")]
     pub aligned_ref: Vec<u8>,
     /// 0-based position in the full reference where the alignment starts.
     pub ref_start: usize,
@@ -1417,6 +1420,24 @@ mod tests {
         super::sort_hits_by_identity(&mut hits);
         let order: Vec<&str> = hits.iter().map(|h| h.accession.as_str()).collect();
         assert_eq!(order, ["long", "short", "worse"]);
+    }
+
+    #[test]
+    fn seq_id_hit_alignments_serialize_as_strings() {
+        let mut h = hit("a", "x", super::RefSource::Ncbi, 99.0);
+        h.aligned_query = b"ACG-T".to_vec();
+        h.aligned_ref = b"ACGAT".to_vec();
+        let json = serde_json::to_value(&h).unwrap();
+        assert_eq!(json["aligned_query"], "ACG-T");
+        assert_eq!(json["aligned_ref"], "ACGAT");
+        let back: super::SeqIdHit = serde_json::from_value(json).unwrap();
+        assert_eq!(back.aligned_query, b"ACG-T");
+
+        // Caches written before this change stored the bytes as number arrays.
+        let mut old = serde_json::to_value(&h).unwrap();
+        old["aligned_query"] = serde_json::json!([65, 67]);
+        let back: super::SeqIdHit = serde_json::from_value(old).unwrap();
+        assert_eq!(back.aligned_query, b"AC");
     }
 
     fn hit(acc: &str, desc: &str, source: super::RefSource, identity: f32) -> super::SeqIdHit {
