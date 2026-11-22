@@ -391,10 +391,17 @@ species-identification pool from two sources, kept apart end to end:
   references for hsp65 and the Mtb rpoB regions.
 
 `references/` is a copy of the cosmic-seq export bundle (`scripts/05_export_cosmic_files.py`,
-on the cluster `output/cosmic-seq/results/cosmic_files/`). Update it with
-`python scripts/sync_cosmic_seq.py --remote <host>:<path>/cosmic_files` (scp) or `--from <dir>`;
-the script mirrors the bundle, reports changed record counts and refuses to drop a file that a
-`REF_*` constant embeds. Then rebuild, run the tests and commit.
+on the cluster `output/cosmic-seq/results/cosmic_files/`). Update it by hand (no build step
+does; `build.rs` never touches `references/`, the build only embeds the committed files), first
+with `--dry-run`, then without:
+
+```powershell
+uv run --no-project python scripts/sync_cosmic_seq.py --dry-run --remote mimeul@cluster.s3it.uzh.ch:/shares/sander.imm.uzh/MM/kansasii/output/cosmic-seq/results/cosmic_files
+```
+
+(`--from <dir>` takes a local copy instead of scp.) The script mirrors the bundle, reports
+changed record counts and refuses to drop a file that a `REF_*` constant embeds. Then rebuild,
+run the tests and commit.
 
 `references/species_groups.tsv` (cosmic-seq `scripts/04`: NCBI species groups, the M. chelonae /
 M. abscessus complex as NCBI genus *Mycobacteroides* (taxid 670516), and the curated M. kansasii

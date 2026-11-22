@@ -12,6 +12,13 @@ Usage:
   python scripts/sync_cosmic_seq.py --remote HOST:PATH      # scp -r from the cluster (OpenSSH)
   ... [--dry-run]
 
+From the S3IT cluster, on Windows (no `python` on PATH, hence uv); first with --dry-run, then without:
+  uv run --no-project python scripts/sync_cosmic_seq.py --dry-run --remote mimeul@cluster.s3it.uzh.ch:/shares/sander.imm.uzh/MM/kansasii/output/cosmic-seq/results/cosmic_files
+
+No build step runs this: build.rs never touches res/sequences/references/, the build only embeds
+the committed files. Run it by hand after cosmic-seq steps 04/05 (or the sbatch) have rewritten the
+bundle on the cluster.
+
 Afterwards: `cargo test -- sequencing`, review `git diff --stat res/sequences/references`, commit.
 """
 from __future__ import annotations
