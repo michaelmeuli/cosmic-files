@@ -2662,17 +2662,12 @@ impl Tab {
                 }
             }
             Message::Ab1CacheUpdated => {
-                if let Some(ref mut items) = self.items_opt
-                    && let Ok(cache) = crate::sequencing::batch::AB1_SEQ_CACHE.read()
-                {
+                if let Some(ref mut items) = self.items_opt {
                     for item in items.iter_mut() {
                         if item.metadata.is_ab1()
                             && item.metadata.seq_id_hits().is_empty()
-                            && let Some(hits) = item
-                                .path_opt()
-                                .and_then(|path| cache.get(path))
-                                .filter(|hits| !hits.is_empty())
-                                .cloned()
+                            && let Some(hits) =
+                                item.ab1_cached_hits().filter(|hits| !hits.is_empty())
                         {
                             set_ab1_hits(item, hits);
                         }

@@ -9,7 +9,7 @@
 //! readable with the `sqlite3` CLI, and nothing queries inside it.
 
 use super::batch::{ANALYSIS_VERSION, SampleSusceptibilityRecord};
-use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -87,36 +87,55 @@ impl DiskCache {
         }
     }
 
-    /// Like [`Self::open`], but `None` when no database exists at `path` yet, so a lookup in a
-    /// cache that was never written doesn't create an empty file.
+    /// Opens an existing cache read-only, for lookups (the preview's scan-cache lookups, the
+    /// startup preload). `None` when no database exists at `path` yet (nothing is created), it
+    /// has another schema, or it can't be read. Never writes, so it doesn't wait on a scan
+    /// holding the write lock.
     pub(crate) fn open_existing(path: &Path) -> Option<Self> {
-        if path.is_file() {
-            Self::open(path)
-        } else {
-            None
+        if !path.is_file() {
+            return None;
         }
+        let open = || -> rusqlite::Result<Option<Self>> {
+            let conn = Connection::open_with_flags(
+                path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            conn.busy_timeout(Duration::from_secs(5))?;
+            let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+            Ok((version == SCHEMA_VERSION).then(|| Self {
+                conn,
+                path: path.to_path_buf(),
+                batch: None,
+            }))
+        };
+        open()
+            .inspect_err(|e| log::warn!("ab1 cache: failed to read {}: {e}", path.display()))
+            .ok()
+            .flatten()
     }
 
     fn try_open(path: &Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         // Rollback journal rather than WAL: no long-lived -wal/-shm side files, which matters
-        // when the cache sits on a network share.
+        // when the cache sits on a network share. A no-op (no write) when already set.
         conn.pragma_update(None, "journal_mode", "DELETE")?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        // Only touch the schema when it differs (a new file has version 0): writing it on
+        // every open would wait on, and fail behind, a scan holding the write lock.
         if version != SCHEMA_VERSION {
-            conn.execute_batch("DROP TABLE IF EXISTS ab1_record;")?;
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS ab1_record;
+                 CREATE TABLE ab1_record (
+                     path       TEXT PRIMARY KEY NOT NULL,
+                     mtime_secs INTEGER NOT NULL,
+                     file_size  INTEGER NOT NULL,
+                     version    INTEGER NOT NULL,
+                     record     TEXT NOT NULL
+                 );",
+            )?;
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS ab1_record (
-                 path       TEXT PRIMARY KEY NOT NULL,
-                 mtime_secs INTEGER NOT NULL,
-                 file_size  INTEGER NOT NULL,
-                 version    INTEGER NOT NULL,
-                 record     TEXT NOT NULL
-             );",
-        )?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self {
             conn,
             path: path.to_path_buf(),
@@ -464,5 +483,31 @@ mod tests {
         cache.put("a", 1, 1, &record("a"));
         assert!(cache.get("a", 1, 1).is_some());
         assert!(path.with_extension("corrupt").is_file());
+    }
+
+    #[test]
+    fn lookups_do_not_wait_on_an_open_scan_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.sqlite");
+        let mut scan = DiskCache::open(&path).unwrap();
+        scan.put("a", 1, 1, &record("a"));
+        // A scan batch with an uncommitted upsert holds the write lock.
+        scan.begin_batch();
+        scan.put("b", 1, 1, &record("b"));
+
+        let start = std::time::Instant::now();
+        let reader = DiskCache::open_existing(&path).expect("read-only open");
+        assert!(reader.get("a", 1, 1).is_some());
+        assert!(reader.get("b", 1, 1).is_none(), "uncommitted");
+        // Reopening read-write for the same schema writes nothing either.
+        assert!(DiskCache::open(&path).is_some());
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "waited on the lock"
+        );
+
+        // No database, no file.
+        assert!(DiskCache::open_existing(&dir.path().join("none.sqlite")).is_none());
+        assert!(!dir.path().join("none.sqlite").exists());
     }
 }

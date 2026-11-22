@@ -102,7 +102,11 @@ records with a resistance SNP outside a position call (`is_susceptible_rare == S
 rrl, rrs or rrs3end). When none qualifies, an existing `rare_mutations.csv` is deleted, so it
 never shows an earlier scan's mutations. The PDF is
 sent to ntfy only when a topic is configured. A bare topic name goes to the public
-`https://ntfy.sh` server.
+`https://ntfy.sh` server, where anyone who knows the topic can read the report, so it logs a
+warning; set `ntfy_topic` to the full URL of a private server to avoid that.
+
+AB1 files are parsed by `abif_entries` in `mod.rs`, which checks every count, size and offset
+read from the file, so a damaged `.ab1` is skipped instead of crashing the scan.
 
 **Interactive preview.** When a user selects an AB1 file in the file manager, `tab.rs` first
 looks for its hits in `AB1_SEQ_CACHE`. If the file is outside the scan directories, `tab.rs`
@@ -369,7 +373,7 @@ classDiagram
 
 | Cache | Key → value | Where | Purpose |
 |---|---|---|---|
-| `AB1_SEQ_CACHE` | canonical path → top 10 `SeqIdHit` per reference source | memory | The preview panel reads hits without aligning on the UI thread. |
+| `AB1_SEQ_CACHE` | canonical path → (mtime, size, top 10 `SeqIdHit` per reference source) | memory | The preview panel reads hits without aligning on the UI thread. |
 | `SIXTEEN_S_HITS_CACHE` | sample_id → 16S hits | memory | Another file from the same sample can show its 16S species, even if the files are in different directories. |
 | `ab1_scan_cache.sqlite` / `ab1_scan_cache_2.sqlite` | canonical path → (mtime, size, version, record JSON) | disk (`ab1_cache_path`, else the user cache dir) | Rescanning unchanged files skips alignment. Rows of files no longer found under the scan dir are pruned. |
 | `ab1_preview_cache.sqlite` | same | disk | Same, for files opened outside the scan directories. |
@@ -384,9 +388,9 @@ moved to `*.corrupt` and rebuilt. To keep rows small, only the top hit carries p
 the catalogue text of each pncA site (`PncaSnpCall::resistance_alts`) is looked up again on
 load, not stored.
 
-`AB1_SEQ_CACHE` entries are not checked against the file's mtime. A file outside the scan
-directories that changes during a session keeps showing its old hits until restart. Files
-inside a scan directory are refreshed by the next scan.
+`AB1_SEQ_CACHE` entries carry the mtime and size of the file they were computed for, and
+`batch::cached_hits` only returns them for a file that still matches. A file that changes
+during a session is re-analysed when it is next previewed.
 
 ---
 

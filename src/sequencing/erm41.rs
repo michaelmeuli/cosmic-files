@@ -295,7 +295,9 @@ fn parse_erm41_lof_snps(csv: &str, refseq: &[u8]) -> Erm41LofSnpMap {
         if target_aa == 0 {
             continue;
         }
-        let codon_start = (prot_pos - 1) * 3;
+        let Some(codon_start) = prot_pos.checked_sub(1).map(|p| p * 3) else {
+            continue;
+        };
         if codon_start + 3 > refseq.len() {
             continue;
         }

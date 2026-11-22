@@ -87,7 +87,7 @@ pub(super) fn translate_codon(codon: &[u8]) -> Option<&'static str> {
 }
 
 /// 0-based index into `REF_PNCA` of a signed HGVS coding-sequence position. There is no
-/// `c.0` â€” `c.-1` sits immediately before `c.1` (the `A` of the start codon).
+/// `c.0` — `c.-1` sits immediately before `c.1` (the `A` of the start codon).
 fn nt_pos_to_ref_idx(c_pos: isize) -> Option<usize> {
     let offset = if c_pos > 0 { c_pos - 1 } else { c_pos };
     let idx = UPSTREAM_FLANK + offset;
@@ -102,7 +102,7 @@ fn ref_idx_to_nt_pos(ref_idx: usize) -> Option<isize> {
 
 /// 0-based index into `REF_PNCA` of the first base of a 1-based codon number.
 fn codon_to_ref_idx(codon: usize) -> Option<usize> {
-    nt_pos_to_ref_idx(((codon - 1) * 3 + 1) as isize)
+    nt_pos_to_ref_idx(isize::try_from(codon.checked_sub(1)? * 3 + 1).ok()?)
 }
 
 /// Parses `tbprofiler/mutations.csv`, keeping only `pncA` rows whose mutation is a simple
@@ -110,7 +110,7 @@ fn codon_to_ref_idx(codon: usize) -> Option<usize> {
 /// acid substitution / nonsense call (`p.WtNNNAlt` / `p.WtNNN*`).
 ///
 /// Frameshifts, in-frame indels, delins, and stop-codon extensions (`fs`, `del`, `dup`,
-/// `delins`, `ext`) are not positioned by this simple gapless-alignment model and are skipped â€”
+/// `delins`, `ext`) are not positioned by this simple gapless-alignment model and are skipped —
 /// same limitation as the rest of this codebase, which only calls substitutions, not indels.
 fn parse_pnca_resistance_snps(csv: &str) -> (PncaNtSnpMap, PncaAaSnpMap) {
     static NT_SNP_RE: LazyLock<Regex> =
@@ -160,7 +160,7 @@ fn parse_pnca_resistance_snps(csv: &str) -> (PncaNtSnpMap, PncaAaSnpMap) {
             {
                 continue;
             }
-            let Ok(codon) = caps[2].parse::<usize>() else {
+            let Some(codon) = caps[2].parse::<usize>().ok().filter(|&c| c > 0) else {
                 continue;
             };
             let entry = aa_map
@@ -338,7 +338,7 @@ impl PncaSnpCall {
     }
 
     /// Classifies the allele observed at this site, or `None` when the read doesn't cover it
-    /// at all (as opposed to covering it and finding wildtype â€” those are not the same thing).
+    /// at all (as opposed to covering it and finding wildtype — those are not the same thing).
     fn evidence(&self) -> Option<PncaEvidence> {
         let (observed, wt) = match &self.kind {
             PncaCallKind::Nucleotide {
@@ -364,9 +364,9 @@ impl PncaSnpCall {
 
 /// What the read showed at one diagnostic pncA site, for [`is_susceptible_pnca`].
 enum PncaEvidence {
-    /// Matches the wildtype allele â€” positive evidence of susceptibility at this site.
+    /// Matches the wildtype allele — positive evidence of susceptibility at this site.
     Wildtype,
-    /// Differs from wildtype but isn't in the WHO catalogue â€” neither confirms nor rules out
+    /// Differs from wildtype but isn't in the WHO catalogue — neither confirms nor rules out
     /// resistance, but does confirm the site was covered.
     Uncatalogued,
     /// Matches a catalogued resistance-conferring alt, at this confidence rank
@@ -494,7 +494,7 @@ fn call_pnca_aa_snps(map: &PncaAaSnpMap, ga: &GappedAlignment) -> Vec<PncaSnpCal
 
 /// Database is `REF_PNCA`: the pncA CDS plus a 50bp upstream promoter flank for each
 /// *M. tuberculosis* complex member with a distinct sequence (H37Rv `Rv2043c`, bovis AF2122/97,
-/// canettii â€” see `res/sequences/sequences.toml` for the rest, including the bovis BCG
+/// canettii — see `res/sequences/sequences.toml` for the rest, including the bovis BCG
 /// Pasteur/africanum/mungi/orygis references that were tried and dropped as exact duplicates
 /// of one of these three), fetched from NCBI at build time (via `fetch_sequences_from_toml()`
 /// in build.rs).

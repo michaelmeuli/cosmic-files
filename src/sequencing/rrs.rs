@@ -42,7 +42,13 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
     let mut map: RrsSnpMap = BTreeMap::new();
     for row in rdr.deserialize::<ResistanceVariant>() {
-        let row = row.unwrap();
+        let row = match row {
+            Ok(row) => row,
+            Err(e) => {
+                log::warn!("ntm-db variants.csv: skipping unreadable row: {e}");
+                continue;
+            }
+        };
         if row.gene.trim() != "rrs" {
             continue;
         }
@@ -56,7 +62,11 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
             let digits_end = rest
                 .find(|c: char| !c.is_ascii_digit())
                 .unwrap_or(rest.len());
-            if let Ok(pos1) = rest[..digits_end].parse::<usize>() {
+            if let Some(pos0) = rest[..digits_end]
+                .parse::<usize>()
+                .ok()
+                .and_then(|p| p.checked_sub(1))
+            {
                 let after_pos = &rest[digits_end..];
                 if let (Some(wt), Some(alt)) = (
                     after_pos.bytes().next(),
@@ -65,7 +75,7 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
                         .and_then(|s| s.strip_prefix('>'))
                         .and_then(|s| s.bytes().next()),
                 ) {
-                    let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
+                    let entry = map.entry(pos0).or_insert_with(|| (wt, BTreeMap::new()));
                     let variant = entry
                         .1
                         .entry(alt)

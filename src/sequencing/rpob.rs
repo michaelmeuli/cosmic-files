@@ -152,7 +152,7 @@ fn parse_rpob_catalogue(csv: &str, h37rv: &[u8]) -> RifCatalogue {
         if !AA3.contains(&&caps[1]) || (alt != "*" && !AA3.contains(&alt.as_str())) {
             continue;
         }
-        let Ok(codon) = caps[2].parse::<usize>() else {
+        let Some(codon) = caps[2].parse::<usize>().ok().filter(|&c| c > 0) else {
             continue;
         };
         let drug = row.drug.trim().to_string();

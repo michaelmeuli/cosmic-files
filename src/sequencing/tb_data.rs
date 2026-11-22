@@ -117,7 +117,13 @@ pub static TB_ECOLI_MAPPING: LazyLock<HashMap<(String, String), String>> = LazyL
         csv::Reader::from_reader(include_str!("../../res/tb_ecoli_mapping.csv").as_bytes());
     let mut map = HashMap::new();
     for row in rdr.deserialize::<TBMappingRow>() {
-        let row = row.unwrap();
+        let row = match row {
+            Ok(row) => row,
+            Err(e) => {
+                log::warn!("tb_ecoli_mapping.csv: skipping unreadable row: {e}");
+                continue;
+            }
+        };
         map.insert(
             (row.gene.trim().to_string(), row.mutation.trim().to_string()),
             row.ecoli.trim().to_string(),

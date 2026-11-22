@@ -109,7 +109,13 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
     let mut rdr = csv::Reader::from_reader(csv.as_bytes());
     let mut map: RrsSnpMap = BTreeMap::new();
     for row in rdr.deserialize::<ResistanceVariant>() {
-        let row = row.unwrap();
+        let row = match row {
+            Ok(row) => row,
+            Err(e) => {
+                log::warn!("ntm-db variants.csv: skipping unreadable row: {e}");
+                continue;
+            }
+        };
         if row.gene.trim() != "rrs" {
             continue;
         }
@@ -123,7 +129,11 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
             let digits_end = rest
                 .find(|c: char| !c.is_ascii_digit())
                 .unwrap_or(rest.len());
-            if let Ok(pos1) = rest[..digits_end].parse::<usize>() {
+            if let Some(pos0) = rest[..digits_end]
+                .parse::<usize>()
+                .ok()
+                .and_then(|p| p.checked_sub(1))
+            {
                 let after_pos = &rest[digits_end..];
                 if let (Some(wt), Some(alt)) = (
                     after_pos.bytes().next(),
@@ -132,7 +142,7 @@ fn parse_rrs_resistance_snps(csv: &str) -> RrsSnpMap {
                         .and_then(|s| s.strip_prefix('>'))
                         .and_then(|s| s.bytes().next()),
                 ) {
-                    let entry = map.entry(pos1 - 1).or_insert_with(|| (wt, BTreeMap::new()));
+                    let entry = map.entry(pos0).or_insert_with(|| (wt, BTreeMap::new()));
                     let variant = entry
                         .1
                         .entry(alt)
@@ -314,9 +324,9 @@ pub(super) fn find_16s3end_display_window(
         .windows(anchor_len as usize)
         .position(|w| w.eq_ignore_ascii_case(RRS3END_ANCHOR_L))
     {
-        let pos28 = hit + anchor_len as usize;
-        if let Some(window) = super::scan_window(pos28, LEFT, RIGHT, peak_locs) {
-            return Some((window.0, window.1, false, pos28 as u16));
+        let pos1248 = hit + anchor_len as usize;
+        if let Some(window) = super::scan_window(pos1248, LEFT, RIGHT, peak_locs) {
+            return Some((window.0, window.1, false, pos1248 as u16));
         }
     }
 
@@ -325,9 +335,9 @@ pub(super) fn find_16s3end_display_window(
         .windows(rc_anchor_r.len())
         .position(|w| w.eq_ignore_ascii_case(&rc_anchor_r))
     {
-        let pos28_comp = hit + rc_anchor_r.len();
-        if let Some(window) = super::scan_window(pos28_comp, RIGHT, LEFT, peak_locs) {
-            return Some((window.0, window.1, true, pos28_comp as u16));
+        let pos1248_comp = hit + rc_anchor_r.len();
+        if let Some(window) = super::scan_window(pos1248_comp, RIGHT, LEFT, peak_locs) {
+            return Some((window.0, window.1, true, pos1248_comp as u16));
         }
     }
 

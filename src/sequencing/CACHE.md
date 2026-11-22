@@ -15,13 +15,13 @@
 
 **On hit:** loads the stored record directly, without running alignment.
 
-**On miss or stale:** runs the full pipeline (AB1 parse → quality trim → alignment → resistance calls), then upserts the row. During a scan, upserts are committed in transactions of 20, so an interrupted first scan keeps most of its progress. Each transaction holds the database's write lock from its first upsert until its commit, so it spans the alignment of up to 20 files. Another connection that needs to write in that time (including `try_open` on the same file) waits up to the 5 s `busy_timeout` and then fails.
+**On miss or stale:** runs the full pipeline (AB1 parse → quality trim → alignment → resistance calls), then upserts the row. During a scan, upserts are committed in transactions of 20, so an interrupted first scan keeps most of its progress. Each transaction holds the database's write lock from its first upsert until its commit, so it spans the alignment of up to 20 files. Lookups don't need that lock: `DiskCache::open_existing` opens the database read-only, and `DiskCache::open` writes only when the schema version differs (a new or outdated file), so neither waits on a running scan.
 
 A file whose record has no hits (no gene keyword in its name, or an unreadable read) is a miss on every scan, because the hit condition requires non-empty `seq_id_hits`. Re-analysing such a file is cheap, since there is nothing to align. The preview cache doesn't require hits.
 
 **Two passes:** the scan first walks the whole tree and serves every hit, collecting the misses. It aligns the misses only afterwards, so no cached result waits behind a slow alignment.
 
-**Startup preload:** `preload_disk_cache` loads every current row of the scan cache(s) (`scan_cache_files`) into the in-memory caches in one query. A row is current when its file still exists with the same mtime and size and `cached_record_current` holds. The preload runs at launch (`Message::PreloadAb1Cache`), ahead of the scan, which may first wait for a Microsynth sync. It never writes records or prunes. Opening a database still runs `DiskCache::try_open`, which sets `PRAGMA user_version` and creates the table if needed. This also applies to the preview's lookups in the scan caches.
+**Startup preload:** `preload_disk_cache` loads every current row of the scan cache(s) (`scan_cache_files`) into the in-memory caches in one query. A row is current when its file still exists with the same mtime and size and `cached_record_current` holds. The preload runs at launch (`Message::PreloadAb1Cache`), ahead of the scan, which may first wait for a Microsynth sync. It opens the database read-only (`DiskCache::open_existing`), as do the preview's lookups in the scan caches. A database with another schema version is skipped, not rebuilt.
 
 **Pruning:** after a scan, rows for paths under the scan directory that the scan didn't see are deleted. This covers deleted files, renamed files and files outside `report_max_age_days`. Rows outside the scan directory are kept, so one database can serve several scan directories.
 
@@ -35,13 +35,13 @@ A file whose record has no hits (no gene keyword in its name, or an unreadable r
 
 ## Layer 2 — In-memory cache (`AB1_SEQ_CACHE`)
 
-A static `LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>>` in `batch.rs`.
+A static `LazyLock<RwLock<HashMap<PathBuf, CachedHits>>>` in `batch.rs`; `CachedHits` holds the hits and the `(mtime_secs, file_size)` stamp of the file they were computed for.
 
 It is filled both on a disk-cache hit and after a fresh alignment. Only the top 10 `SeqIdHit`s per reference source are kept, already sorted by identity. The full hit list against every reference is never retained, because scanning many AB1 files would otherwise keep one unbounded hit list per file for the life of the process.
 
 The key is the **canonical path** (with the `\\?\` prefix on Windows), so it matches what `item_from_entry` in `tab.rs` looks up when building file list items on the UI thread.
 
-Entries are never checked against the file's mtime or size. `analyse_ab1_for_preview` returns a memory hit before it looks at the file, so a file outside the scan directories that changes during a session keeps its old hits until restart. The next scan replaces the entries for files inside a scan directory.
+Read it with `batch::cached_hits(path, metadata)`, which returns the hits only when the file's mtime and size still match the stamp. The UI-thread readers pass the `fs::Metadata` the item was listed with (`Item::ab1_cached_hits`), so the check does no file I/O. A file that changed since its hits were computed gets none, so the preview re-analyses it (`analyse_ab1_for_preview` stats the file first).
 
 ---
 
@@ -64,12 +64,12 @@ tab::Message::Ab1CacheUpdated
   └─ listed AB1 items without stored hits take theirs from AB1_SEQ_CACHE (+ calls)
 
 item_from_entry()     (UI thread, per file)
-  └─ AB1_SEQ_CACHE.read().get(&canonical_path)
+  └─ cached_hits(&canonical_path, &metadata)   (stamp must match)
        → SeqIdHit list for preview panel (no alignment on UI thread)
 
-Tab::seq_id_hits_cached()  (preview panel)
+Item::seq_id_hits_cached()  (preview panel)
   ├─ stored hits on Item non-empty? → use those
-  └─ else fall back to AB1_SEQ_CACHE lookup
+  └─ else fall back to Item::ab1_cached_hits()
 ```
 
 A folder listing (`item_from_entry`) doesn't read AB1 files at all: an item starts with only its cached hits (`SeqData::read_opt` = `None`). The chromatogram, lengths and quality are read (`item::read_ab1`) on a worker thread when the file is first previewed (`tab::Message::Ab1Read`), separately from the alignment.

@@ -894,86 +894,104 @@ fn scan_window(center: usize, left: usize, right: usize, peak_locs: &[u16]) -> O
     Some((start_scan, end_scan))
 }
 
-/// Tries the edited basecalls (PBAS tag 2) first, falling back to raw basecalls (PBAS tag 1).
-pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
+/// One entry of an ABIF file's tag directory.
+struct AbifEntry<'a> {
+    name: &'a [u8],
+    number: i32,
+    num_elems: usize,
+    /// The file from the entry's data offset to the end (data of ≤ 4 bytes is stored inline in
+    /// the entry). Take the entry's data with [`Self::bytes`].
+    rest: &'a [u8],
+}
+
+impl<'a> AbifEntry<'a> {
+    /// The entry's first `num_elems × width` bytes, or `None` if the file ends before them.
+    fn bytes(&self, width: usize) -> Option<&'a [u8]> {
+        self.rest.get(..self.num_elems.checked_mul(width)?)
+    }
+
+    /// The data as big-endian unsigned 16-bit values (PLOC peak positions).
+    fn u16s(&self) -> Option<Vec<u16>> {
+        Some(
+            self.bytes(2)?
+                .chunks_exact(2)
+                .map(|b| u16::from_be_bytes([b[0], b[1]]))
+                .collect(),
+        )
+    }
+}
+
+/// The tag directory of an ABIF (`.ab1`) file, or `None` if `data` isn't one. Every count,
+/// size and offset comes from the file, so all of them are checked: entries whose fields are
+/// negative are skipped, and the directory stops where the file does, so a damaged file can
+/// neither panic nor make the caller loop over a huge claimed entry count.
+fn abif_entries(data: &[u8]) -> Option<Vec<AbifEntry<'_>>> {
     if data.len() < 34 || &data[0..4] != b"ABIF" {
         return None;
     }
+    let be_i32 = |b: &[u8], at: usize| -> Option<i32> {
+        Some(i32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?))
+    };
+    let be_usize = |b: &[u8], at: usize| usize::try_from(be_i32(b, at)?).ok();
 
-    // Root directory entry sits at byte 6 (28 bytes long).
-    // num_elements (i32 BE) at root+12 = byte 18
-    // data_offset  (i32 BE) at root+20 = byte 26
-    let dir_count = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
-    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
-
-    let mut pbas1: Option<Vec<u8>> = None;
-
+    // The root directory entry sits at byte 6; its element count is at byte 18 and its data
+    // offset (where the tag directory starts) at byte 26.
+    let dir_count = be_usize(data, 18)?;
+    let dir_offset = be_usize(data, 26)?;
+    let mut entries = Vec::new();
     for i in 0..dir_count {
-        let e = dir_offset + i * 28;
-        if e + 28 > data.len() {
+        let Some(entry) = i
+            .checked_mul(28)
+            .and_then(|o| o.checked_add(dir_offset))
+            .and_then(|e| data.get(e..e.checked_add(28)?))
+        else {
             break;
-        }
-        let tag_name = &data[e..e + 4];
-        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
-        // num_elements at e+12, data_size at e+16, data_offset at e+20
-        let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
-        let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-        let data_off = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
-
-        if tag_name == b"PBAS" {
-            // When data fits in 4 bytes it is stored inline at the data_offset field position
-            let offset = if data_size <= 4 { e + 20 } else { data_off };
-            if offset + num_elems <= data.len() {
-                let seq = data[offset..offset + num_elems].to_vec();
-                if tag_number == 2 {
-                    return Some(seq); // edited basecalls — best quality
-                } else if tag_number == 1 {
-                    pbas1 = Some(seq); // raw basecalls — keep as fallback
-                }
-            }
-        }
+        };
+        // num_elements at +12, data_size at +16, data_offset at +20.
+        let (Some(number), Some(num_elems), Some(data_size), Some(data_off)) = (
+            be_i32(entry, 4),
+            be_usize(entry, 12),
+            be_usize(entry, 16),
+            be_usize(entry, 20),
+        ) else {
+            continue;
+        };
+        let rest = if data_size <= 4 {
+            &entry[20..]
+        } else {
+            data.get(data_off..).unwrap_or_default()
+        };
+        entries.push(AbifEntry {
+            name: &entry[..4],
+            number,
+            num_elems,
+            rest,
+        });
     }
+    Some(entries)
+}
 
-    pbas1
+/// The data of tag `name` as bytes, preferring tag number 2 (edited/analysed) over 1 (raw).
+fn abif_tag_bytes(data: &[u8], name: &[u8]) -> Option<Vec<u8>> {
+    let entries = abif_entries(data)?;
+    let find = |number| {
+        entries
+            .iter()
+            .filter(|e| e.name == name && e.number == number)
+            .find_map(|e| e.bytes(1))
+    };
+    find(2).or_else(|| find(1)).map(<[u8]>::to_vec)
+}
+
+/// Tries the edited basecalls (PBAS tag 2) first, falling back to raw basecalls (PBAS tag 1).
+pub fn parse_ab1_sequence(data: &[u8]) -> Option<Vec<u8>> {
+    abif_tag_bytes(data, b"PBAS")
 }
 
 /// Tries edited quality scores (PCON tag 2) first, falling back to raw (PCON tag 1).
 /// Each byte is a Phred quality score corresponding to the base at the same index in PBAS.
 pub fn parse_ab1_quality(data: &[u8]) -> Option<Vec<u8>> {
-    if data.len() < 34 || &data[0..4] != b"ABIF" {
-        return None;
-    }
-
-    let dir_count = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
-    let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
-
-    let mut pcon1: Option<Vec<u8>> = None;
-
-    for i in 0..dir_count {
-        let e = dir_offset + i * 28;
-        if e + 28 > data.len() {
-            break;
-        }
-        let tag_name = &data[e..e + 4];
-        let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
-        let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
-        let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-        let data_off = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
-
-        if tag_name == b"PCON" {
-            let offset = if data_size <= 4 { e + 20 } else { data_off };
-            if offset + num_elems <= data.len() {
-                let qual = data[offset..offset + num_elems].to_vec();
-                if tag_number == 2 {
-                    return Some(qual); // edited quality — best
-                } else if tag_number == 1 {
-                    pcon1 = Some(qual); // raw quality — keep as fallback
-                }
-            }
-        }
-    }
-
-    pcon1
+    abif_tag_bytes(data, b"PCON")
 }
 
 impl Ab1Channels {
@@ -982,12 +1000,7 @@ impl Ab1Channels {
     /// Returns `None` if the data is not a valid ABIF file or required tags are missing.
     /// Prefers edited/analyzed data (PBAS 2, PLOC 2, DATA 9–12) over raw (PBAS 1, PLOC 1, DATA 1–4).
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 34 || &data[0..4] != b"ABIF" {
-            return None;
-        }
-
-        let dir_count = i32::from_be_bytes(data[18..22].try_into().ok()?) as usize;
-        let dir_offset = i32::from_be_bytes(data[26..30].try_into().ok()?) as usize;
+        let entries = abif_entries(data)?;
 
         // Collect all tag entries we care about
         let mut data_tags: std::collections::HashMap<i32, Vec<i16>> =
@@ -998,59 +1011,31 @@ impl Ab1Channels {
         let mut ploc2: Option<Vec<u16>> = None;
         let mut fwo: Option<[u8; 4]> = None;
 
-        for i in 0..dir_count {
-            let e = dir_offset + i * 28;
-            if e + 28 > data.len() {
-                break;
-            }
-            let tag_name = &data[e..e + 4];
-            let tag_number = i32::from_be_bytes(data[e + 4..e + 8].try_into().ok()?);
-            let num_elems = i32::from_be_bytes(data[e + 12..e + 16].try_into().ok()?) as usize;
-            let data_size = i32::from_be_bytes(data[e + 16..e + 20].try_into().ok()?) as usize;
-            let data_off = i32::from_be_bytes(data[e + 20..e + 24].try_into().ok()?) as usize;
-
-            let offset = if data_size <= 4 { e + 20 } else { data_off };
-
-            if tag_name == b"DATA" && (1..=12).contains(&tag_number) {
-                // Each element is an i16 BE (2 bytes)
-                if offset + num_elems * 2 <= data.len() {
-                    let values: Vec<i16> = (0..num_elems)
-                        .map(|j| {
-                            i16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]])
-                        })
-                        .collect();
-                    data_tags.insert(tag_number, values);
-                }
-            } else if tag_name == b"PBAS" {
-                if offset + num_elems <= data.len() {
-                    let seq = data[offset..offset + num_elems].to_vec();
-                    match tag_number {
-                        2 => pbas2 = Some(seq),
-                        1 => pbas1 = Some(seq),
-                        _ => {}
+        for entry in &entries {
+            match (entry.name, entry.number) {
+                // Traces: big-endian i16 per scan.
+                (b"DATA", n @ 1..=12) => {
+                    if let Some(bytes) = entry.bytes(2) {
+                        let values = bytes
+                            .chunks_exact(2)
+                            .map(|b| i16::from_be_bytes([b[0], b[1]]))
+                            .collect();
+                        data_tags.insert(n, values);
                     }
                 }
-            } else if tag_name == b"PLOC" {
-                // i16 BE peak scan positions
-                if offset + num_elems * 2 <= data.len() {
-                    let locs: Vec<u16> = (0..num_elems)
-                        .map(|j| {
-                            u16::from_be_bytes([data[offset + j * 2], data[offset + j * 2 + 1]])
-                        })
-                        .collect();
-                    match tag_number {
-                        2 => ploc2 = Some(locs),
-                        1 => ploc1 = Some(locs),
-                        _ => {}
-                    }
+                (b"PBAS", 2) => pbas2 = entry.bytes(1).map(<[u8]>::to_vec),
+                (b"PBAS", 1) => pbas1 = entry.bytes(1).map(<[u8]>::to_vec),
+                // Peak scan positions.
+                (b"PLOC", 2) => ploc2 = entry.u16s(),
+                (b"PLOC", 1) => ploc1 = entry.u16s(),
+                // 4 bytes: the base letter of each channel, in order.
+                (b"FWO_", 1) => {
+                    fwo = entry
+                        .rest
+                        .get(..4)
+                        .and_then(|b| <[u8; 4]>::try_from(b).ok());
                 }
-            } else if tag_name == b"FWO_" && tag_number == 1 {
-                // 4 bytes: base letter for each channel in order
-                if offset + 4 <= data.len() {
-                    let mut arr = [0u8; 4];
-                    arr.copy_from_slice(&data[offset..offset + 4]);
-                    fwo = Some(arr);
-                }
+                _ => {}
             }
         }
 
@@ -1076,10 +1061,10 @@ impl Ab1Channels {
         );
 
         let rrs3end_view_state_opt = rrs3end::find_16s3end_display_window(&bases, &peak_locs).map(
-            |(start, end, is_reverse, pos28_base_idx)| Rrs3EndViewState {
+            |(start, end, is_reverse, pos1248_base_idx)| Rrs3EndViewState {
                 window: (start, end),
                 is_reverse,
-                pos28_base_idx,
+                pos1248_base_idx,
             },
         );
 
@@ -1132,7 +1117,7 @@ pub struct Rrs3EndViewState {
     /// `true` when the reverse complement matched the anchor.
     pub is_reverse: bool,
     /// Index into `bases` / `peak_locs` that corresponds to position 1248.
-    pub pos28_base_idx: u16,
+    pub pos1248_base_idx: u16,
 }
 
 /// Chromatogram display parameters for the rrl / NTM macrolide-resistance region.
@@ -1250,10 +1235,10 @@ impl SeqIdHit {
 /// rrl/rrs/rrs3end. The top NCBI hit by identity is often a different reference of the same
 /// species (NCBI type material), which carries none, so the calls are taken from the best
 /// same-species hit that has them.
-pub(crate) fn best_snp_hit<'a>(
-    hits: &'a [SeqIdHit],
+pub(crate) fn best_snp_hit(
+    hits: &[SeqIdHit],
     has_calls: impl Fn(&SeqIdHit) -> bool,
-) -> Option<&'a SeqIdHit> {
+) -> Option<&SeqIdHit> {
     let best = hits.iter().find(|h| h.source == RefSource::Ncbi)?;
     hits.iter()
         .find(|h| h.description == best.description && has_calls(h))
@@ -1470,6 +1455,88 @@ fn pdf_days_to_ymd(days: u32) -> (u32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    /// A minimal ABIF file: a 34-byte header whose root entry points at a directory with one
+    /// 28-byte entry per `(name, number, data)`, followed by the data (inline if ≤ 4 bytes).
+    fn abif(entries: &[(&[u8; 4], i32, &[u8])]) -> Vec<u8> {
+        let be = |v: usize| i32::try_from(v).unwrap().to_be_bytes();
+        let dir_offset = 34;
+        let mut data_offset = dir_offset + 28 * entries.len();
+        let mut file = b"ABIF\x00\x65".to_vec();
+        file.extend([0u8; 12]); // root entry: name, number, type, element size
+        file.extend(be(entries.len())); // num_elements (byte 18)
+        file.extend(be(28 * entries.len())); // data_size
+        file.extend(be(dir_offset)); // data_offset (byte 26)
+        file.extend([0u8; 4]);
+        let mut tail: Vec<u8> = Vec::new();
+        for (name, number, data) in entries {
+            file.extend(*name);
+            file.extend(number.to_be_bytes());
+            file.extend([0u8; 4]); // type, element size
+            file.extend(be(data.len())); // num_elements (= bytes for PBAS/PCON)
+            file.extend(be(data.len())); // data_size
+            if data.len() <= 4 {
+                let mut inline = data.to_vec();
+                inline.resize(4, 0);
+                file.extend(inline);
+            } else {
+                file.extend(be(data_offset));
+                data_offset += data.len();
+                tail.extend(*data);
+            }
+            file.extend([0u8; 4]); // handle
+        }
+        file.extend(tail);
+        file
+    }
+
+    #[test]
+    fn abif_tags_prefer_edited_and_read_inline_data() {
+        let file = abif(&[
+            (b"PBAS", 1, b"ACGTACGT"),
+            (b"PBAS", 2, b"TTTTGGGG"),
+            (b"PCON", 1, b"\x14\x1e"),
+        ]);
+        assert_eq!(
+            super::parse_ab1_sequence(&file).as_deref(),
+            Some(&b"TTTTGGGG"[..])
+        );
+        assert_eq!(
+            super::parse_ab1_quality(&file).as_deref(),
+            Some(&b"\x14\x1e"[..])
+        );
+        let raw_only = abif(&[(b"PBAS", 1, b"ACGTACGT")]);
+        assert_eq!(
+            super::parse_ab1_sequence(&raw_only).as_deref(),
+            Some(&b"ACGTACGT"[..])
+        );
+        assert!(super::parse_ab1_sequence(b"not an ab1 file at all, just text....").is_none());
+    }
+
+    #[test]
+    fn damaged_abif_headers_do_not_panic() {
+        let good = abif(&[(b"PBAS", 2, b"ACGTACGT"), (b"PLOC", 2, b"\x00\x01\x00\x02")]);
+        let patch = |at: usize, v: i32| {
+            let mut f = good.clone();
+            f[at..at + 4].copy_from_slice(&v.to_be_bytes());
+            f
+        };
+        // Directory entry 0 starts at 34: num_elements at +12, data_offset at +20.
+        for damaged in [
+            patch(18, i32::MAX),      // huge entry count
+            patch(18, -1),            // negative entry count
+            patch(26, i32::MAX),      // directory beyond the file
+            patch(34 + 12, i32::MAX), // huge element count
+            patch(34 + 12, -1),       // negative element count
+            patch(34 + 20, i32::MAX), // data beyond the file
+            patch(34 + 20, -1),       // negative data offset
+        ] {
+            let _ = super::parse_ab1_sequence(&damaged);
+            let _ = super::parse_ab1_quality(&damaged);
+            let _ = super::Ab1Channels::from_bytes(&damaged);
+        }
+        assert!(super::parse_ab1_sequence(&patch(34 + 20, i32::MAX)).is_none());
+    }
+
     #[test]
     fn pdf_truncate_counts_characters() {
         assert_eq!(super::pdf_truncate("abc", 3), "abc");

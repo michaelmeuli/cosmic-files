@@ -444,7 +444,7 @@ pub fn item_from_entry(
         .is_some_and(|e| e.eq_ignore_ascii_case("ab1"));
     // No file I/O here: only the cached alignment hits. The preview reads the file itself
     // (`sequencing::read_ab1`) on a worker thread when the item is selected.
-    let sequence_opt = (is_ab1 && !remote).then(|| sequencing::cached_seq_data(&path));
+    let sequence_opt = (is_ab1 && !remote).then(|| sequencing::cached_seq_data(&path, &metadata));
 
     let (is_susceptible, susceptibility_calls) = sequence_opt
         .as_ref()

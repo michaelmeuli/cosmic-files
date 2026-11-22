@@ -20,14 +20,11 @@ use crate::sequencing::{
 use crate::tab::Message;
 
 /// [`SeqData`] for a listed AB1 file without reading it: only the alignment hits already in
-/// [`AB1_SEQ_CACHE`](crate::sequencing::batch::AB1_SEQ_CACHE) (a memory lookup). The file itself
-/// is read by [`read_ab1`] when the preview needs it.
-pub(super) fn cached_seq_data(path: &Path) -> SeqData {
-    let seq_id_hits = crate::sequencing::batch::AB1_SEQ_CACHE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(path).cloned())
-        .unwrap_or_default();
+/// [`AB1_SEQ_CACHE`](crate::sequencing::batch::AB1_SEQ_CACHE) for the file as `metadata`
+/// describes it (a memory lookup). The file itself is read by [`read_ab1`] when the preview
+/// needs it.
+pub(super) fn cached_seq_data(path: &Path, metadata: &std::fs::Metadata) -> SeqData {
+    let seq_id_hits = crate::sequencing::batch::cached_hits(path, metadata).unwrap_or_default();
     SeqData {
         read_opt: None,
         seq_id_hits,
@@ -181,21 +178,22 @@ impl Item {
         if !stored.is_empty() {
             return Cow::Borrowed(stored);
         }
-        let result = self
-            .path_opt()
-            .and_then(|p| {
-                crate::sequencing::batch::AB1_SEQ_CACHE
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.get(p).cloned())
-            })
-            .unwrap_or_default();
+        let result = self.ab1_cached_hits().unwrap_or_default();
         log::trace!(
             "seq_id_hits_cached({}): {} hits from AB1_SEQ_CACHE",
             self.name,
             result.len()
         );
         Cow::Owned(result)
+    }
+
+    /// This item's hits in `AB1_SEQ_CACHE`, if they were computed for the file as listed (same
+    /// mtime and size as the item's metadata). No file I/O.
+    pub fn ab1_cached_hits(&self) -> Option<Vec<SeqIdHit>> {
+        let ItemMetadata::Path { metadata, .. } = &self.metadata else {
+            return None;
+        };
+        crate::sequencing::batch::cached_hits(self.path_opt()?, metadata)
     }
 
     fn is_fasta(&self) -> bool {
@@ -1022,7 +1020,7 @@ impl Item {
                     display_window: Some(view_state.window),
                     highlighted_scans: chrom
                         .peak_locs
-                        .get(view_state.pos28_base_idx as usize)
+                        .get(view_state.pos1248_base_idx as usize)
                         .copied()
                         .map(|v| vec![v])
                         .unwrap_or_default(),
@@ -1603,7 +1601,8 @@ mod tests {
 
     #[test]
     fn cached_seq_data_reads_no_file() {
-        let seq = cached_seq_data(Path::new("does/not/exist.ab1"));
+        let metadata = std::fs::metadata(".").unwrap();
+        let seq = cached_seq_data(Path::new("does/not/exist.ab1"), &metadata);
         assert!(seq.read_opt.is_none());
         assert!(seq.seq_id_hits.is_empty());
     }

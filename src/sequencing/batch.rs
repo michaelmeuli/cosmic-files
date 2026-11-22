@@ -43,11 +43,34 @@ use super::{
     species_group, trim_to_min_quality, truncate_per_source,
 };
 
-/// In-memory cache: maps each AB1 file path to the top 10 seq_id_hits (by identity) computed by
-/// the last background scan. `item_from_entry()` reads from this cache instead of running
-/// alignment on the UI thread.
-pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, Vec<SeqIdHit>>>> =
+/// Hits in [`AB1_SEQ_CACHE`], with the stamp of the file they were computed for.
+pub(crate) struct CachedHits {
+    /// `(mtime_secs, file_size)` from [`file_stamp`].
+    stamp: (u64, u64),
+    pub(crate) hits: Vec<SeqIdHit>,
+}
+
+/// In-memory cache: maps each AB1 file's canonical path to its top seq_id_hits (by identity),
+/// from a scan, the disk caches or a preview alignment. `item_from_entry()` reads from this
+/// cache instead of running alignment on the UI thread. Read it with [`cached_hits`], which
+/// ignores entries computed for an older version of the file.
+pub(crate) static AB1_SEQ_CACHE: LazyLock<RwLock<HashMap<PathBuf, CachedHits>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
+
+/// The [`AB1_SEQ_CACHE`] hits for `path` (canonical), if they were computed for the file as
+/// `meta` describes it (same mtime and size). No file I/O, so callers on the UI thread pass the
+/// metadata they already have.
+pub(crate) fn cached_hits(path: &Path, meta: &std::fs::Metadata) -> Option<Vec<SeqIdHit>> {
+    let guard = AB1_SEQ_CACHE.read().ok()?;
+    let entry = guard.get(path)?;
+    (entry.stamp == file_stamp(Some(meta))).then(|| entry.hits.clone())
+}
+
+fn insert_hits(canonical_path: PathBuf, stamp: (u64, u64), hits: Vec<SeqIdHit>) {
+    if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
+        guard.insert(canonical_path, CachedHits { stamp, hits });
+    }
+}
 
 /// Sample-id → 16S seq_id_hits, populated by [`scan_ab1_directory`]. Unlike `AB1_SEQ_CACHE`
 /// (keyed by path), this lets a sibling file look up its sample's 16S species even when the
@@ -450,7 +473,7 @@ pub fn scan_ab1_directory(
                         path.display(),
                         cached.seq_id_hits.len(),
                     );
-                    insert_cached_record(canonical_path, &cached);
+                    insert_cached_record(canonical_path, (mtime_secs, file_size), &cached);
                     records.push(cached);
                     continue;
                 }
@@ -475,7 +498,8 @@ pub fn scan_ab1_directory(
 
     // Cache misses — run the full alignment pipeline.
     for (path, key, mtime_secs, file_size, file_created) in misses {
-        let Some((_, record)) = analyse_ab1_file(&path, file_created) else {
+        let Some((_, record)) = analyse_ab1_file(&path, file_created, (mtime_secs, file_size))
+        else {
             continue;
         };
         if let Some(cache) = &mut disk_cache {
@@ -510,12 +534,13 @@ pub fn scan_ab1_directory(
 /// Run the full alignment pipeline on one AB1 file: infer the gene from the filename, align the
 /// quality-trimmed read against that gene's references, and derive the susceptibility calls.
 ///
-/// Populates [`AB1_SEQ_CACHE`] (and [`SIXTEEN_S_HITS_CACHE`] for 16S reads) as a side effect.
-/// Returns the top 10 hits alongside the record, whose `seq_id_hits` keeps only the top 5.
-/// Returns `None` if the file can't be read.
+/// Populates [`AB1_SEQ_CACHE`] (with `stamp`, the file's [`file_stamp`]) and, for 16S reads,
+/// [`SIXTEEN_S_HITS_CACHE`] as a side effect. Returns the top 10 hits alongside the record,
+/// whose `seq_id_hits` keeps only the top 5. Returns `None` if the file can't be read.
 fn analyse_ab1_file(
     path: &Path,
     file_created: Option<SystemTime>,
+    stamp: (u64, u64),
 ) -> Option<(Vec<SeqIdHit>, SampleSusceptibilityRecord)> {
     // Canonicalize so the key matches the \\?\ -prefixed paths the file manager uses.
     let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -579,9 +604,7 @@ fn analyse_ab1_file(
         seq_id_hits.first().map(|h| (&h.description, h.identity)),
         canonical_path.display()
     );
-    if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
-        guard.insert(canonical_path, seq_id_hits.clone());
-    }
+    insert_hits(canonical_path, stamp, seq_id_hits.clone());
     if is_16s && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write() {
         guard.insert(sample_id.clone(), seq_id_hits.clone());
     }
@@ -613,11 +636,14 @@ fn analyse_ab1_file(
     Some((seq_id_hits, record))
 }
 
-/// Put a disk-cached record's hits into the in-memory caches the preview reads from.
-fn insert_cached_record(canonical_path: PathBuf, record: &SampleSusceptibilityRecord) {
-    if let Ok(mut guard) = AB1_SEQ_CACHE.write() {
-        guard.insert(canonical_path, record.seq_id_hits.clone());
-    }
+/// Put a disk-cached record's hits into the in-memory caches the preview reads from. `stamp`
+/// is the stamp the record was stored under (and checked against the file).
+fn insert_cached_record(
+    canonical_path: PathBuf,
+    stamp: (u64, u64),
+    record: &SampleSusceptibilityRecord,
+) {
+    insert_hits(canonical_path, stamp, record.seq_id_hits.clone());
     if record.gene.as_deref() == Some(Ab1Gene::Rrs16S.label())
         && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
     {
@@ -644,7 +670,7 @@ pub(crate) fn preview_cache_file(ab1_cache_path: &str) -> PathBuf {
 /// [`SIXTEEN_S_HITS_CACHE`]) in one query, so the preview has the previous scan's results right
 /// after startup instead of waiting for the next scan (which may first wait for a Microsynth
 /// sync) to walk the tree. A row counts as current when its file still exists with the same
-/// mtime and size, and [`cached_record_current`] holds. Read-only: nothing is written or pruned.
+/// mtime and size, and [`cached_record_current`] holds. The database is opened read-only.
 /// Returns the number of files loaded. Blocking: call from a worker thread.
 pub fn preload_disk_cache(cache_file: &Path) -> usize {
     let Some(cache) = DiskCache::open_existing(cache_file) else {
@@ -661,7 +687,7 @@ pub fn preload_disk_cache(cache_file: &Path) -> usize {
         {
             continue;
         }
-        insert_cached_record(path, &record);
+        insert_cached_record(path, (mtime_secs, file_size), &record);
         loaded += 1;
     }
     log::debug!(
@@ -672,29 +698,26 @@ pub fn preload_disk_cache(cache_file: &Path) -> usize {
 }
 
 /// Results for one AB1 file for the preview panel. Looks them up, in order, in
-/// [`AB1_SEQ_CACHE`] (not checked against the file's mtime or size), the scan caches
-/// `scan_cache_files` (only if they exist; nothing is stored in them), and the preview cache
-/// `cache_file`, the last two only while the file's mtime and size are unchanged. Only when none has them does it run [`analyse_ab1_file`] and store all of its hits
-/// in `cache_file`. Either way the hits end up in [`AB1_SEQ_CACHE`], keyed by canonical path.
-/// Blocking: call from a worker thread.
+/// [`AB1_SEQ_CACHE`], the scan caches `scan_cache_files` (opened read-only, only if they
+/// exist), and the preview cache `cache_file`, each only while the file's mtime and size are
+/// unchanged. Only when none has them does it run [`analyse_ab1_file`] and store all of its
+/// hits in `cache_file`. Either way the hits end up in [`AB1_SEQ_CACHE`], keyed by canonical
+/// path. Blocking: call from a worker thread.
 pub(crate) fn analyse_ab1_for_preview(
     path: &Path,
     cache_file: &Path,
     scan_cache_files: &[PathBuf],
 ) -> Vec<SeqIdHit> {
     let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if let Some(hits) = AB1_SEQ_CACHE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&canonical_path).cloned())
-    {
+    let meta = std::fs::metadata(path).ok();
+    if let Some(hits) = meta.as_ref().and_then(|m| cached_hits(&canonical_path, m)) {
         log::debug!("ab1_preview: memory cache hit for {}", path.display());
         return hits;
     }
 
-    let meta = std::fs::metadata(path).ok();
     let file_created = meta.as_ref().and_then(|m| m.created().ok());
     let (mtime_secs, file_size) = file_stamp(meta.as_ref());
+    let stamp = (mtime_secs, file_size);
     let key = canonical_path.to_string_lossy().into_owned();
 
     for scan_cache_file in scan_cache_files {
@@ -708,7 +731,7 @@ pub(crate) fn analyse_ab1_for_preview(
                 path.display(),
                 scan_cache_file.display()
             );
-            insert_cached_record(canonical_path, &record);
+            insert_cached_record(canonical_path, stamp, &record);
             return record.seq_id_hits;
         }
     }
@@ -725,13 +748,13 @@ pub(crate) fn analyse_ab1_for_preview(
             && cached_record_current(&record)
         {
             log::debug!("ab1_preview: disk cache hit for {}", path.display());
-            insert_cached_record(canonical_path, &record);
+            insert_cached_record(canonical_path, stamp, &record);
             return record.seq_id_hits;
         }
     }
 
     // Not cached: align without holding the lock, so other previews' cache hits aren't blocked.
-    let Some((seq_id_hits, mut record)) = analyse_ab1_file(path, file_created) else {
+    let Some((seq_id_hits, mut record)) = analyse_ab1_file(path, file_created, stamp) else {
         return Vec::new();
     };
     // Unlike the scan record (top 5, for the report), keep every hit the preview displays.
@@ -1101,10 +1124,7 @@ fn fmt_susceptible(v: Option<bool>) -> String {
 /// Joins the call tags of `(ref_pos, call_tag)` pairs into a comma-separated CSV cell, e.g.
 /// `"A2059G (clarithromycin, E.coli: A2059G), A2058A (E.coli: A2058A)"`.
 fn snp_calls_str(calls: impl Iterator<Item = (usize, String)>) -> String {
-    calls
-        .map(|(_, tag)| format!("{}", tag))
-        .collect::<Vec<_>>()
-        .join(", ")
+    calls.map(|(_, tag)| tag).collect::<Vec<_>>().join(", ")
 }
 
 /// Joins pncA calls with a non-empty [`call_tag`](super::pnca::PncaSnpCall::call_tag) into a
@@ -1359,7 +1379,7 @@ mod tests {
 
         assert_eq!(preload_disk_cache(&cache_file), 1);
         let guard = AB1_SEQ_CACHE.read().unwrap();
-        assert!(guard.get(&current).is_some_and(|hits| hits.len() == 1));
+        assert!(guard.get(&current).is_some_and(|e| e.hits.len() == 1));
         assert!(!guard.contains_key(&changed));
         assert!(!guard.contains_key(&deleted));
     }
@@ -1415,6 +1435,25 @@ mod tests {
         assert!(!out.exists());
         // Nothing to remove is fine too.
         write_rare_mutations_csv(&[], &out, 30).unwrap();
+    }
+
+    #[test]
+    fn memory_cache_ignores_hits_of_a_changed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("2024000009_16S.ab1");
+        std::fs::write(&path, b"first").unwrap();
+        let path = path.canonicalize().unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        insert_hits(
+            path.clone(),
+            file_stamp(Some(&meta)),
+            cached_record(&path).seq_id_hits,
+        );
+        assert_eq!(cached_hits(&path, &meta).map(|h| h.len()), Some(1));
+
+        std::fs::write(&path, b"rewritten, longer").unwrap();
+        let changed = std::fs::metadata(&path).unwrap();
+        assert!(cached_hits(&path, &changed).is_none());
     }
 
     #[test]
