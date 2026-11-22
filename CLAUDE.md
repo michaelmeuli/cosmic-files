@@ -73,6 +73,8 @@ Additionally, `res/sequences/references/` holds committed amplicon-level referen
 
 The amplicons are short, so they only help species identification: SNP calls still require the full-length ntm-db entries (accession contains `:`), whose absolute positions match `variants.csv`. `best_snp_hit` therefore anchors on the best NCBI species. Identity ties between short and long references go to the longer one (`sort_hits_by_identity`). For five *M. kansasii*-complex species (persicum, pseudokansasii, ostraviense, innocens, attenuatum), these amplicons are the **only** references; neither NCBI nor ntm-db has them. Reads from a primer set that isn't wired into `REF_AMPLICON_*` therefore can't be identified as those species.
 
+`res/sequences/references/` is synced from the cosmic-seq export bundle with `python scripts/sync_cosmic_seq.py --remote <host>:<path>/cosmic_files` (or `--from <dir>`); never copy files by hand. The bundle includes `species_groups.tsv` (species → complex label; NCBI groups + curated kansasii/abscessus complexes), which `species_from_16s_hits` uses to name 16S calls by their complex (`species_group` in `mod.rs`). Groups are edited in cosmic-seq (`species_groups.tsv` at its repo root), not here. Bump `ANALYSIS_VERSION` when the calls change.
+
 Key types:
 ```rust
 SeqData          // Full result for one AB1 file

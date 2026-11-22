@@ -40,7 +40,7 @@ use super::{
         RrsSusceptibilityCalls3End, identify_sequence_16s3end, is_susceptible_rrs_3end,
         is_susceptible_rrs_by_snp_calls_rare_3end,
     },
-    trim_to_min_quality, truncate_per_source,
+    species_group, trim_to_min_quality, truncate_per_source,
 };
 
 /// In-memory cache: maps each AB1 file path to the top 10 seq_id_hits (by identity) computed by
@@ -170,7 +170,8 @@ pub struct SampleSusceptibilityRecord {
 /// 1: rpoB rifampicin (RRDR) calls.
 /// 2: NCBI and GTDB references kept apart (hit `source`, per-source species/identity).
 /// 3: slimmed records (pncA calls only on the top hit, catalogue alts not stored).
-pub(crate) const ANALYSIS_VERSION: u32 = 3;
+/// 4: 16S species calls named by species group (cosmic-seq `species_groups.tsv`).
+pub(crate) const ANALYSIS_VERSION: u32 = 4;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -212,37 +213,31 @@ pub(crate) fn rpob_susceptibility_calls(hit: &SeqIdHit) -> RpobSusceptibilityCal
     }
 }
 
-/// For 16S hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
-pub(crate) fn species_from_16s_hits(hits: &[&SeqIdHit]) -> Option<String> {
-    let first = hits.first()?;
-    if first.description.contains("abscessus") {
-        return Some("M. chelonae / M. abscessus complex".to_string());
-    }
-    if first.description.contains("marinum") || first.description.contains("ulcerans") {
-        return Some("M. marinum/ulcerans".to_string());
-    }
-    if first.description.starts_with("Mycobacterium kansasii")
-        || first.description.starts_with("Mycobacterium persicum")
-        || first
-            .description
-            .starts_with("Mycobacterium pseudokansasii")
-        || first.description.starts_with("Mycobacterium ostraviense")
-        || first.description.starts_with("Mycobacterium innocens")
-        || first.description.starts_with("Mycobacterium attenuatum")
-        || first.description.starts_with("Mycobacterium gastri")
-    {
-        return Some("M. kansasii complex".to_string());
-    }
-    let base_identity = first.identity;
+/// Identity window of a tie: hits within this many percentage points of the best hit are
+/// reported together.
+const TIE_IDENTITY: f32 = 0.1;
+
+/// The best hit and the hits tied with it (`hits` sorted by identity, best first).
+fn tied_hits<'a>(hits: &[&'a SeqIdHit]) -> Vec<&'a SeqIdHit> {
+    let Some(first) = hits.first() else {
+        return Vec::new();
+    };
+    hits.iter()
+        .copied()
+        .take_while(|hit| (hit.identity - first.identity).abs() <= TIE_IDENTITY)
+        .collect()
+}
+
+/// Species epithets of tied hits joined after the first hit's genus, e.g.
+/// "Mycobacterium gastri/kansasii"; the first description alone when all hits share it.
+fn join_epithets(ties: &[&SeqIdHit]) -> Option<String> {
+    let first = ties.first()?;
     let (prefix, first_epithet) = first
         .description
         .rsplit_once(' ')
         .unwrap_or(("", first.description.as_str()));
     let mut epithets: Vec<&str> = vec![first_epithet];
-    for hit in &hits[1..] {
-        if (hit.identity - base_identity).abs() > 0.1 {
-            break;
-        }
+    for hit in &ties[1..] {
         if let Some((_, epithet)) = hit.description.rsplit_once(' ')
             && !epithets.contains(&epithet)
         {
@@ -254,6 +249,31 @@ pub(crate) fn species_from_16s_hits(hits: &[&SeqIdHit]) -> Option<String> {
     } else {
         format!("{} {}", prefix, epithets.join("/"))
     })
+}
+
+/// For 16S hits: 16S does not separate the members of a complex, so tied hits are named by their
+/// species group ([`species_group`], cosmic-seq `species_groups.tsv`), e.g. "M. kansasii complex".
+/// Ties in no group are joined by epithet as in [`join_epithets`]; a tie that spans several groups
+/// lists them, e.g. "M. kansasii complex / Mycobacterium szulgai".
+pub(crate) fn species_from_16s_hits(hits: &[&SeqIdHit]) -> Option<String> {
+    let ties = tied_hits(hits);
+    let mut parts: Vec<String> = Vec::new();
+    let mut ungrouped: Vec<&SeqIdHit> = Vec::new();
+    let mut ungrouped_at = None;
+    for hit in &ties {
+        if let Some(label) = species_group(&hit.description) {
+            if !parts.iter().any(|part| part == label) {
+                parts.push(label.to_string());
+            }
+        } else {
+            ungrouped_at.get_or_insert(parts.len());
+            ungrouped.push(hit);
+        }
+    }
+    if let Some(at) = ungrouped_at {
+        parts.insert(at, join_epithets(&ungrouped)?);
+    }
+    (!parts.is_empty()).then(|| parts.join(" / "))
 }
 
 /// For 16S 3'-end hits, only *M. marinum*/*M. ulcerans* (the pair position 1248 discriminates)
@@ -278,27 +298,7 @@ pub(crate) fn species_from_rpob_hits(hits: &[&SeqIdHit]) -> Option<String> {
     if first.description.contains("chelonae") {
         return Some("M. chelonae".to_string());
     }
-    let base_identity = first.identity;
-    let (prefix, first_epithet) = first
-        .description
-        .rsplit_once(' ')
-        .unwrap_or(("", first.description.as_str()));
-    let mut epithets: Vec<&str> = vec![first_epithet];
-    for hit in &hits[1..] {
-        if (hit.identity - base_identity).abs() > 0.1 {
-            break;
-        }
-        if let Some((_, epithet)) = hit.description.rsplit_once(' ')
-            && !epithets.contains(&epithet)
-        {
-            epithets.push(epithet);
-        }
-    }
-    Some(if epithets.len() == 1 {
-        first.description.clone()
-    } else {
-        format!("{} {}", prefix, epithets.join("/"))
-    })
+    join_epithets(&tied_hits(hits))
 }
 
 /// Walk `scan_path` recursively, analyse every `.ab1` file, and return a
@@ -1155,6 +1155,92 @@ mod tests {
         // 2024-01-15T00:00:00Z = 1705276800 seconds since epoch
         let t = UNIX_EPOCH + Duration::from_secs(1_705_276_800);
         assert_eq!(system_time_to_iso8601(t), "2024-01-15T00:00:00Z");
+    }
+
+    fn hit(description: &str, identity: f32) -> SeqIdHit {
+        SeqIdHit {
+            accession: "X".to_string(),
+            description: description.to_string(),
+            source: RefSource::Gtdb,
+            identity,
+            is_reverse: false,
+            rrl_snp_calls: Vec::new(),
+            rrs_snp_calls: Vec::new(),
+            rrs_snp_calls_3end: Vec::new(),
+            erm41_snp_calls: Vec::new(),
+            pnca_snp_calls: Vec::new(),
+            rpob_snp_calls: Vec::new(),
+            aligned_query: Vec::new(),
+            aligned_ref: Vec::new(),
+            ref_start: 0,
+            erm41_position_28_opt: None,
+            rrs3end_position_1248_opt: None,
+            rrl_position_2058_2059_opt: None,
+        }
+    }
+
+    fn call_16s(hits: &[(&str, f32)]) -> Option<String> {
+        let hits: Vec<SeqIdHit> = hits.iter().map(|&(d, i)| hit(d, i)).collect();
+        species_from_16s_hits(&hits.iter().collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn species_16s_named_by_group() {
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium gastri", 100.0),
+                ("Mycobacterium kansasii", 100.0)
+            ]),
+            Some("M. kansasii complex".to_string())
+        );
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium avium", 99.5),
+                ("Mycobacterium szulgai", 98.0)
+            ]),
+            Some("M. avium complex (MAC)".to_string())
+        );
+        assert_eq!(
+            call_16s(&[("Mycobacteroides abscessus subsp. massiliense", 99.0)]),
+            Some("M. chelonae / M. abscessus complex".to_string())
+        );
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium marinum", 99.0),
+                ("Mycobacterium ulcerans", 99.0)
+            ]),
+            Some("M. marinum/ulcerans group".to_string())
+        );
+    }
+
+    #[test]
+    fn species_16s_ungrouped_and_mixed_ties() {
+        assert_eq!(
+            call_16s(&[("Mycobacterium szulgai", 99.0)]),
+            Some("Mycobacterium szulgai".to_string())
+        );
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium szulgai", 99.0),
+                ("Mycobacterium malmoense", 99.0),
+                ("Mycobacterium xenopi", 98.0),
+            ]),
+            Some("Mycobacterium szulgai/malmoense".to_string())
+        );
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium kansasii", 99.0),
+                ("Mycobacterium szulgai", 99.0),
+                ("Mycobacterium persicum", 99.0),
+            ]),
+            Some("M. kansasii complex / Mycobacterium szulgai".to_string())
+        );
+        // "abscessus" in another genus is no longer caught by a substring rule.
+        assert_eq!(
+            call_16s(&[("Nocardia abscessus", 99.0)]),
+            Some("Nocardia abscessus".to_string())
+        );
+        assert_eq!(call_16s(&[]), None);
     }
 
     fn cached_record(path: &Path) -> SampleSusceptibilityRecord {

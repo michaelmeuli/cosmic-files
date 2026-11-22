@@ -390,6 +390,19 @@ species-identification pool from two sources, kept apart end to end:
 - **GTDB** (`RefSource::Gtdb`): the cosmic-seq amplicons in `references/`. These are the only
   references for hsp65 and the Mtb rpoB regions.
 
+`references/` is a copy of the cosmic-seq export bundle (`scripts/05_export_cosmic_files.py`,
+on the cluster `output/cosmic-seq/results/cosmic_files/`). Update it with
+`python scripts/sync_cosmic_seq.py --remote <host>:<path>/cosmic_files` (scp) or `--from <dir>`;
+the script mirrors the bundle, reports changed record counts and refuses to drop a file that a
+`REF_*` constant embeds. Then rebuild, run the tests and commit.
+
+`references/species_groups.tsv` (cosmic-seq `scripts/04`: NCBI species groups plus the curated
+M. kansasii and M. chelonae / M. abscessus complexes) maps species to a group label. 16S does not
+separate the members of a complex, so `species_from_16s_hits` names hits tied within 0.1 % by
+their group (`species_group`, keyed by the first two words of the description), e.g.
+"M. kansasii complex"; ungrouped ties are joined by epithet ("Mycobacterium szulgai/malmoense").
+rpoB and 16S 3′-end calls are not grouped.
+
 Within each source, `dedup_substring_same_desc` removes any reference that is a substring of
 another reference with the same species name. Every `SeqIdHit` carries its `source`. The batch
 scan keeps the top hits per source (`truncate_per_source`) and makes one species call per

@@ -24,7 +24,12 @@
 //!    genome and primer pair, the products with the fewest mismatches. The product runs from the
 //!    forward to the reverse primer, primers included;
 //! 4. writes one FASTA per amplicon (`references/fasta/<amplicon>.fasta`; header
-//!    `>accession|amplicon|species [length=.. mismatches=f+r copies=..]`).
+//!    `>accession|amplicon|N species [length=.. mismatches=f+r copies=..]`, `N` numbering the
+//!    products of one genome);
+//! 5. writes the species → group table `species_groups.tsv` (NCBI species groups plus curated
+//!    complexes), used to name 16S calls by their complex ([`species_group`]);
+//! 6. bundles both for this repository (`scripts/05_export_cosmic_files.py`), copied into
+//!    `res/sequences/references/` by `scripts/sync_cosmic_seq.py`.
 //!
 //! `myco_erm41.fasta` is generated at build time but unused; erm41 identification uses
 //! per-subspecies references (`erm41_abscessus_ATCC_19977.fasta`, `erm41_bolletii_CIP_108541.fasta`, `erm41_massiliense_CCUG_48898.fasta`) instead.
@@ -134,6 +139,40 @@ const REF_AMPLICON_RRS3END: &str =
 /// Amplicon-level 23S references (MCLR19F/MCLR21R primers), merged into the rrl pool.
 const REF_AMPLICON_RRL: &str =
     include_str!("../../res/sequences/references/23S_MCLR19F_MCLR21R.fasta");
+/// Species → species group (complex) lookup from cosmic-seq (`scripts/04_ncbi_species_groups.py`:
+/// NCBI species groups plus its curated kansasii and abscessus/chelonae complexes), copied here by
+/// `scripts/sync_cosmic_seq.py`. Tab-separated, columns include `label` and `species`.
+const REF_SPECIES_GROUPS: &str = include_str!("../../res/sequences/references/species_groups.tsv");
+
+/// Display label of the group of each species, keyed by "Genus epithet".
+static SPECIES_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> =
+    std::sync::LazyLock::new(|| parse_species_groups(REF_SPECIES_GROUPS));
+
+/// `species → label` from the cosmic-seq species group table; columns are found by header name.
+fn parse_species_groups(tsv: &str) -> std::collections::HashMap<&str, &str> {
+    let mut lines = tsv.lines();
+    let header: Vec<&str> = lines.next().unwrap_or("").split('\t').collect();
+    let column = |name: &str| header.iter().position(|h| h.trim() == name);
+    let (Some(label), Some(species)) = (column("label"), column("species")) else {
+        return std::collections::HashMap::new();
+    };
+    lines
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let (species, label) = (fields.get(species)?.trim(), fields.get(label)?.trim());
+            (!species.is_empty() && !label.is_empty()).then_some((species, label))
+        })
+        .collect()
+}
+
+/// Species group label (e.g. "M. kansasii complex") of a hit description, looked up by its first
+/// two words, so "Mycobacteroides abscessus subsp. massiliense" counts as *M. abscessus*; GTDB
+/// suffixes are already stripped by [`parse_multi_fasta`]. `None` for species in no group.
+pub(crate) fn species_group(description: &str) -> Option<&'static str> {
+    let mut words = description.split_whitespace();
+    let key = format!("{} {}", words.next()?, words.next()?);
+    SPECIES_GROUPS.get(key.as_str()).copied()
+}
 /// pncA CDS + 50bp upstream promoter flank for each M. tuberculosis complex member with a
 /// distinct reference sequence, fetched from NCBI at build time (see `pnca` module docs).
 /// Concatenated into one multi-FASTA so `identify_sequence_pnca()` can search all of them via
