@@ -140,16 +140,44 @@ const REF_AMPLICON_RRS3END: &str =
 const REF_AMPLICON_RRL: &str =
     include_str!("../../res/sequences/references/23S_MCLR19F_MCLR21R.fasta");
 /// Species → species group (complex) lookup from cosmic-seq (`scripts/04_ncbi_species_groups.py`:
-/// NCBI species groups plus its curated kansasii and abscessus/chelonae complexes), copied here by
-/// `scripts/sync_cosmic_seq.py`. Tab-separated, columns include `label` and `species`.
+/// NCBI species groups plus its curated kansasii and chelonae-abscessus complexes), copied here by
+/// `scripts/sync_cosmic_seq.py`. Tab-separated, columns include `label` and `species`; species use
+/// GTDB's genus *Mycobacterium*.
 const REF_SPECIES_GROUPS: &str = include_str!("../../res/sequences/references/species_groups.tsv");
 
-/// Display label of the group of each species, keyed by "Genus epithet".
-static SPECIES_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> =
+/// Genera split from *Mycobacterium* in 2018 (Gupta et al.). NCBI uses them, GTDB (and therefore
+/// the cosmic-seq amplicons and `species_groups.tsv`) does not, and NCBI deflines mix both
+/// spellings, so the group lookup treats them as *Mycobacterium*. Keep in sync with cosmic-seq
+/// `cosmic_seq/names.py`.
+const MYCOBACTERIUM_SYNONYMS: &[&str] = &[
+    "Mycobacteroides",
+    "Mycolicibacterium",
+    "Mycolicibacter",
+    "Mycolicibacillus",
+];
+
+/// Display label of the group of each species, keyed by [`canonical_binomial`].
+static SPECIES_GROUPS: std::sync::LazyLock<std::collections::HashMap<String, &'static str>> =
     std::sync::LazyLock::new(|| parse_species_groups(REF_SPECIES_GROUPS));
 
+/// "Genus epithet" of a species name or hit description with the genus as GTDB writes it:
+/// NCBI's brackets for misplaced taxa are dropped and [`MYCOBACTERIUM_SYNONYMS`] become
+/// *Mycobacterium*, e.g. "[Mycobacterium] chelonae subsp. bovistauri" → "Mycobacterium chelonae",
+/// "Mycobacteroides abscessus subsp. massiliense" → "Mycobacterium abscessus".
+fn canonical_binomial(description: &str) -> Option<String> {
+    let mut words = description.split_whitespace();
+    let genus = words.next()?.trim_start_matches('[').trim_end_matches(']');
+    let epithet = words.next()?;
+    let genus = if MYCOBACTERIUM_SYNONYMS.contains(&genus) {
+        "Mycobacterium"
+    } else {
+        genus
+    };
+    Some(format!("{genus} {epithet}"))
+}
+
 /// `species → label` from the cosmic-seq species group table; columns are found by header name.
-fn parse_species_groups(tsv: &str) -> std::collections::HashMap<&str, &str> {
+fn parse_species_groups(tsv: &str) -> std::collections::HashMap<String, &str> {
     let mut lines = tsv.lines();
     let header: Vec<&str> = lines.next().unwrap_or("").split('\t').collect();
     let column = |name: &str| header.iter().position(|h| h.trim() == name);
@@ -159,19 +187,21 @@ fn parse_species_groups(tsv: &str) -> std::collections::HashMap<&str, &str> {
     lines
         .filter_map(|line| {
             let fields: Vec<&str> = line.split('\t').collect();
-            let (species, label) = (fields.get(species)?.trim(), fields.get(label)?.trim());
-            (!species.is_empty() && !label.is_empty()).then_some((species, label))
+            let label = fields.get(label)?.trim();
+            let species = canonical_binomial(fields.get(species)?)?;
+            (!label.is_empty()).then_some((species, label))
         })
         .collect()
 }
 
-/// Species group label (e.g. "M. kansasii complex") of a hit description, looked up by its first
-/// two words, so "Mycobacteroides abscessus subsp. massiliense" counts as *M. abscessus*; GTDB
+/// Species group label (e.g. "M. kansasii complex") of a hit description. The lookup uses
+/// [`canonical_binomial`], so "Mycobacteroides abscessus subsp. massiliense" and
+/// "[Mycobacterium] chelonae" match the table's "Mycobacterium abscessus" / "... chelonae"; GTDB
 /// suffixes are already stripped by [`parse_multi_fasta`]. `None` for species in no group.
 pub(crate) fn species_group(description: &str) -> Option<&'static str> {
-    let mut words = description.split_whitespace();
-    let key = format!("{} {}", words.next()?, words.next()?);
-    SPECIES_GROUPS.get(key.as_str()).copied()
+    SPECIES_GROUPS
+        .get(&canonical_binomial(description)?)
+        .copied()
 }
 /// pncA CDS + 50bp upstream promoter flank for each M. tuberculosis complex member with a
 /// distinct reference sequence, fetched from NCBI at build time (see `pnca` module docs).

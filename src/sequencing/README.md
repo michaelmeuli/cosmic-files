@@ -399,7 +399,8 @@ the script mirrors the bundle, reports changed record counts and refuses to drop
 `references/species_groups.tsv` (cosmic-seq `scripts/04`: NCBI species groups plus the curated
 M. kansasii and M. chelonae / M. abscessus complexes) maps species to a group label. 16S does not
 separate the members of a complex, so `species_from_16s_hits` names hits tied within 0.1 % by
-their group (`species_group`, keyed by the first two words of the description), e.g.
+their group (`species_group`, keyed by the first two words of the description with NCBI's split
+genera such as *Mycobacteroides* and bracketed `[Mycobacterium]` read as GTDB's *Mycobacterium*), e.g.
 "M. kansasii complex"; ungrouped ties are joined by epithet ("Mycobacterium szulgai/malmoense").
 rpoB and 16S 3′-end calls are not grouped.
 

@@ -171,7 +171,8 @@ pub struct SampleSusceptibilityRecord {
 /// 2: NCBI and GTDB references kept apart (hit `source`, per-source species/identity).
 /// 3: slimmed records (pncA calls only on the top hit, catalogue alts not stored).
 /// 4: 16S species calls named by species group (cosmic-seq `species_groups.tsv`).
-pub(crate) const ANALYSIS_VERSION: u32 = 4;
+/// 5: species group lookup ignores genus synonyms (Mycobacteroides, `[Mycobacterium]`, ...).
+pub(crate) const ANALYSIS_VERSION: u32 = 5;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -1204,6 +1205,37 @@ mod tests {
             call_16s(&[("Mycobacteroides abscessus subsp. massiliense", 99.0)]),
             Some("M. chelonae / M. abscessus complex".to_string())
         );
+    }
+
+    #[test]
+    fn species_16s_group_ignores_genus_synonyms() {
+        let label = Some("M. chelonae / M. abscessus complex".to_string());
+        // NCBI split genus, GTDB genus, and NCBI's bracketed misplaced genus all match.
+        for description in [
+            "Mycobacteroides stephanolepidis",
+            "Mycobacterium stephanolepidis",
+            "[Mycobacterium] chelonae subsp. bovistauri",
+            "Mycobacteroides chelonae",
+        ] {
+            assert_eq!(call_16s(&[(description, 99.0)]), label, "{description}");
+        }
+        // A tie of two spellings of the same species is one group.
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacteroides chelonae", 99.0),
+                ("Mycobacterium chelonae", 99.0)
+            ]),
+            label
+        );
+        // Split genera without a group keep their own name.
+        assert_eq!(
+            call_16s(&[("Mycolicibacterium fortuitum", 99.0)]),
+            Some("Mycolicibacterium fortuitum".to_string())
+        );
+    }
+
+    #[test]
+    fn species_16s_marinum_ulcerans_group() {
         assert_eq!(
             call_16s(&[
                 ("Mycobacterium marinum", 99.0),
