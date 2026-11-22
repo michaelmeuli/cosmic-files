@@ -10,22 +10,10 @@ use super::{Item, ItemMetadata};
 use crate::fl;
 use crate::location::Location;
 use crate::sequencing::batch::{Ab1Gene, RpoBRegion, parse_ab1_filename};
-use crate::sequencing::rrl::{
-    RrlSusceptibilityCalls, is_susceptible_rrl, is_susceptible_rrl_by_snp_calls_rare,
-};
-use crate::sequencing::rrs::{
-    RrsSusceptibilityCalls, is_susceptible_rrs, is_susceptible_rrs_by_snp_calls_rare,
-};
-use crate::sequencing::rrs3end::{
-    Rrs3EndPosition1248, RrsSusceptibilityCalls3End, is_susceptible_rrs_3end,
-    is_susceptible_rrs_by_snp_calls_rare_3end,
-};
+use crate::sequencing::rrs3end::Rrs3EndPosition1248;
 use crate::sequencing::{
     Ab1Channels, Ab1Read, RefSource, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
-    erm41::{Erm41SusceptibilityCalls, is_susceptible_erm41},
     hits_from, parse_ab1_quality, parse_ab1_sequence,
-    pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
-    rpob::is_susceptible_rpob,
     tb_data::{DrVariant, TB_ECOLI_MAPPING},
     trim_to_min_quality,
 };
@@ -175,69 +163,11 @@ fn push_source_section<'a>(
 
 /// Combined susceptibility verdict and per-gene calls for an AB1 file's alignment hits.
 ///
-/// The verdict takes the first gene that yields one, in the order erm41 → rrl → rrs → pncA →
-/// rpoB (rifampicin).
+/// The same function the batch scan uses
+/// ([`susceptibility_from_hits`](crate::sequencing::batch::susceptibility_from_hits)), so the
+/// preview and the report always agree.
 pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCalls) {
-    let Some(hit) = hits.first() else {
-        return (None, SusceptibilityCalls::default());
-    };
-    let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
-    let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
-    let rrs3end_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
-
-    let is_susceptible =
-        is_susceptible_erm41(hit.erm41_position_28_opt.as_ref(), &hit.erm41_snp_calls)
-            .or_else(|| {
-                is_susceptible_rrl(
-                    hit.rrl_position_2058_2059_opt.as_ref(),
-                    &rrl_hit.rrl_snp_calls,
-                )
-            })
-            .or_else(|| is_susceptible_rrs(&rrs_hit.rrs_snp_calls))
-            .or_else(|| is_susceptible_pnca(&hit.pnca_snp_calls))
-            .or_else(|| is_susceptible_rpob(&hit.rpob_snp_calls));
-
-    let susceptibility_calls = SusceptibilityCalls {
-        erm41: Erm41SusceptibilityCalls {
-            position_28: hit.erm41_position_28_opt,
-            lof_snp_calls: hit.erm41_snp_calls.clone(),
-            is_susceptible: is_susceptible_erm41(
-                hit.erm41_position_28_opt.as_ref(),
-                &hit.erm41_snp_calls,
-            ),
-        },
-        rrl: RrlSusceptibilityCalls {
-            position_2058_2059: hit.rrl_position_2058_2059_opt,
-            snp_calls: rrl_hit.rrl_snp_calls.clone(),
-            is_susceptible: is_susceptible_rrl(
-                hit.rrl_position_2058_2059_opt.as_ref(),
-                &rrl_hit.rrl_snp_calls,
-            ),
-            is_susceptible_rare: is_susceptible_rrl_by_snp_calls_rare(
-                hit.rrl_position_2058_2059_opt.as_ref(),
-                &rrl_hit.rrl_snp_calls,
-            ),
-        },
-        rrs: RrsSusceptibilityCalls {
-            snp_calls: rrs_hit.rrs_snp_calls.clone(),
-            is_susceptible: is_susceptible_rrs(&rrs_hit.rrs_snp_calls),
-            is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare(&rrs_hit.rrs_snp_calls),
-        },
-        rrs3end: RrsSusceptibilityCalls3End {
-            position_1248: hit.rrs3end_position_1248_opt,
-            snp_calls: rrs3end_hit.rrs_snp_calls_3end.clone(),
-            is_susceptible: is_susceptible_rrs_3end(&rrs3end_hit.rrs_snp_calls_3end),
-            is_susceptible_rare: is_susceptible_rrs_by_snp_calls_rare_3end(
-                &rrs3end_hit.rrs_snp_calls_3end,
-            ),
-        },
-        pnca: PncaSusceptibilityCalls {
-            snp_calls: hit.pnca_snp_calls.clone(),
-            is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
-        },
-        rpob: crate::sequencing::batch::rpob_susceptibility_calls(hit),
-    };
-    (is_susceptible, susceptibility_calls)
+    crate::sequencing::batch::susceptibility_from_hits(hits)
 }
 
 impl Item {

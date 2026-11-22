@@ -651,8 +651,9 @@ pub struct GappedAlignment {
     pub ref_start: usize,
 }
 
-/// Align `query` (Sanger read) against `reference` (gene sequence) using semiglobal
-/// Smith-Waterman (free reference end-gaps, full query placed within reference).
+/// Align `query` (Sanger read) against `reference` (gene sequence) with a semiglobal alignment
+/// (rust-bio `Aligner::semiglobal`: free reference end-gaps, the whole query placed within the
+/// reference).
 ///
 /// Returns a [`GappedAlignment`] with gapped strings for display and SNP calling.
 /// Identity is computed as `matches / reference_span × 100`, which naturally penalises
@@ -1104,7 +1105,7 @@ impl Ab1Channels {
 
 /// Chromatogram display parameters for the erm(41) region.
 ///
-/// Built in [`Ab1Channels::parse`] via [`erm41::find_erm41_display_window`]
+/// Built in [`Ab1Channels::from_bytes`] via [`erm41::find_erm41_display_window`]
 /// when [`ERM41_ANCHOR_L`] is found in the basecall sequence. Stored inside
 /// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
 /// diagnostic position 28 site.
@@ -1120,7 +1121,7 @@ pub struct Erm41ViewState {
 
 /// Chromatogram display parameters for the 16S 3-End region.
 ///
-/// Built in [`Ab1Channels::parse`] via [`rrs3end::find_16s3end_display_window`]
+/// Built in [`Ab1Channels::from_bytes`] via [`rrs3end::find_16s3end_display_window`]
 /// when [`RRS3END_ANCHOR_L`] is found in the basecall sequence. Stored inside
 /// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
 /// diagnostic position 1248 site.
@@ -1136,7 +1137,7 @@ pub struct Rrs3EndViewState {
 
 /// Chromatogram display parameters for the rrl / NTM macrolide-resistance region.
 ///
-/// Built in [`Ab1Channels::parse`] via [`rrl::find_rrl_ntm_display_window`]
+/// Built in [`Ab1Channels::from_bytes`] via [`rrl::find_rrl_ntm_display_window`]
 /// when [`RRL_ANCHOR_L`] is found in the basecall sequence. Stored inside
 /// [`Ab1Channels`] and used by the UI to scroll the chromatogram to the
 /// diagnostic SNP site (positions 2058–2059).
@@ -1189,7 +1190,8 @@ pub struct SeqIdHit {
     /// Reference database the hit comes from.
     #[serde(default)]
     pub source: RefSource,
-    /// Percent identity of the best local alignment window (0.0–100.0).
+    /// Percent identity (0.0–100.0) after `trim_alignment_ends`: matches / aligned reference
+    /// span × 100 (see [`align_to_ref`]).
     pub identity: f32,
     /// `true` when the reverse complement of the query was the better match.
     pub is_reverse: bool,
@@ -1430,13 +1432,12 @@ fn pdf_hline(layer: &printpdf::PdfLayerReference, y: f32) {
     ]));
 }
 
-/// Truncates `s` to `max_chars` bytes, appending `".."` if it was cut. Byte-based, not
-/// char-aware — table cell contents here are ASCII (species names, filenames, call tags).
+/// Truncates `s` to `max_chars` characters, appending `".."` if it was cut. Counts characters,
+/// not bytes, so a non-ASCII filename (e.g. with `ü`) can't split a character and panic.
 fn pdf_truncate(s: &str, max_chars: usize) -> String {
-    if s.len() <= max_chars {
-        s.to_string()
-    } else {
-        format!("{}..", &s[..max_chars])
+    match s.char_indices().nth(max_chars) {
+        Some((cut, _)) => format!("{}..", &s[..cut]),
+        None => s.to_string(),
     }
 }
 
@@ -1469,6 +1470,15 @@ fn pdf_days_to_ymd(days: u32) -> (u32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pdf_truncate_counts_characters() {
+        assert_eq!(super::pdf_truncate("abc", 3), "abc");
+        assert_eq!(super::pdf_truncate("abcd", 3), "abc..");
+        // A multi-byte character straddling the old byte cut no longer panics.
+        assert_eq!(super::pdf_truncate("aüb", 2), "aü..");
+        assert_eq!(super::pdf_truncate("Probe_Müller_rrl.ab1", 8), "Probe_Mü..");
+    }
+
     #[test]
     fn sort_hits_ties_prefer_longer_reference() {
         let mk = |acc: &str, identity: f32, aref: &[u8]| super::SeqIdHit {

@@ -6732,9 +6732,11 @@ impl Application for App {
                     );
                 }
                 let rare_path = out_path.with_file_name("rare_mutations.csv");
-                if let Err(e) =
-                    crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path)
-                {
+                if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(
+                    &records,
+                    &rare_path,
+                    self.config.tb_config.report_max_age_days,
+                ) {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
                     log::info!("Rare mutations CSV → {}", rare_path.display());
@@ -6848,9 +6850,11 @@ impl Application for App {
                     );
                 }
                 let rare_path = out_path.with_file_name("rare_mutations_2.csv");
-                if let Err(e) =
-                    crate::sequencing::batch::write_rare_mutations_csv(&records, &rare_path)
-                {
+                if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(
+                    &records,
+                    &rare_path,
+                    self.config.tb_config.report_max_age_days,
+                ) {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
                     log::info!("Rare mutations CSV → {}", rare_path.display());

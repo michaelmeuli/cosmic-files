@@ -89,11 +89,20 @@ flowchart TD
     REC --> PR["prune cache rows for files<br/>under the scan dir not seen"]
 
     REC --> DONE["Message::Ab1ScanComplete"]
-    DONE --> CSV["write_ab1_csv()"]
-    DONE --> RARE["write_rare_mutations_csv()"]
+    DONE --> CSV["write_ab1_csv()<br/>ab1_susceptibility_report.csv"]
+    DONE --> RARE["write_rare_mutations_csv()<br/>rare_mutations.csv"]
     DONE --> PDF["build_report_pdf()<br/>A4 landscape"]
     PDF --> N["ntfy_notify::send_report_ntfy()"]
 ```
+
+`Message::Ab1ScanComplete` writes the reports on the UI thread (`app.rs`). Both CSVs and the
+PDF include only records with a known gene and a best identity (NCBI or GTDB) of at least
+`MIN_SEQ_ID_IDENTITY` and created within `report_max_age_days`. `rare_mutations.csv` lists the
+records with a resistance SNP outside a position call (`is_susceptible_rare == Some(false)` for
+rrl, rrs or rrs3end). When none qualifies, an existing `rare_mutations.csv` is deleted, so it
+never shows an earlier scan's mutations. The PDF is
+sent to ntfy only when a topic is configured. A bare topic name goes to the public
+`https://ntfy.sh` server.
 
 **Interactive preview.** When a user selects an AB1 file in the file manager, `tab.rs` first
 looks for its hits in `AB1_SEQ_CACHE`. If the file is outside the scan directories, `tab.rs`
@@ -121,11 +130,11 @@ flowchart TD
     D -- "PncA: pncA" --> PN["pnca::identify_sequence_pnca"]
     D -- "None (incl. rpoB MAB / marinum / other genus)" --> X["no hits"]
 
-    E & H & RP & RL & S16 & S3 & PN --> HITS["Vec&lt;SeqIdHit&gt;<br/>sorted by identity, keep top 10"]
+    E & H & RP & RL & S16 & S3 & PN --> HITS["Vec&lt;SeqIdHit&gt;<br/>sorted by identity, keep top 10 per source"]
     HITS --> MC["AB1_SEQ_CACHE[path]<br/>(16S also: SIXTEEN_S_HITS_CACHE[sample_id])"]
     HITS --> SUS["SusceptibilityCalls<br/>+ combined is_susceptible (§6)"]
     HITS --> SP["species<br/>(16S/rpoB: ties joined, e.g. 'gastri/kansasii')"]
-    SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores top 5 hits)"]
+    SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores top 5 hits per source)"]
 ```
 
 `parse_ab1_filename` ([`ab1_filename.rs`](ab1_filename.rs)) is the only place keywords are
@@ -217,9 +226,9 @@ top hit's species.
 | Module | References | Diagnostic logic | Result |
 |---|---|---|---|
 | **erm41** | 3 subspecies FASTAs: *abscessus* ATCC 19977, *bolletii* CIP 108541, *massiliense* CCUG 48898 | Primer trim (`ERM41_FWD_START/END`) → anchor call at **position 28** (C/G/A = susceptible, **T28 = inducible resistance**) → LOF SNPs from ntm-db `Mycobacterium_abscessus/variants.csv`. **Any observed LOF allele overrides position 28 and gives susceptible.** *massiliense* is always susceptible, because its erm(41) is non-functional. | `Erm41Position28`, `Vec<Erm41LofCall>` |
-| **rrl** | `myco_rrl.fasta` (≥ 1200 bp) | Anchor call at **2058/2059**: A/A = wildtype (susceptible), any other base = resistance → catalogue SNPs from ntm-db `variants.csv` (abscessus, avium, intracellulare). Any resistance allele gives resistant. A wildtype 2058/2059 combined with a resistance SNP elsewhere is reported as a **rare** mutation. | `RrlPosition2058_2059`, `Vec<RrlSnpCall>` |
-| **rrs** | `myco_rrs.fasta` (≥ 1200 bp) | Aminoglycoside resistance SNPs (e.g. `n.1401A>G`) from ntm-db `variants.csv` | `Vec<RrsSnpCall>` |
-| **rrs3end** | `myco_rrs.fasta` | Anchor call at **1248** (A = *M. marinum*, G = *M. ulcerans*) plus the same SNP logic as `rrs`, stored in `rrs_snp_calls_3end` | `Rrs3EndPosition1248`, `Vec<RrsSnpCall3End>` |
+| **rrl** | `myco_rrl.fasta` (NCBI query limited to 1200–3500 bp at build time; no runtime length filter) + `references/23S_MCLR19F_MCLR21R.fasta` | Anchor call at **2058/2059**: A/A = wildtype (susceptible), any other pair of A/C/G/T = resistance; an `N` or IUPAC ambiguity code from the basecaller gives no call → catalogue SNPs from ntm-db `variants.csv` (abscessus, avium, intracellulare). Any resistance allele gives resistant. A wildtype 2058/2059 combined with a resistance SNP elsewhere is reported as a **rare** mutation. | `RrlPosition2058_2059`, `Vec<RrlSnpCall>` |
+| **rrs** | `myco_rrs.fasta` (NCBI query limited to 1200–3500 bp at build time) + `references/rrs_289_261.fasta`, `16S_IMMF_IMMR2.fasta` | Aminoglycoside resistance SNPs (e.g. `n.1401A>G`) from ntm-db `variants.csv`. Only ever resistant or undetermined, never susceptible. | `Vec<RrsSnpCall>` |
+| **rrs3end** | `myco_rrs.fasta` + `references/16S_Bact1098s_Bact1525a.fasta` | Anchor call at **1248** (A = *M. marinum*, G = *M. ulcerans*) plus the same SNP logic as `rrs`, stored in `rrs_snp_calls_3end`. Only ever resistant or undetermined. | `Rrs3EndPosition1248`, `Vec<RrsSnpCall3End>` |
 | **hsp65** | `references/hsp65_TB11_TB12.fasta` | Trims Telenti and Patel primer sets, then species ID only (no SNP calls). | — |
 | **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter. Rifampicin calls: `rpob/rpob_h37rv.fasta` (H37Rv Rv0667 CDS) | Species ID; for the Mtb regions the read is also aligned to H37Rv and every RRDR codon (426–452), the catalogued codons outside it (V170F, I491F) and RRDR indels are called against the WHO catalogue | `Vec<RpobSnpCall>` (top hit only) |
 | **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site. | `Vec<PncaSnpCall>` |
@@ -251,7 +260,10 @@ Ranks come from `tb_data::confidence_rank`, on a scale from 0 (strongest) to 5.
 
 ## 6. Combined susceptibility verdict
 
-`SampleSusceptibilityRecord::is_susceptible` checks the genes in priority order. **The first
+`batch::susceptibility_from_hits` computes the per-gene calls and the combined verdict
+(`SampleSusceptibilityRecord::is_susceptible`). The batch scan and the preview
+(`item::ab1_susceptibility`) both call it, so they always agree. It checks the genes in
+priority order. **The first
 gene that gives a verdict (not `None`) decides.** Because each file holds one amplicon,
 usually only one gene contributes.
 
@@ -265,7 +277,9 @@ flowchart TD
     R -- Some --> OUT2(["rrl verdict"])
     R -- None --> S{"is_susceptible_rrs"}
     S -- Some --> OUT3(["rrs verdict"])
-    S -- None --> P{"is_susceptible_pnca"}
+    S -- None --> S3{"is_susceptible_rrs_3end"}
+    S3 -- Some --> OUT3E(["rrs3end verdict"])
+    S3 -- None --> P{"is_susceptible_pnca"}
     P -- Some --> OUT4(["pncA verdict"])
     P -- None --> RB{"is_susceptible_rpob"}
     RB --> OUT5(["rpoB (rifampicin) verdict or undetermined"])
@@ -294,6 +308,7 @@ classDiagram
         is_susceptible: Option~bool~
         susceptibility_calls: SusceptibilityCalls
         seq_id_hits: Vec~SeqIdHit~ (top 5 per source)
+        analysis_version: u32
     }
     class SusceptibilityCalls {
         erm41: Erm41SusceptibilityCalls
@@ -301,6 +316,7 @@ classDiagram
         rrs: RrsSusceptibilityCalls
         rrs3end: RrsSusceptibilityCalls3End
         pnca: PncaSusceptibilityCalls
+        rpob: RpobSusceptibilityCalls
     }
     class SeqIdHit {
         accession / description
@@ -320,8 +336,11 @@ classDiagram
         ref_start: usize
     }
     class SeqData {
-        chromatogram_opt: Option~Ab1Channels~
+        read_opt: Option~Ab1Read~
         seq_id_hits: Vec~SeqIdHit~
+    }
+    class Ab1Read {
+        chromatogram_opt: Option~Ab1Channels~
         length / trimmed_length
         trimmed_avg_quality_opt
     }
@@ -332,15 +351,17 @@ classDiagram
     }
     SampleSusceptibilityRecord --> SusceptibilityCalls
     SampleSusceptibilityRecord --> "0..10" SeqIdHit
-    SeqData --> Ab1Channels
+    SeqData --> Ab1Read
+    Ab1Read --> Ab1Channels
     SeqData --> "*" SeqIdHit
     GappedAlignment ..> SeqIdHit : copied into
 ```
 
 - `SampleSusceptibilityRecord` is the batch / report result, with one record per file.
-- `SeqData` is the result for the interactive single-file view. It includes the raw traces
-  (`Ab1Channels`) used to draw the chromatogram. The `Erm41ViewState`, `Rrs3EndViewState` and
-  `RrlNtmViewState` fields let the view zoom to the diagnostic position.
+- `SeqData` is the result for the interactive single-file view. A folder listing fills only
+  its hits; `read_opt` (`Ab1Read`: the raw traces in `Ab1Channels`, lengths and quality) is read
+  on a worker thread when the file is first previewed. The `Erm41ViewState`, `Rrs3EndViewState`
+  and `RrlNtmViewState` fields of `Ab1Channels` let the view zoom to the diagnostic position.
 
 ---
 
@@ -352,15 +373,20 @@ classDiagram
 | `SIXTEEN_S_HITS_CACHE` | sample_id → 16S hits | memory | Another file from the same sample can show its 16S species, even if the files are in different directories. |
 | `ab1_scan_cache.sqlite` / `ab1_scan_cache_2.sqlite` | canonical path → (mtime, size, version, record JSON) | disk (`ab1_cache_path`, else the user cache dir) | Rescanning unchanged files skips alignment. Rows of files no longer found under the scan dir are pruned. |
 | `ab1_preview_cache.sqlite` | same | disk | Same, for files opened outside the scan directories. |
-
-The disk caches are `DiskCache` ([`disk_cache.rs`](disk_cache.rs)). A configured
-`ab1_cache_path` ending in `.json` (the old cache format) maps to the same name with
-`.sqlite`; the old JSON file is no longer read and can be deleted. Keep the cache outside
-cloud-synced folders (OneDrive, Dropbox, …): syncing an SQLite file mid-write can corrupt it,
-so opening one there logs a warning. An unreadable database is moved to `*.corrupt` and
-rebuilt. To keep rows small, only the top hit carries pncA calls, and the catalogue text of
-each pncA site (`PncaSnpCall::resistance_alts`) is looked up again on load, not stored.
 | `.microsynth_sync.json` | archives already extracted | disk (scan dir) | Avoids downloading the same Microsynth archives again. |
+
+The disk caches are `DiskCache` ([`disk_cache.rs`](disk_cache.rs)); see [CACHE.md](CACHE.md)
+for how the layers interlock. A configured `ab1_cache_path` ending in `.json` (the old cache
+format) maps to the same name with `.sqlite`; the old JSON file is no longer read and can be
+deleted. Keep the cache outside cloud-synced folders (OneDrive, Dropbox, …): syncing an SQLite
+file mid-write can corrupt it, so opening one there logs a warning. An unreadable database is
+moved to `*.corrupt` and rebuilt. To keep rows small, only the top hit carries pncA calls, and
+the catalogue text of each pncA site (`PncaSnpCall::resistance_alts`) is looked up again on
+load, not stored.
+
+`AB1_SEQ_CACHE` entries are not checked against the file's mtime. A file outside the scan
+directories that changes during a session keeps showing its old hits until restart. Files
+inside a scan directory are refreshed by the next scan.
 
 ---
 

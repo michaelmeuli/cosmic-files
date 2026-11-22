@@ -74,11 +74,16 @@ impl RrlPosition2058_2059 {
         Some((base2058, base2059))
     }
 
+    /// A/A is wildtype, any other pair of called bases a mutation. A non-ACGT byte (`N` or an
+    /// IUPAC ambiguity code from the basecaller) gives no call, like an unfound anchor.
     fn from_bases(bases: Option<(u8, u8)>) -> Option<Self> {
+        let is_called = |b: u8| matches!(b, b'A' | b'C' | b'G' | b'T');
         match bases {
             Some((b'A', b'A')) => Some(Self::SusceptibleWildtype),
-            Some((_, _)) => Some(Self::ResistanceConferringMutation),
-            None => None,
+            Some((a, b)) if is_called(a) && is_called(b) => {
+                Some(Self::ResistanceConferringMutation)
+            }
+            _ => None,
         }
     }
 
@@ -451,4 +456,32 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
 
     super::sort_hits_by_identity(&mut hits);
     hits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A read with `b2058`/`b2059` between the two anchors.
+    fn read(b2058: u8, b2059: u8) -> Vec<u8> {
+        [RRL_ANCHOR_L, &[b2058, b2059], RRL_ANCHOR_R].concat()
+    }
+
+    #[test]
+    fn position_2058_2059_calls() {
+        use RrlPosition2058_2059::{ResistanceConferringMutation, SusceptibleWildtype};
+        let call = |a, b| RrlPosition2058_2059::from_single_read(&read(a, b));
+        assert_eq!(call(b'A', b'A'), Some(SusceptibleWildtype));
+        assert_eq!(call(b'G', b'A'), Some(ResistanceConferringMutation));
+        assert_eq!(call(b'A', b'G'), Some(ResistanceConferringMutation));
+        // Also found on the reverse strand.
+        assert_eq!(
+            RrlPosition2058_2059::from_single_read(&reverse_complement(&read(b'A', b'C'))),
+            Some(ResistanceConferringMutation)
+        );
+        // An unresolved basecall is no call, not resistance.
+        assert_eq!(call(b'N', b'A'), None);
+        assert_eq!(call(b'A', b'R'), None);
+        assert_eq!(is_susceptible_rrl(call(b'N', b'A').as_ref(), &[]), None);
+    }
 }
