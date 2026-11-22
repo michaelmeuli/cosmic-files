@@ -140,7 +140,8 @@ const REF_AMPLICON_RRS3END: &str =
 const REF_AMPLICON_RRL: &str =
     include_str!("../../res/sequences/references/23S_MCLR19F_MCLR21R.fasta");
 /// Species → species group (complex) lookup from cosmic-seq (`scripts/04_ncbi_species_groups.py`:
-/// NCBI species groups plus its curated kansasii and chelonae-abscessus complexes), copied here by
+/// NCBI species groups, NCBI genus Mycobacteroides as the chelonae-abscessus complex, and the curated
+/// kansasii complex), copied here by
 /// `scripts/sync_cosmic_seq.py`. Tab-separated, columns include `label` and `species`; species use
 /// GTDB's genus *Mycobacterium*.
 const REF_SPECIES_GROUPS: &str = include_str!("../../res/sequences/references/species_groups.tsv");

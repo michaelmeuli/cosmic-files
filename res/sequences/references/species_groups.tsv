@@ -11,15 +11,6 @@ Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium marseille
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium paraintracellulare	ncbi	120793	1138383	22	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium senriense	ncbi	120793	2775496	2	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium timonense	ncbi	120793	701043	3	
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium abscessus	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium bolletii	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium chelonae	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium franklinii	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium immunogenum	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium massiliense	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium salmoniphilum	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium saopaulense	curated				
-Mycobacterium chelonae-abscessus complex	M. chelonae / M. abscessus complex	Mycobacterium stephanolepidis	curated				
 Mycobacterium kansasii complex	M. kansasii complex	Mycobacterium attenuatum	curated				
 Mycobacterium kansasii complex	M. kansasii complex	Mycobacterium gastri	curated				
 Mycobacterium kansasii complex	M. kansasii complex	Mycobacterium innocens	curated				
@@ -56,3 +47,14 @@ Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium marinum	ncb
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium pseudoshottsii	ncbi	2993898	265949	7	
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium shottsii	ncbi	2993898	133549	2	
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium ulcerans	ncbi	2993898	1809	1037	
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium abscessus	ncbi	670516	36809	2673	Mycobacteroides abscessus
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium bolletii	curated				
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium chelonae	ncbi	670516	1774	94	Mycobacteroides chelonae
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium franklinii	ncbi	670516	948102	12	Mycobacteroides franklinii
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium fukienense	ncbi	670516	1938594	0	[Mycobacterium] fukienense
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium immunogenum	ncbi	670516	83262	20	Mycobacteroides immunogenum
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium massiliense	curated				
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium runyonii	ncbi	670516	3393498	0	[Mycobacterium] runyonii
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium salmoniphilum	ncbi	670516	404941	11	Mycobacteroides salmoniphilum
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium saopaulense	ncbi	670516	1578165	4	Mycobacteroides saopaulense
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium stephanolepidis	ncbi	670516	1520670	2	Mycobacteroides stephanolepidis

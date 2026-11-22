@@ -172,7 +172,8 @@ pub struct SampleSusceptibilityRecord {
 /// 3: slimmed records (pncA calls only on the top hit, catalogue alts not stored).
 /// 4: 16S species calls named by species group (cosmic-seq `species_groups.tsv`).
 /// 5: species group lookup ignores genus synonyms (Mycobacteroides, `[Mycobacterium]`, ...).
-pub(crate) const ANALYSIS_VERSION: u32 = 5;
+/// 6: chelonae-abscessus complex = NCBI genus Mycobacteroides (adds fukienense, runyonii).
+pub(crate) const ANALYSIS_VERSION: u32 = 6;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
