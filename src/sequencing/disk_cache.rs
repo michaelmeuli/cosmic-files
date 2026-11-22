@@ -87,6 +87,16 @@ impl DiskCache {
         }
     }
 
+    /// Like [`Self::open`], but `None` when no database exists at `path` yet, so a lookup in a
+    /// cache that was never written doesn't create an empty file.
+    pub(crate) fn open_existing(path: &Path) -> Option<Self> {
+        if path.is_file() {
+            Self::open(path)
+        } else {
+            None
+        }
+    }
+
     fn try_open(path: &Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -138,6 +148,45 @@ impl DiskCache {
         serde_json::from_str(&json)
             .inspect_err(|e| log::warn!("ab1 cache: dropping undecodable row {key}: {e}"))
             .ok()
+    }
+
+    /// Every row written by the current [`ANALYSIS_VERSION`], as `(key, mtime_secs, file_size,
+    /// record)`, in one query. Rows that don't decode are skipped. Callers check the stamps
+    /// against the files themselves.
+    pub(crate) fn load_current(&self) -> Vec<(String, u64, u64, SampleSusceptibilityRecord)> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT path, mtime_secs, file_size, record FROM ab1_record WHERE version = ?1",
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                log::warn!("ab1 cache: load query failed in {}: {e}", self.display());
+                return Vec::new();
+            }
+        };
+        let rows = stmt.query_map(params![ANALYSIS_VERSION], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        });
+        let Ok(rows) = rows else {
+            return Vec::new();
+        };
+        rows.filter_map(Result::ok)
+            .filter_map(|(key, mtime, size, json)| {
+                let record = serde_json::from_str(&json)
+                    .inspect_err(|e| log::warn!("ab1 cache: skipping undecodable row {key}: {e}"))
+                    .ok()?;
+                Some((
+                    key,
+                    u64::try_from(mtime).unwrap_or(0),
+                    u64::try_from(size).unwrap_or(0),
+                    record,
+                ))
+            })
+            .collect()
     }
 
     /// Stores `record` for `key`, replacing any previous row. Inside a batch
@@ -325,6 +374,35 @@ mod tests {
             )
             .unwrap();
         assert!(cache.get("a", 1, 1).is_none());
+    }
+
+    #[test]
+    fn load_current_returns_only_current_version_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = DiskCache::open(&dir.path().join("c.sqlite")).unwrap();
+        cache.put("a", 10, 100, &record("a"));
+        cache
+            .conn
+            .execute(
+                "INSERT INTO ab1_record VALUES ('old', 1, 1, ?1, '{}')",
+                params![ANALYSIS_VERSION - 1],
+            )
+            .unwrap();
+        let rows = cache.load_current();
+        assert_eq!(rows.len(), 1);
+        let (key, mtime, size, rec) = &rows[0];
+        assert_eq!((key.as_str(), *mtime, *size), ("a", 10, 100));
+        assert_eq!(rec.sample_id, "a");
+    }
+
+    #[test]
+    fn open_existing_does_not_create_a_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.sqlite");
+        assert!(DiskCache::open_existing(&path).is_none());
+        assert!(!path.exists());
+        DiskCache::open(&path).unwrap();
+        assert!(DiskCache::open_existing(&path).is_some());
     }
 
     #[test]

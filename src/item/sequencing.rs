@@ -21,7 +21,7 @@ use crate::sequencing::rrs3end::{
     is_susceptible_rrs_by_snp_calls_rare_3end,
 };
 use crate::sequencing::{
-    Ab1Channels, RefSource, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
+    Ab1Channels, Ab1Read, RefSource, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
     erm41::{Erm41SusceptibilityCalls, is_susceptible_erm41},
     hits_from, parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, is_susceptible_pnca},
@@ -31,9 +31,24 @@ use crate::sequencing::{
 };
 use crate::tab::Message;
 
-/// Parses an AB1 file's bytes into [`SeqData`] (quality-trimmed basecalls, chromatogram), and
-/// attaches any alignment hits the background scan has already cached for `path`.
-pub(super) fn load_seq_data(path: &Path, bytes: &[u8]) -> SeqData {
+/// [`SeqData`] for a listed AB1 file without reading it: only the alignment hits already in
+/// [`AB1_SEQ_CACHE`](crate::sequencing::batch::AB1_SEQ_CACHE) (a memory lookup). The file itself
+/// is read by [`read_ab1`] when the preview needs it.
+pub(super) fn cached_seq_data(path: &Path) -> SeqData {
+    let seq_id_hits = crate::sequencing::batch::AB1_SEQ_CACHE
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(path).cloned())
+        .unwrap_or_default();
+    SeqData {
+        read_opt: None,
+        seq_id_hits,
+    }
+}
+
+/// Parses an AB1 file's bytes for the preview: chromatogram, basecall length and
+/// quality-trimmed length/quality. Blocking work: call from a worker thread.
+pub fn read_ab1(path: &Path, bytes: &[u8]) -> Ab1Read {
     let ab1_seq = parse_ab1_sequence(bytes);
     let ab1_qual = parse_ab1_quality(bytes);
     let (length, trimmed_length, trimmed_avg_quality_opt) = if let Some(seq) = ab1_seq.as_ref() {
@@ -84,17 +99,9 @@ pub(super) fn load_seq_data(path: &Path, bytes: &[u8]) -> SeqData {
     } else {
         (0, 0, None)
     };
-    // Look up pre-computed alignment results from the background scan cache.
-    // This avoids running Smith-Waterman on the UI thread.
-    let seq_id_hits = crate::sequencing::batch::AB1_SEQ_CACHE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(path).cloned())
-        .unwrap_or_default();
     let chromatogram_opt = Ab1Channels::from_bytes(bytes);
-    SeqData {
+    Ab1Read {
         chromatogram_opt,
-        seq_id_hits,
         length,
         trimmed_length,
         trimmed_avg_quality_opt,
@@ -102,6 +109,16 @@ pub(super) fn load_seq_data(path: &Path, bytes: &[u8]) -> SeqData {
 }
 
 type Details<'a> = widget::Column<'a, Message, cosmic::Theme>;
+
+/// Text shown where a chromatogram would be: still loading (the preview reads the file on a
+/// worker thread) or not available for this read.
+fn chromatogram_placeholder(metadata: &ItemMetadata, gene: &str) -> String {
+    if metadata.ab1_read_loaded() {
+        format!("{gene} chromatogram view is not available.")
+    } else {
+        "Loading chromatogram…".to_string()
+    }
+}
 
 /// Pushes one species-call line per reference source in `sources`, e.g.
 /// `16S (NCBI): M. kansasii complex`. `species_for` gives the call of a source (`None`: no
@@ -639,9 +656,10 @@ impl Item {
                 details = details.push(widget::text::body(""));
             } else {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "erm(41) chromatogram view is not available.",
-                ));
+                details = details.push(widget::text::body(chromatogram_placeholder(
+                    &self.metadata,
+                    "erm(41)",
+                )));
                 details = details.push(widget::text::body(""));
             }
             match self
@@ -1086,9 +1104,10 @@ impl Item {
                 details = details.push(widget::text::body(""));
             } else {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "16S 3-End chromatogram view is not available.",
-                ));
+                details = details.push(widget::text::body(chromatogram_placeholder(
+                    &self.metadata,
+                    "16S 3-End",
+                )));
                 details = details.push(widget::text::body(""));
             }
 
@@ -1241,9 +1260,10 @@ impl Item {
                 details = details.push(widget::text::body(""));
             } else {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "rrl chromatogram view is not available.",
-                ));
+                details = details.push(widget::text::body(chromatogram_placeholder(
+                    &self.metadata,
+                    "rrl",
+                )));
                 details = details.push(widget::text::body(""));
             }
             match self
@@ -1622,5 +1642,39 @@ impl ChromatogramProgram<'_> {
                 shaping: cosmic::iced::advanced::text::Shaping::Basic,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_ab1_parses_lengths_and_chromatogram() {
+        // Generated locally under target/ (not committed); skip when absent.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/synthetic_ab1/2026999001_hsp65_gastri_synthetic.ab1");
+        let Ok(bytes) = std::fs::read(&path) else {
+            eprintln!("skipping: {} not found", path.display());
+            return;
+        };
+        let read = read_ab1(&path, &bytes);
+        assert!(read.length > 0);
+        assert!(read.trimmed_length <= read.length);
+        assert!(read.chromatogram_opt.is_some());
+    }
+
+    #[test]
+    fn read_ab1_of_unreadable_bytes_is_empty() {
+        let read = read_ab1(Path::new("x.ab1"), &[]);
+        assert_eq!((read.length, read.trimmed_length), (0, 0));
+        assert!(read.chromatogram_opt.is_none());
+    }
+
+    #[test]
+    fn cached_seq_data_reads_no_file() {
+        let seq = cached_seq_data(Path::new("does/not/exist.ab1"));
+        assert!(seq.read_opt.is_none());
+        assert!(seq.seq_id_hits.is_empty());
     }
 }

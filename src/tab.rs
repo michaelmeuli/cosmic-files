@@ -243,6 +243,20 @@ pub const MODE_SHIFT_USER: u32 = 6;
 pub const MODE_SHIFT_GROUP: u32 = 3;
 pub const MODE_SHIFT_OTHER: u32 = 0;
 
+/// Stores an AB1 item's alignment hits and recomputes its susceptibility calls from them.
+fn set_ab1_hits(item: &mut Item, hits: Vec<SeqIdHit>) {
+    if let ItemMetadata::Path {
+        sequence_opt: Some(sequence),
+        is_susceptible,
+        susceptibility_calls,
+        ..
+    } = &mut item.metadata
+    {
+        (*is_susceptible, *susceptibility_calls) = ab1_susceptibility(&hits);
+        sequence.seq_id_hits = hits;
+    }
+}
+
 pub const fn get_mode_part(mode: u32, shift: u32) -> u32 {
     (mode >> shift) & 0o7
 }
@@ -447,6 +461,11 @@ pub enum Message {
     /// Alignment hits for an AB1 file the background scan didn't cover, computed on demand
     /// for the preview.
     Ab1Analysed(PathBuf, Vec<SeqIdHit>),
+    /// The previewed AB1 file was read (chromatogram, lengths, quality).
+    Ab1Read(PathBuf, Box<crate::sequencing::Ab1Read>),
+    /// `AB1_SEQ_CACHE` gained results (startup preload, finished scan): fill listed AB1 items
+    /// that don't carry hits yet.
+    Ab1CacheUpdated,
     Checksums(PathBuf, ChecksumState),
     CalculateChecksums(PathBuf),
     CopyChecksum(String),
@@ -2624,15 +2643,40 @@ impl Tab {
                     && let Some(item) = items
                         .iter_mut()
                         .find(|item| item.location_opt.as_ref() == Some(&location))
+                {
+                    set_ab1_hits(item, hits);
+                }
+            }
+            Message::Ab1Read(path, read) => {
+                let location = Location::Path(path);
+                if let Some(ref mut items) = self.items_opt
+                    && let Some(item) = items
+                        .iter_mut()
+                        .find(|item| item.location_opt.as_ref() == Some(&location))
                     && let ItemMetadata::Path {
                         sequence_opt: Some(sequence),
-                        is_susceptible,
-                        susceptibility_calls,
                         ..
                     } = &mut item.metadata
                 {
-                    (*is_susceptible, *susceptibility_calls) = ab1_susceptibility(&hits);
-                    sequence.seq_id_hits = hits;
+                    sequence.read_opt = Some(*read);
+                }
+            }
+            Message::Ab1CacheUpdated => {
+                if let Some(ref mut items) = self.items_opt
+                    && let Ok(cache) = crate::sequencing::batch::AB1_SEQ_CACHE.read()
+                {
+                    for item in items.iter_mut() {
+                        if item.metadata.is_ab1()
+                            && item.metadata.seq_id_hits().is_empty()
+                            && let Some(hits) = item
+                                .path_opt()
+                                .and_then(|path| cache.get(path))
+                                .filter(|hits| !hits.is_empty())
+                                .cloned()
+                        {
+                            set_ab1_hits(item, hits);
+                        }
+                    }
                 }
             }
             Message::OpenSeqAlignment(hit) => {
@@ -5285,22 +5329,74 @@ impl Tab {
                 }
             }
 
-            // Align a previewed AB1 file on demand when no background scan has covered it. The
-            // subscription is keyed by path, so a file is never aligned twice concurrently, and
-            // it drops once the hits arrive (or the selection changes).
+            // Read a previewed AB1 file (chromatogram, lengths, quality). Folder listings don't
+            // read AB1 files, so this happens once, when the file is first previewed. Separate
+            // from the alignment below so the chromatogram doesn't wait for a slow alignment.
+            let mut selected = items.iter().filter(|item| item.state.selected);
+            if preview
+                && let (Some(item), None) = (selected.next(), selected.next())
+                && item.metadata.is_ab1()
+                && !item.metadata.ab1_read_loaded()
+                && let Some(path) = item.path_opt().cloned()
+            {
+                subscriptions.push(Subscription::run_with(path, |path| {
+                    let path = path.clone();
+                    stream::channel(
+                        1,
+                        move |mut output: futures::channel::mpsc::Sender<_>| async move {
+                            let message = {
+                                let path = path.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    let start = Instant::now();
+                                    let bytes = std::fs::read(&path)
+                                        .inspect_err(|err| {
+                                            log::warn!(
+                                                "failed to read AB1 {}: {err}",
+                                                path.display()
+                                            );
+                                        })
+                                        .unwrap_or_default();
+                                    let read = crate::item::read_ab1(&path, &bytes);
+                                    log::debug!(
+                                        "read {} for preview in {:?}",
+                                        path.display(),
+                                        start.elapsed()
+                                    );
+                                    Message::Ab1Read(path, Box::new(read))
+                                })
+                                .await
+                                .unwrap()
+                            };
+                            if let Err(err) = output.send(message).await {
+                                log::warn!(
+                                    "failed to send AB1 read for {}: {}",
+                                    path.display(),
+                                    err
+                                );
+                            }
+                            std::future::pending().await
+                        },
+                    )
+                }));
+            }
+
+            // Load a previewed AB1 file's results into the item when it doesn't carry them yet:
+            // from memory, the scan or preview disk caches, or by aligning it on demand (see
+            // `analyse_ab1_for_preview`). Runs even when `AB1_SEQ_CACHE` already has the path, so
+            // the item's stored hits and susceptibility calls get filled, not just the hit list.
+            // The subscription is keyed by path, so a file is never aligned twice concurrently,
+            // and it drops once the hits arrive (or the selection changes).
             let mut selected = items.iter().filter(|item| item.state.selected);
             if preview
                 && let (Some(item), None) = (selected.next(), selected.next())
                 && item.metadata.is_ab1()
                 && item.metadata.seq_id_hits().is_empty()
                 && let Some(path) = item.path_opt().cloned()
-                && !crate::sequencing::batch::AB1_SEQ_CACHE
-                    .read()
-                    .is_ok_and(|guard| guard.contains_key(&path))
             {
                 struct Wrapper {
                     path: PathBuf,
                     cache_file: PathBuf,
+                    scan_cache_files: Vec<PathBuf>,
                 }
                 impl Hash for Wrapper {
                     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -5309,11 +5405,21 @@ impl Tab {
                 }
                 let cache_file =
                     crate::sequencing::batch::preview_cache_file(&self.tb_config.ab1_cache_path);
+                let scan_cache_files = crate::sequencing::batch::scan_cache_files(&self.tb_config);
                 subscriptions.push(Subscription::run_with(
-                    Wrapper { path, cache_file },
-                    |Wrapper { path, cache_file }| {
+                    Wrapper {
+                        path,
+                        cache_file,
+                        scan_cache_files,
+                    },
+                    |Wrapper {
+                         path,
+                         cache_file,
+                         scan_cache_files,
+                     }| {
                         let path = path.clone();
                         let cache_file = cache_file.clone();
+                        let scan_cache_files = scan_cache_files.clone();
                         stream::channel(
                             1,
                             move |mut output: futures::channel::mpsc::Sender<_>| async move {
@@ -5325,6 +5431,7 @@ impl Tab {
                                             crate::sequencing::batch::analyse_ab1_for_preview(
                                                 &path,
                                                 &cache_file,
+                                                &scan_cache_files,
                                             );
                                         log::debug!(
                                             "analysed {} for preview in {:?}",

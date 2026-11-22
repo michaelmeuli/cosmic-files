@@ -153,9 +153,28 @@ impl ItemMetadata {
 
     pub fn ab1_chromatogram(&self) -> Option<&Ab1Channels> {
         match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.chromatogram_opt.as_ref(),
+            Self::Path { sequence_opt, .. } => sequence_opt
+                .as_ref()?
+                .read_opt
+                .as_ref()?
+                .chromatogram_opt
+                .as_ref(),
             _ => None,
         }
+    }
+
+    /// `true` once the preview has read the AB1 file itself (chromatogram, lengths, quality).
+    pub fn ab1_read_loaded(&self) -> bool {
+        matches!(
+            self,
+            Self::Path {
+                sequence_opt: Some(SeqData {
+                    read_opt: Some(_),
+                    ..
+                }),
+                ..
+            }
+        )
     }
 
     pub fn rrl_position_2058_2059_call(&self) -> RrlPosition2058_2059 {
@@ -210,21 +229,31 @@ impl ItemMetadata {
 
     pub fn sequence_length(&self) -> Option<usize> {
         match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.length),
+            Self::Path { sequence_opt, .. } => {
+                Some(sequence_opt.as_ref()?.read_opt.as_ref()?.length)
+            }
             _ => None,
         }
     }
 
     pub fn sequence_length_trimmed(&self) -> Option<usize> {
         match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref().map(|s| s.trimmed_length),
+            Self::Path { sequence_opt, .. } => {
+                Some(sequence_opt.as_ref()?.read_opt.as_ref()?.trimmed_length)
+            }
             _ => None,
         }
     }
 
     pub fn sequence_avg_quality_trimmed(&self) -> Option<f32> {
         match self {
-            Self::Path { sequence_opt, .. } => sequence_opt.as_ref()?.trimmed_avg_quality_opt,
+            Self::Path { sequence_opt, .. } => {
+                sequence_opt
+                    .as_ref()?
+                    .read_opt
+                    .as_ref()?
+                    .trimmed_avg_quality_opt
+            }
             _ => None,
         }
     }

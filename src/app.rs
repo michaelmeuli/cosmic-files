@@ -546,6 +546,9 @@ pub enum Message {
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
     ScanAb1Directory2,
     Ab1ScanComplete2(Vec<crate::sequencing::SampleSusceptibilityRecord>),
+    /// Load the scan disk caches into memory at startup, ahead of the (possibly sync-delayed) scan.
+    PreloadAb1Cache,
+    Ab1CachePreloaded,
     #[cfg(feature = "russh")]
     SetTbMicrosynthUsername(String),
     #[cfg(feature = "russh")]
@@ -1911,6 +1914,17 @@ impl App {
         Task::batch(commands)
     }
 
+    /// Tells every tab that `AB1_SEQ_CACHE` gained results, so listed AB1 items pick them up.
+    fn refresh_ab1_items(&mut self) -> Task<Message> {
+        let tabs: Box<[_]> = self.tab_model.iter().collect();
+        Task::batch(tabs.into_iter().map(|entity| {
+            self.update(Message::TabMessage(
+                Some(entity),
+                tab::Message::Ab1CacheUpdated,
+            ))
+        }))
+    }
+
     fn update_desktop(&mut self) -> Task<Message> {
         let needs_reload: Box<[_]> = (self.tab_model.iter())
             .filter_map(|entity| {
@@ -2972,6 +2986,9 @@ impl Application for App {
         }
 
         let mut commands = vec![app.update_config(), app.update(Message::CheckClipboard)];
+
+        // Before the scan: it may first wait for a Microsynth sync.
+        commands.push(app.update(Message::PreloadAb1Cache));
 
         if !app.config.tb_config.ab1_scan_path.is_empty() {
             commands.push(app.update(app.ab1_scan_message()));
@@ -6675,7 +6692,7 @@ impl Application for App {
                     let records = tokio::task::spawn_blocking(move || {
                         let cache_path = crate::sequencing::batch::scan_cache_file(
                             &ab1_cache_path,
-                            "ab1_scan_cache.sqlite",
+                            crate::sequencing::batch::SCAN_CACHE_FILE_NAME,
                         );
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
@@ -6756,6 +6773,29 @@ impl Application for App {
                         }
                     });
                 }
+                return self.refresh_ab1_items();
+            }
+            Message::PreloadAb1Cache => {
+                let cache_files =
+                    crate::sequencing::batch::scan_cache_files(&self.config.tb_config);
+                if cache_files.is_empty() {
+                    return Task::none();
+                }
+                return Task::future(async move {
+                    let loaded = tokio::task::spawn_blocking(move || {
+                        cache_files
+                            .iter()
+                            .map(|f| crate::sequencing::batch::preload_disk_cache(f))
+                            .sum::<usize>()
+                    })
+                    .await
+                    .unwrap_or_default();
+                    log::info!("AB1 cache preload: {loaded} files");
+                    cosmic::action::app(Message::Ab1CachePreloaded)
+                });
+            }
+            Message::Ab1CachePreloaded => {
+                return self.refresh_ab1_items();
             }
             Message::ScanAb1Directory2 => {
                 let scan_path = self.config.tb_config.ab1_scan_path_2.clone();
@@ -6768,7 +6808,7 @@ impl Application for App {
                     let records = tokio::task::spawn_blocking(move || {
                         let cache_path = crate::sequencing::batch::scan_cache_file(
                             &ab1_cache_path,
-                            "ab1_scan_cache_2.sqlite",
+                            crate::sequencing::batch::SCAN_CACHE_FILE_NAME_2,
                         );
                         crate::sequencing::batch::scan_ab1_directory(
                             std::path::PathBuf::from(scan_path),
@@ -6849,6 +6889,7 @@ impl Application for App {
                         }
                     });
                 }
+                return self.refresh_ab1_items();
             }
         }
 

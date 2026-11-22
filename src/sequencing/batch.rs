@@ -91,6 +91,30 @@ pub fn scan_cache_file(ab1_cache_path: &str, file_name: &str) -> PathBuf {
     }
 }
 
+/// Cache file name of the first and second scan directory (`ab1_scan_path`/`ab1_scan_path_2`).
+pub const SCAN_CACHE_FILE_NAME: &str = "ab1_scan_cache.sqlite";
+pub const SCAN_CACHE_FILE_NAME_2: &str = "ab1_scan_cache_2.sqlite";
+
+/// Disk caches of the configured scan directories (those with a non-empty scan path).
+pub fn scan_cache_files(tb_config: &crate::config::TBConfig) -> Vec<PathBuf> {
+    [
+        (
+            &tb_config.ab1_scan_path,
+            &tb_config.ab1_cache_path,
+            SCAN_CACHE_FILE_NAME,
+        ),
+        (
+            &tb_config.ab1_scan_path_2,
+            &tb_config.ab1_cache_path_2,
+            SCAN_CACHE_FILE_NAME_2,
+        ),
+    ]
+    .into_iter()
+    .filter(|(scan_path, _, _)| !scan_path.is_empty())
+    .map(|(_, cache_path, file_name)| scan_cache_file(cache_path, file_name))
+    .collect()
+}
+
 /// Size and mtime (whole seconds; 0 if unknown) of a file, the disk cache's staleness key.
 fn file_stamp(meta: Option<&std::fs::Metadata>) -> (u64, u64) {
     let mtime_secs = meta
@@ -308,6 +332,9 @@ pub fn scan_ab1_directory(
     let max_age = (max_age_days > 0).then(|| Duration::from_secs(u64::from(max_age_days) * 86_400));
 
     let mut records = Vec::new();
+    // Files without a current disk-cache row, aligned after the walk so every cached result
+    // reaches `AB1_SEQ_CACHE` (and the preview) before the first slow alignment starts.
+    let mut misses: Vec<(PathBuf, String, u64, u64, Option<SystemTime>)> = Vec::new();
 
     for entry in WalkDir::new(&scan_path).into_iter().filter_map(Result::ok) {
         let path = entry.path();
@@ -365,11 +392,20 @@ pub fn scan_ab1_directory(
             }
         }
 
-        // Cache miss — run full alignment pipeline.
-        let Some((_, record)) = analyse_ab1_file(path, file_created) else {
+        misses.push((path.to_path_buf(), key, mtime_secs, file_size, file_created));
+    }
+
+    log::debug!(
+        "ab1_scan: {} disk cache hits, {} files to align",
+        records.len(),
+        misses.len()
+    );
+
+    // Cache misses — run the full alignment pipeline.
+    for (path, key, mtime_secs, file_size, file_created) in misses {
+        let Some((_, record)) = analyse_ab1_file(&path, file_created) else {
             continue;
         };
-
         if let Some(cache) = &mut disk_cache {
             cache.put(&key, mtime_secs, file_size, &record);
         }
@@ -614,16 +650,78 @@ pub(crate) fn preview_cache_file(ab1_cache_path: &str) -> PathBuf {
     }
 }
 
-/// Align one AB1 file on demand for the preview panel, for files the background scan doesn't
-/// cover. Reuses the result stored in `cache_file` while the file's mtime is unchanged;
-/// otherwise runs [`analyse_ab1_file`] and stores all of its hits there. Either way the hits end
-/// up in [`AB1_SEQ_CACHE`], keyed by canonical path. Blocking: call from a worker thread.
-pub(crate) fn analyse_ab1_for_preview(path: &Path, cache_file: &Path) -> Vec<SeqIdHit> {
+/// Loads every still-current row of the scan cache at `cache_file` into [`AB1_SEQ_CACHE`] (and
+/// [`SIXTEEN_S_HITS_CACHE`]) in one query, so the preview has the previous scan's results right
+/// after startup instead of waiting for the next scan (which may first wait for a Microsynth
+/// sync) to walk the tree. A row counts as current when its file still exists with the same
+/// mtime and size, and [`cached_record_current`] holds. Read-only: nothing is written or pruned.
+/// Returns the number of files loaded. Blocking: call from a worker thread.
+pub fn preload_disk_cache(cache_file: &Path) -> usize {
+    let Some(cache) = DiskCache::open_existing(cache_file) else {
+        return 0;
+    };
+    let mut loaded = 0;
+    for (key, mtime_secs, file_size, record) in cache.load_current() {
+        let path = PathBuf::from(&key);
+        let meta = std::fs::metadata(&path).ok();
+        if meta.is_none()
+            || file_stamp(meta.as_ref()) != (mtime_secs, file_size)
+            || record.seq_id_hits.is_empty()
+            || !cached_record_current(&record)
+        {
+            continue;
+        }
+        insert_cached_record(path, &record);
+        loaded += 1;
+    }
+    log::debug!(
+        "ab1_preload: {loaded} records from {}",
+        cache_file.display()
+    );
+    loaded
+}
+
+/// Results for one AB1 file for the preview panel. Looks them up, in order, in
+/// [`AB1_SEQ_CACHE`], the scan caches `scan_cache_files` (opened read-only, only if they
+/// exist), and the preview cache `cache_file`, each as long as the file's mtime and size are
+/// unchanged. Only when none has them does it run [`analyse_ab1_file`] and store all of its hits
+/// in `cache_file`. Either way the hits end up in [`AB1_SEQ_CACHE`], keyed by canonical path.
+/// Blocking: call from a worker thread.
+pub(crate) fn analyse_ab1_for_preview(
+    path: &Path,
+    cache_file: &Path,
+    scan_cache_files: &[PathBuf],
+) -> Vec<SeqIdHit> {
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if let Some(hits) = AB1_SEQ_CACHE
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&canonical_path).cloned())
+    {
+        log::debug!("ab1_preview: memory cache hit for {}", path.display());
+        return hits;
+    }
+
     let meta = std::fs::metadata(path).ok();
     let file_created = meta.as_ref().and_then(|m| m.created().ok());
     let (mtime_secs, file_size) = file_stamp(meta.as_ref());
-    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let key = canonical_path.to_string_lossy().into_owned();
+
+    for scan_cache_file in scan_cache_files {
+        if let Some(cache) = DiskCache::open_existing(scan_cache_file)
+            && let Some(record) = cache.get(&key, mtime_secs, file_size)
+            && !record.seq_id_hits.is_empty()
+            && cached_record_current(&record)
+        {
+            log::debug!(
+                "ab1_preview: scan cache hit for {} in {}",
+                path.display(),
+                scan_cache_file.display()
+            );
+            insert_cached_record(canonical_path, &record);
+            return record.seq_id_hits;
+        }
+    }
 
     {
         let mut guard = PREVIEW_DISK_CACHE
@@ -1057,5 +1155,83 @@ mod tests {
         // 2024-01-15T00:00:00Z = 1705276800 seconds since epoch
         let t = UNIX_EPOCH + Duration::from_secs(1_705_276_800);
         assert_eq!(system_time_to_iso8601(t), "2024-01-15T00:00:00Z");
+    }
+
+    fn cached_record(path: &Path) -> SampleSusceptibilityRecord {
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let (sample_id, gene) = parse_ab1_filename(&file_name);
+        SampleSusceptibilityRecord {
+            sample_id,
+            gene: gene.map(|g| g.label().to_string()),
+            file_name,
+            file_path: path.to_path_buf(),
+            file_created: None,
+            susceptibility_calls: SusceptibilityCalls::default(),
+            species: None,
+            identity: None,
+            species_gtdb: None,
+            identity_gtdb: None,
+            is_susceptible: None,
+            seq_id_hits: vec![SeqIdHit {
+                accession: "X".to_string(),
+                description: "Mycobacterium kansasii".to_string(),
+                source: RefSource::Ncbi,
+                identity: 99.0,
+                is_reverse: false,
+                rrl_snp_calls: Vec::new(),
+                rrs_snp_calls: Vec::new(),
+                rrs_snp_calls_3end: Vec::new(),
+                erm41_snp_calls: Vec::new(),
+                pnca_snp_calls: Vec::new(),
+                rpob_snp_calls: Vec::new(),
+                aligned_query: b"ACGT".to_vec(),
+                aligned_ref: b"ACGT".to_vec(),
+                ref_start: 0,
+                erm41_position_28_opt: None,
+                rrs3end_position_1248_opt: None,
+                rrl_position_2058_2059_opt: None,
+            }],
+            analysis_version: ANALYSIS_VERSION,
+        }
+    }
+
+    #[test]
+    fn preload_loads_only_rows_matching_the_file_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("24-000001-16S.ab1");
+        let changed = dir.path().join("24-000002-16S.ab1");
+        let deleted = dir.path().join("24-000003-16S.ab1");
+        std::fs::write(&current, b"current").unwrap();
+        std::fs::write(&changed, b"changed").unwrap();
+        let current = current.canonicalize().unwrap();
+        let changed = changed.canonicalize().unwrap();
+
+        let cache_file = dir.path().join("scan.sqlite");
+        {
+            let mut cache = DiskCache::open(&cache_file).unwrap();
+            for path in [&current, &changed] {
+                let (mtime, size) = file_stamp(std::fs::metadata(path).ok().as_ref());
+                // `changed` is stored with a stale size, as if the file was rewritten since.
+                let size = if path == &changed { size + 1 } else { size };
+                let key = path.to_string_lossy().into_owned();
+                cache.put(&key, mtime, size, &cached_record(path));
+            }
+            let key = deleted.to_string_lossy().into_owned();
+            cache.put(&key, 1, 1, &cached_record(&deleted));
+        }
+
+        assert_eq!(preload_disk_cache(&cache_file), 1);
+        let guard = AB1_SEQ_CACHE.read().unwrap();
+        assert!(guard.get(&current).is_some_and(|hits| hits.len() == 1));
+        assert!(!guard.contains_key(&changed));
+        assert!(!guard.contains_key(&deleted));
+    }
+
+    #[test]
+    fn preload_of_a_missing_cache_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_file = dir.path().join("none.sqlite");
+        assert_eq!(preload_disk_cache(&cache_file), 0);
+        assert!(!cache_file.exists());
     }
 }

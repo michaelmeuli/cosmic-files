@@ -1195,9 +1195,17 @@ pub(crate) fn best_snp_hit<'a>(
 /// downstream SNP / resistance calls for one reference match.
 #[derive(Clone, Debug)]
 pub struct SeqData {
+    /// What was read from the file itself; `None` until the preview has read it (a folder
+    /// listing doesn't touch AB1 files).
+    pub read_opt: Option<Ab1Read>,
+    pub seq_id_hits: Vec<SeqIdHit>,
+}
+
+/// The parts of [`SeqData`] that need the AB1 file's bytes.
+#[derive(Clone, Debug)]
+pub struct Ab1Read {
     /// Parsed chromatogram traces and basecalls; `None` if the file wasn't a valid AB1.
     pub chromatogram_opt: Option<Ab1Channels>,
-    pub seq_id_hits: Vec<SeqIdHit>,
     /// Full basecall sequence length, before quality trimming.
     pub length: usize,
     /// Basecall sequence length after [`trim_to_min_quality`].
