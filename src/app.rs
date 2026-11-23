@@ -1687,6 +1687,18 @@ impl App {
         selection_paths: Option<Vec<PathBuf>>,
     ) -> Task<Message> {
         log::info!("rescan_tab {entity:?} {location:?} {selection_paths:?}");
+        if let Location::Path(path) = &location
+            && entity == self.tab_model.active()
+            && self.state.last_location.as_ref() != Some(path)
+        {
+            self.state.last_location = Some(path.clone());
+            if let Some(state_handler) = self.state_handler.as_ref()
+                && let Err(err) = state_handler
+                    .set::<&Option<PathBuf>>("last_location", &self.state.last_location)
+            {
+                log::warn!("Failed to save last location: {err:?}");
+            }
+        }
         let icon_sizes = self.config.tab.icon_sizes;
         let _mounter_items = self.mounter_items.clone();
         let client_items = self.client_items.clone();
@@ -3034,11 +3046,15 @@ impl Application for App {
         }
 
         if app.tab_model.entity_at(0).is_none() {
-            if let Ok(current_dir) = env::current_dir() {
-                commands.push(app.open_tab(Location::Path(current_dir), true, None));
+            let scan_path = PathBuf::from(&app.config.tb_config.ab1_scan_path);
+            let start = if !app.config.tb_config.ab1_scan_path.is_empty() && scan_path.is_dir() {
+                scan_path
+            } else if let Some(last) = app.state.last_location.clone().filter(|p| p.is_dir()) {
+                last
             } else {
-                commands.push(app.open_tab(Location::Path(home_dir()), true, None));
-            }
+                home_dir()
+            };
+            commands.push(app.open_tab(Location::Path(start), true, None));
         }
 
         (app, Task::batch(commands))

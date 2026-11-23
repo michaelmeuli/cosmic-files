@@ -165,6 +165,9 @@ pub enum TypeToSearch {
 pub struct State {
     pub sort_names: FxOrderMap<String, (HeadingOptions, bool)>,
     pub dialog_sort_name: (HeadingOptions, bool),
+    /// Last local folder shown in the active tab; startup fallback when
+    /// `ab1_scan_path` is unset or missing.
+    pub last_location: Option<PathBuf>,
 }
 
 impl Default for State {
@@ -177,6 +180,7 @@ impl Default for State {
                 )
             })),
             dialog_sort_name: (HeadingOptions::Modified, false),
+            last_location: None,
         }
     }
 }
