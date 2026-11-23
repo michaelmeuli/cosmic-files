@@ -57,6 +57,7 @@ sha2 = "0.11"
 png = "0.18"
 jxl-image-rs-integration = "0.8"
 num_cpus = "1.17.0"
+rayon = "1.12"
 async-ssh2-tokio = { version = "0.12.1", optional = true }
 russh-sftp = { version = "~2.1", optional = true }
 keyring = { version = "3", features = ["windows-native", "linux-native-sync-persistent", "apple-native", "crypto-rust"], optional = true }

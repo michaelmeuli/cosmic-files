@@ -19,7 +19,7 @@
 
 A file whose record has no hits (no gene keyword in its name, or an unreadable read) is a miss on every scan, because the hit condition requires non-empty `seq_id_hits`. Re-analysing such a file is cheap, since there is nothing to align. The preview cache doesn't require hits.
 
-**Two passes:** the scan first walks the whole tree and serves every hit, collecting the misses. It aligns the misses only afterwards, so no cached result waits behind a slow alignment.
+**Two passes:** the scan first walks the whole tree and serves every hit, collecting the misses. It aligns the misses only afterwards, so no cached result waits behind a slow alignment. The misses are aligned in parallel on `SCAN_POOL`, a dedicated rayon pool of half the logical cores (1–8 threads). Both scan directories share this pool, so two concurrent scans stay within that budget. Workers send finished records back to the scan thread, which alone writes to the database. Preview alignments don't use the pool.
 
 **Startup preload:** `preload_disk_cache` loads every current row of the scan cache(s) (`scan_cache_files`) into the in-memory caches in one query. A row is current when its file still exists with the same mtime and size and `cached_record_current` holds. The preload runs at launch (`Message::PreloadAb1Cache`), ahead of the scan, which may first wait for a Microsynth sync. It opens the database read-only (`DiskCache::open_existing`), as do the preview's lookups in the scan caches. A database with another schema version is skipped, not rebuilt.
 

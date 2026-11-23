@@ -43,6 +43,25 @@ use super::{
     species_group, trim_to_min_quality, truncate_per_source,
 };
 
+/// Worker pool for the scan's alignments (pass 2 of [`scan_ab1_directory`]). Shared by both
+/// scan directories, so two concurrent scans together never use more than half the logical
+/// cores (1..=8), leaving room for the UI, thumbnailer and preview alignments. Preview
+/// alignments ([`analyse_ab1_for_preview`]) don't use it, so they never queue behind a scan.
+static SCAN_POOL: LazyLock<Option<rayon::ThreadPool>> = LazyLock::new(|| {
+    let threads = (num_cpus::get() / 2).clamp(1, 8);
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("ab1-align-{i}"))
+        .build()
+    {
+        Ok(pool) => Some(pool),
+        Err(e) => {
+            log::warn!("ab1_scan: failed to build alignment thread pool, aligning serially: {e}");
+            None
+        }
+    }
+});
+
 /// Hits in [`AB1_SEQ_CACHE`], with the stamp of the file they were computed for.
 pub(crate) struct CachedHits {
     /// `(mtime_secs, file_size)` from [`file_stamp`].
@@ -496,16 +515,63 @@ pub fn scan_ab1_directory(
         misses.len()
     );
 
-    // Cache misses — run the full alignment pipeline.
-    for (path, key, mtime_secs, file_size, file_created) in misses {
-        let Some((_, record)) = analyse_ab1_file(&path, file_created, (mtime_secs, file_size))
-        else {
-            continue;
-        };
+    // Cache misses — run the full alignment pipeline on the bounded worker pool. Workers send
+    // finished records back here; this thread alone owns the (non-`Sync`) disk cache, so rows
+    // are still upserted in batches as they arrive and an interrupted scan keeps its progress.
+    let started = std::time::Instant::now();
+    let n_misses = misses.len();
+    let mut store = |key: String, mtime_secs: u64, file_size: u64, record| {
         if let Some(cache) = &mut disk_cache {
             cache.put(&key, mtime_secs, file_size, &record);
         }
         records.push(record);
+    };
+    let analyse = |(path, key, mtime_secs, file_size, file_created): (
+        PathBuf,
+        String,
+        u64,
+        u64,
+        Option<SystemTime>,
+    )| {
+        analyse_ab1_file(&path, file_created, (mtime_secs, file_size))
+            .map(|(_, record)| (key, mtime_secs, file_size, record))
+    };
+    match SCAN_POOL.as_ref() {
+        Some(pool) if n_misses > 1 => {
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            log::debug!(
+                "ab1_scan: aligning {n_misses} files on {} threads",
+                pool.current_num_threads()
+            );
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    pool.install(|| {
+                        misses.into_par_iter().for_each_with(tx, |tx, miss| {
+                            if let Some(done) = analyse(miss) {
+                                let _ = tx.send(done);
+                            }
+                        });
+                    });
+                });
+                for (key, mtime_secs, file_size, record) in rx {
+                    store(key, mtime_secs, file_size, record);
+                }
+            });
+        }
+        _ => {
+            for miss in misses {
+                if let Some((key, mtime_secs, file_size, record)) = analyse(miss) {
+                    store(key, mtime_secs, file_size, record);
+                }
+            }
+        }
+    }
+    if n_misses > 0 {
+        log::debug!(
+            "ab1_scan: aligned {n_misses} files in {:.1?}",
+            started.elapsed()
+        );
     }
 
     if let Some(cache) = &mut disk_cache {

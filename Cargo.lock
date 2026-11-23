@@ -1711,6 +1711,7 @@ dependencies = [
  "png 0.18.1",
  "printpdf",
  "procfs",
+ "rayon",
  "recently-used-xbel",
  "regex",
  "reqwest",
