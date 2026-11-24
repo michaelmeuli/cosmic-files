@@ -220,7 +220,9 @@ pub struct SampleSusceptibilityRecord {
 ///    verdict.
 /// 8: species groups list NCBI subspecies under their former species names (M. chimaera,
 ///    M. yongonense → MAC).
-pub(crate) const ANALYSIS_VERSION: u32 = 8;
+/// 9: NCBI rpoB pool includes complete-cds type strains (SLEN cap 3000 → 4500), e.g. the
+///    M. bolletii and M. massiliense type strains.
+pub(crate) const ANALYSIS_VERSION: u32 = 9;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets

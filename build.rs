@@ -287,8 +287,12 @@ fn fetch_myco_sequences(seq_dir: &std::path::Path, api_key: Option<&str>) {
             "Mycobacteriales[Organism] AND erm(41)[Gene Name] AND 400:3000[SLEN]",
             "myco_erm41.fasta",
         ),
+        // rpoB cap is 4500, not 3000: complete-cds type-strain records with flanks are
+        // ~3.8–4.2 kb (Adékambi 2003/2006 set behind the 2573f/3337r SOP, e.g. AY859692
+        // M. bolletii CIP 108541T, AY593981 M. massiliense, AY147164 M. abscessus). Above
+        // 4.5 kb are genomes and contigs.
         (
-            "Mycobacteriales[Organism] AND rpoB[Gene Name] AND 400:3000[SLEN] AND type_material[Filter]",
+            "Mycobacteriales[Organism] AND rpoB[Gene Name] AND 400:4500[SLEN] AND type_material[Filter]",
             "myco_rpob.fasta",
         ),
         (

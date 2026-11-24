@@ -443,8 +443,11 @@ fn parse_multi_fasta(fasta: &str) -> Vec<(String, String, Vec<u8>)> {
                     std::mem::take(&mut cur_seq),
                 ));
             }
-            let mut words = rest.splitn(4, ' ');
-            let first = words.next().unwrap_or("");
+            let (first, defline) = rest.split_once(' ').unwrap_or((rest, ""));
+            // NCBI prefixes unreviewed submissions with "UNVERIFIED: " (e.g. MZ401483); without
+            // stripping it the description would read "UNVERIFIED: Mycobacteroides".
+            let defline = defline.strip_prefix("UNVERIFIED: ").unwrap_or(defline);
+            let mut words = defline.splitn(3, ' ');
             // cosmic-seq amplicon references (`res/sequences/references/`) use
             // `ACCESSION|amplicon_name|N Genus species [length=… mismatches=… copies=…]`;
             // keep only the genome accession.
@@ -1670,6 +1673,18 @@ mod tests {
         assert_eq!(r[0].2, b"ACGTACGT");
         assert_eq!(r[1].0, "NC_022663.1");
         assert_eq!(r[1].1, "Mycobacterium kansasii");
+    }
+
+    #[test]
+    fn parse_multi_fasta_strips_unverified_prefix() {
+        let fa = ">MZ401483.1 UNVERIFIED: Mycobacteroides abscessus ATCC 19977 rpoB-like gene\nACGT\n\
+                  >AY859692.1 Mycobacterium bolletii CIP 108541 rpoB gene, complete cds\nGG\n\
+                  >X1.1 Mycobacterium avium subsp. paratuberculosis K-10\nCC\n";
+        let r = super::parse_multi_fasta(fa);
+        assert_eq!(r[0].0, "MZ401483.1");
+        assert_eq!(r[0].1, "Mycobacteroides abscessus");
+        assert_eq!(r[1].1, "Mycobacterium bolletii");
+        assert_eq!(r[2].1, "Mycobacterium avium subsp. paratuberculosis");
     }
 
     use super::{

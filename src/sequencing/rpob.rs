@@ -546,6 +546,26 @@ pub fn identify_sequence_rpob(query: &[u8], region: RpoBRegion) -> Vec<SeqIdHit>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sequencing::RefSource;
+
+    /// The Adékambi complete-cds type strains are 3.8–4.2 kb; they drop out of the pool if the
+    /// `[SLEN]` cap of the rpoB query in `build.rs::fetch_myco_sequences` falls below that.
+    #[test]
+    fn ntm_pool_has_abscessus_subspecies_type_strains() {
+        for (acc, species) in [
+            ("AY859692", "M. bolletii CIP 108541T"),
+            ("AY593981", "M. massiliense CIP 108297"),
+            ("AY147164", "M. abscessus CIP 104536T"),
+        ] {
+            assert!(
+                RPOB_REFS_NTM
+                    .iter()
+                    .any(|(source, a, _, _)| *source == RefSource::Ncbi && a.starts_with(acc)),
+                "{acc} ({species}) missing from myco_rpob.fasta: check the rpoB SLEN cap in \
+                 build.rs and delete res/sequences/myco_rpob.fasta to re-download"
+            );
+        }
+    }
 
     #[test]
     fn every_region_has_mtb_references() {
