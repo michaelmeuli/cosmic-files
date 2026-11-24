@@ -218,7 +218,9 @@ pub struct SampleSusceptibilityRecord {
 /// 6: chelonae-abscessus complex = NCBI genus Mycobacteroides (adds fukienense, runyonii).
 /// 7: rrl 2058/2059 non-ACGT base is undetermined (was resistant); rrs3end in the combined
 ///    verdict.
-pub(crate) const ANALYSIS_VERSION: u32 = 7;
+/// 8: species groups list NCBI subspecies under their former species names (M. chimaera,
+///    M. yongonense → MAC).
+pub(crate) const ANALYSIS_VERSION: u32 = 8;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -1304,6 +1306,18 @@ mod tests {
                 ("Mycobacterium avium", 99.5),
                 ("Mycobacterium szulgai", 98.0)
             ]),
+            Some("M. avium complex (MAC)".to_string())
+        );
+        // NCBI subspecies still named as species in old deflines belong to the species' group.
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium intracellulare", 99.6),
+                ("Mycobacterium chimaera", 99.6)
+            ]),
+            Some("M. avium complex (MAC)".to_string())
+        );
+        assert_eq!(
+            call_16s(&[("Mycobacterium yongonense", 99.0)]),
             Some("M. avium complex (MAC)".to_string())
         );
         assert_eq!(

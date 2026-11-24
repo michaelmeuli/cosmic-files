@@ -3,14 +3,19 @@ Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium arosiense
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium avium	ncbi	120793	1764	624	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium avium-intracellulare	ncbi	120793	55883	0	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium bouchedurhonense	ncbi	120793	701041	3	
+Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium chimaera	ncbi	120793	222805	36	Mycobacterium intracellulare subsp. chimaera
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium colombiense	ncbi	120793	339268	35	
-Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium intracellulare	ncbi	120793	1767	225	
+Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium hominissuis	ncbi	120793	439334	272	Mycobacterium avium subsp. hominissuis
+Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium intracellulare	ncbi	120793	1767	226	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium lepraemurium	ncbi	120793	64667	1	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium mantenii	ncbi	120793	560555	7	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium marseillense	ncbi	120793	701042	16	
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium paraintracellulare	ncbi	120793	1138383	22	
+Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium paratuberculosis	ncbi	120793	1770	234	Mycobacterium avium subsp. paratuberculosis
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium senriense	ncbi	120793	2775496	2	
+Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium silvaticum	ncbi	120793	44282	2	Mycobacterium avium subsp. silvaticum
 Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium timonense	ncbi	120793	701043	3	
+Mycobacterium avium complex (MAC)	M. avium complex (MAC)	Mycobacterium yongonense	ncbi	120793	1203599	6	Mycobacterium intracellulare subsp. yongonense
 Mycobacterium kansasii complex	M. kansasii complex	Mycobacterium attenuatum	curated				
 Mycobacterium kansasii complex	M. kansasii complex	Mycobacterium gastri	curated				
 Mycobacterium kansasii complex	M. kansasii complex	Mycobacterium innocens	curated				
@@ -41,19 +46,22 @@ Mycobacterium simiae complex	M. simiae complex	Mycobacterium triplex	ncbi	224931
 Mycobacterium tuberculosis complex	M. tuberculosis complex	Mycobacterium canetti	ncbi	77643	78331	38	
 Mycobacterium tuberculosis complex	M. tuberculosis complex	Mycobacterium mungi	ncbi	77643	1844474	1	
 Mycobacterium tuberculosis complex	M. tuberculosis complex	Mycobacterium orygis	ncbi	77643	1305738	6	
-Mycobacterium tuberculosis complex	M. tuberculosis complex	Mycobacterium tuberculosis	ncbi	77643	1773	9109	
+Mycobacterium tuberculosis complex	M. tuberculosis complex	Mycobacterium tuberculosis	ncbi	77643	1773	9113	
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium liflandii	ncbi	2993898	261524	2	
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium marinum	ncbi	2993898	1781	102	
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium pseudoshottsii	ncbi	2993898	265949	7	
+Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium shinshuense	ncbi	2993898	1124626	2	Mycobacterium ulcerans subsp. shinshuense
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium shottsii	ncbi	2993898	133549	2	
 Mycobacterium ulcerans group	M. marinum/ulcerans group	Mycobacterium ulcerans	ncbi	2993898	1809	1037	
-Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium abscessus	ncbi	670516	36809	2673	Mycobacteroides abscessus
-Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium bolletii	curated				
-Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium chelonae	ncbi	670516	1774	94	Mycobacteroides chelonae
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium abscessus	ncbi	670516	36809	2675	Mycobacteroides abscessus
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium bolletii	ncbi	670516	319705	132	Mycobacteroides abscessus subsp. bolletii
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium bovistauri	ncbi	670516	2038731	1	[Mycobacterium] chelonae subsp. bovistauri
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium chelonae	ncbi	670516	1774	95	Mycobacteroides chelonae
 Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium franklinii	ncbi	670516	948102	12	Mycobacteroides franklinii
 Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium fukienense	ncbi	670516	1938594	0	[Mycobacterium] fukienense
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium gwanakae	ncbi	670516	2480908	2	[Mycobacterium] chelonae subsp. gwanakae
 Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium immunogenum	ncbi	670516	83262	20	Mycobacteroides immunogenum
-Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium massiliense	curated				
+Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium massiliense	ncbi	670516	1962118	445	Mycobacteroides abscessus subsp. massiliense
 Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium runyonii	ncbi	670516	3393498	0	[Mycobacterium] runyonii
 Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium salmoniphilum	ncbi	670516	404941	11	Mycobacteroides salmoniphilum
 Mycobacteroides	M. chelonae / M. abscessus complex	Mycobacterium saopaulense	ncbi	670516	1578165	4	Mycobacteroides saopaulense
