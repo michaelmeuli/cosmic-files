@@ -222,7 +222,9 @@ pub struct SampleSusceptibilityRecord {
 ///    M. yongonense → MAC).
 /// 9: NCBI rpoB pool includes complete-cds type strains (SLEN cap 3000 → 4500), e.g. the
 ///    M. bolletii and M. massiliense type strains.
-pub(crate) const ANALYSIS_VERSION: u32 = 9;
+/// 10: GTDB amplicon references add M. abscessus subsp. bolletii and massiliense genomes
+///     (cosmic-seq 64ba579).
+pub(crate) const ANALYSIS_VERSION: u32 = 10;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
