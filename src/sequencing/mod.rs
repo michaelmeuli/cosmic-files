@@ -64,6 +64,14 @@ use rrs3end::{Rrs3EndPosition1248, RrsSnpCall3End, RrsSusceptibilityCalls3End};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
 
+/// Minimum identity (percent) of a hit to be stored in any of the AB1 caches (in-memory, scan
+/// and preview disk caches). Lower hits are only shown when the preview asks for them
+/// ([`batch::analyse_ab1_all_hits`]), and those are never cached.
+pub const CACHE_MIN_IDENTITY: f32 = 98.0;
+
+/// Maximum number of hits per [`RefSource`] kept after an alignment, cached or shown.
+pub const MAX_HITS_PER_SOURCE: usize = 10;
+
 /// Sliding-window size (aligned columns) for [`trim_alignment_ends`].
 const ALIGN_TRIM_WINDOW: usize = 15;
 /// Minimum per-window match rate for [`trim_alignment_ends`] to accept a window as
@@ -546,6 +554,13 @@ pub(crate) fn truncate_per_source(hits: &mut Vec<SeqIdHit>, n: usize) {
         *count += 1;
         *count <= n
     });
+}
+
+/// Reduces `hits` to what the caches store: hits with identity ≥ [`CACHE_MIN_IDENTITY`], at
+/// most [`MAX_HITS_PER_SOURCE`] per source, preserving order.
+pub(crate) fn retain_cacheable(hits: &mut Vec<SeqIdHit>) {
+    hits.retain(|h| h.identity >= CACHE_MIN_IDENTITY);
+    truncate_per_source(hits, MAX_HITS_PER_SOURCE);
 }
 
 /// Within each `description` group, remove entries whose sequence (uppercased) is a contiguous
@@ -1259,6 +1274,20 @@ pub struct SeqData {
     /// listing doesn't touch AB1 files).
     pub read_opt: Option<Ab1Read>,
     pub seq_id_hits: Vec<SeqIdHit>,
+    /// Whether the hits below [`CACHE_MIN_IDENTITY`] were requested from the preview.
+    pub more_hits: MoreHits,
+}
+
+/// State of the preview's "show alignments below 98 %" request for one item.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MoreHits {
+    /// `seq_id_hits` are the cached hits (≥ [`CACHE_MIN_IDENTITY`] only).
+    #[default]
+    NotLoaded,
+    /// The unfiltered re-alignment is running.
+    Loading,
+    /// `seq_id_hits` are the unfiltered top [`MAX_HITS_PER_SOURCE`] per source (not cached).
+    Loaded,
 }
 
 /// The parts of [`SeqData`] that need the AB1 file's bytes.
@@ -1648,6 +1677,25 @@ mod tests {
         super::truncate_per_source(&mut hits, 1);
         let order: Vec<&str> = hits.iter().map(|h| h.accession.as_str()).collect();
         assert_eq!(order, ["n1", "g1"]);
+    }
+
+    #[test]
+    fn retain_cacheable_drops_low_identity_and_caps_per_source() {
+        use super::RefSource::{Gtdb, Ncbi};
+        let mut hits: Vec<_> = (0..12)
+            .map(|i| hit(&format!("n{i}"), "x", Ncbi, 100.0 - i as f32 * 0.1))
+            .collect();
+        hits.push(hit("n_low", "x", Ncbi, 97.9));
+        hits.push(hit("g1", "x", Gtdb, 98.0));
+        hits.push(hit("g2", "x", Gtdb, 90.0));
+        super::retain_cacheable(&mut hits);
+        let order: Vec<&str> = hits.iter().map(|h| h.accession.as_str()).collect();
+        assert_eq!(
+            order,
+            [
+                "n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "g1"
+            ]
+        );
     }
 
     #[test]

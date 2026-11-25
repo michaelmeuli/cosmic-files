@@ -12,8 +12,8 @@ use crate::location::Location;
 use crate::sequencing::batch::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use crate::sequencing::rrs3end::Rrs3EndPosition1248;
 use crate::sequencing::{
-    Ab1Channels, Ab1Read, RefSource, SeqData, SeqIdHit, SusceptibilityCalls, best_snp_hit,
-    hits_from, parse_ab1_quality, parse_ab1_sequence,
+    Ab1Channels, Ab1Read, CACHE_MIN_IDENTITY, MAX_HITS_PER_SOURCE, MoreHits, RefSource, SeqData,
+    SeqIdHit, SusceptibilityCalls, best_snp_hit, hits_from, parse_ab1_quality, parse_ab1_sequence,
     tb_data::{DrVariant, TB_ECOLI_MAPPING},
     trim_to_min_quality,
 };
@@ -28,6 +28,7 @@ pub(super) fn cached_seq_data(path: &Path, metadata: &std::fs::Metadata) -> SeqD
     SeqData {
         read_opt: None,
         seq_id_hits,
+        more_hits: MoreHits::NotLoaded,
     }
 }
 
@@ -126,14 +127,14 @@ fn push_species_calls<'a>(
 }
 
 /// Pushes the species-identification section of one reference source: heading, best-hit
-/// identity, and the top `max` hits as links to their alignments. Sources without hits (no
-/// references of that source for this target, e.g. NCBI for hsp65) are left out.
+/// identity, and the top [`MAX_HITS_PER_SOURCE`] hits as links to their alignments. Sources
+/// without hits (no references of that source for this target, e.g. NCBI for hsp65) are left
+/// out.
 fn push_source_section<'a>(
     mut details: Details<'a>,
     hits: &[SeqIdHit],
     source: RefSource,
     gene: &str,
-    max: usize,
 ) -> Details<'a> {
     let hits = hits_from(hits, source);
     let Some(best) = hits.first() else {
@@ -148,7 +149,7 @@ fn push_source_section<'a>(
         "Sequence identity to {}: {:.1}%",
         best.description, best.identity
     )));
-    for hit in hits.iter().take(max) {
+    for hit in hits.iter().take(MAX_HITS_PER_SOURCE) {
         details = details.push(
             widget::button::link(format!("{} ({:.1}%)", hit.description, hit.identity))
                 .on_press(Message::OpenSeqAlignment(Box::new((*hit).clone())))
@@ -168,6 +169,38 @@ pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCal
 }
 
 impl Item {
+    /// Text for a preview whose read could not be called. With no hits loaded yet, the
+    /// alignment may only have found hits below the cache's identity filter, which the
+    /// "show alignments below 98 %" button ([`Self::push_load_more`]) can show.
+    fn no_alignment_text(&self, hits: &[SeqIdHit], default: &'static str) -> String {
+        if hits.is_empty() && self.metadata.ab1_more_hits() != MoreHits::Loaded {
+            format!("No alignment with ≥{CACHE_MIN_IDENTITY:.0}% identity cached.")
+        } else {
+            default.to_string()
+        }
+    }
+
+    /// Pushes the "show alignments below 98 %" button, or a note while that re-alignment
+    /// runs. Nothing once the unfiltered hits are loaded.
+    fn push_load_more<'a>(&self, details: Details<'a>) -> Details<'a> {
+        let Some(path) = self.path_opt() else {
+            return details;
+        };
+        match self.metadata.ab1_more_hits() {
+            MoreHits::NotLoaded => details.push(widget::text::body("")).push(
+                widget::button::link(format!(
+                    "Show alignments below {CACHE_MIN_IDENTITY:.0}% identity"
+                ))
+                .on_press(Message::Ab1LoadMoreHits(path.clone()))
+                .padding(0),
+            ),
+            MoreHits::Loading => details
+                .push(widget::text::body(""))
+                .push(widget::text::body("Aligning…")),
+            MoreHits::Loaded => details,
+        }
+    }
+
     /// Returns seq_id_hits for preview, falling back to `AB1_SEQ_CACHE` when the item was
     /// created before the background scan ran (empty stored hits).
     ///
@@ -475,7 +508,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to references.",
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -517,7 +550,7 @@ impl Item {
             details = details.push(widget::text::heading(
                 "Percent identity to erm(41) references of abscessus subspecies:",
             ));
-            for hit in &hits[..hits.len().min(3)] {
+            for hit in hits.iter().take(MAX_HITS_PER_SOURCE) {
                 details = details.push(
                     widget::button::link(format!("{}: {:.1}%", hit.description, hit.identity,))
                         .on_press(Message::OpenSeqAlignment(Box::new(hit.clone())))
@@ -611,6 +644,7 @@ impl Item {
             }
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }
@@ -638,7 +672,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to references.",
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -677,10 +711,11 @@ impl Item {
             });
 
             for source in RefSource::ALL {
-                details = push_source_section(details, &hits, source, "hsp65", 3);
+                details = push_source_section(details, &hits, source, "hsp65");
             }
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }
@@ -707,7 +742,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to references.",
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -762,7 +797,7 @@ impl Item {
             }
 
             for source in RefSource::ALL {
-                details = push_source_section(details, &hits, source, "rpoB", 3);
+                details = push_source_section(details, &hits, source, "rpoB");
             }
 
             if region.is_mtb() {
@@ -770,6 +805,7 @@ impl Item {
             }
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }
@@ -849,7 +885,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to references.",
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -887,7 +923,7 @@ impl Item {
                 crate::sequencing::batch::species_from_16s_hits(&hits_from(&hits, source))
             });
 
-            details = push_source_section(details, &hits, RefSource::Ncbi, "16S", 8);
+            details = push_source_section(details, &hits, RefSource::Ncbi, "16S");
             if let Some(snp_hit) = best_snp_hit {
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
@@ -901,9 +937,10 @@ impl Item {
                     details = details.push(widget::text::body(snp.call_tag().to_string()));
                 }
             }
-            details = push_source_section(details, &hits, RefSource::Gtdb, "16S", 8);
+            details = push_source_section(details, &hits, RefSource::Gtdb, "16S");
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }
@@ -936,7 +973,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to references.",
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -1064,10 +1101,11 @@ impl Item {
             }
 
             for source in RefSource::ALL {
-                details = push_source_section(details, &hits, source, "16S 3'-End only", 8);
+                details = push_source_section(details, &hits, source, "16S 3'-End only");
             }
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }
@@ -1102,7 +1140,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to references.",
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -1141,7 +1179,7 @@ impl Item {
             });
 
             for source in RefSource::ALL {
-                details = push_source_section(details, &hits, source, "rrl", 3);
+                details = push_source_section(details, &hits, source, "rrl");
             }
             details = details.push(widget::text::body(""));
             if let Some(snp_hit) = best_snp_hit {
@@ -1215,6 +1253,7 @@ impl Item {
             }
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }
@@ -1251,7 +1290,7 @@ impl Item {
                 .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
         {
             details = details.push(widget::text::body(
-                "Could not align sequence to the pncA reference.",
+                self.no_alignment_text(&hits, "Could not align sequence to the pncA reference."),
             ));
             if let Some(sequence_length) = self.metadata.sequence_length() {
                 details = details.push(widget::text::body(format!(
@@ -1330,6 +1369,7 @@ impl Item {
             }
         }
 
+        details = self.push_load_more(details);
         column = column.push(details);
         column.into()
     }

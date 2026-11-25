@@ -60,7 +60,7 @@ use crate::localize::LANGUAGE_SORTER;
 use crate::location::{EditLocation, Location, SearchLocation};
 use crate::operation::{Controller, OperationError};
 use crate::scan::scan_search;
-use crate::sequencing::SeqIdHit;
+use crate::sequencing::{MoreHits, SeqIdHit};
 use crate::trash::TrashItemSize;
 use crate::{FxOrderMap, fl, format_size, menu, mime_app, mouse_area};
 
@@ -254,6 +254,16 @@ fn set_ab1_hits(item: &mut Item, hits: Vec<SeqIdHit>) {
     {
         (*is_susceptible, *susceptibility_calls) = ab1_susceptibility(&hits);
         sequence.seq_id_hits = hits;
+    }
+}
+
+fn set_ab1_more_hits(item: &mut Item, more_hits: MoreHits) {
+    if let ItemMetadata::Path {
+        sequence_opt: Some(sequence),
+        ..
+    } = &mut item.metadata
+    {
+        sequence.more_hits = more_hits;
     }
 }
 
@@ -461,6 +471,11 @@ pub enum Message {
     /// Alignment hits for an AB1 file the background scan didn't cover, computed on demand
     /// for the preview.
     Ab1Analysed(PathBuf, Vec<SeqIdHit>),
+    /// The preview asked for the hits below the cache's 98 % identity filter: re-align the
+    /// AB1 file in the background (not cached).
+    Ab1LoadMoreHits(PathBuf),
+    /// Result of [`Message::Ab1LoadMoreHits`]: the unfiltered top hits per source.
+    Ab1MoreHits(PathBuf, Vec<SeqIdHit>),
     /// The previewed AB1 file was read (chromatogram, lengths, quality).
     Ab1Read(PathBuf, Box<crate::sequencing::Ab1Read>),
     /// `AB1_SEQ_CACHE` gained results (startup preload, finished scan): fill listed AB1 items
@@ -2643,8 +2658,46 @@ impl Tab {
                     && let Some(item) = items
                         .iter_mut()
                         .find(|item| item.location_opt.as_ref() == Some(&location))
+                    && item.metadata.ab1_more_hits() != MoreHits::Loaded
                 {
                     set_ab1_hits(item, hits);
+                }
+            }
+            Message::Ab1LoadMoreHits(path) => {
+                let location = Location::Path(path.clone());
+                if let Some(ref mut items) = self.items_opt
+                    && let Some(item) = items
+                        .iter_mut()
+                        .find(|item| item.location_opt.as_ref() == Some(&location))
+                    && item.metadata.ab1_more_hits() == MoreHits::NotLoaded
+                {
+                    set_ab1_more_hits(item, MoreHits::Loading);
+                    commands.push(Command::Iced(
+                        cosmic::iced::Task::perform(
+                            async move {
+                                let hits = tokio::task::spawn_blocking({
+                                    let path = path.clone();
+                                    move || crate::sequencing::batch::analyse_ab1_all_hits(&path)
+                                })
+                                .await
+                                .unwrap_or_default();
+                                (path, hits)
+                            },
+                            |(path, hits)| Message::Ab1MoreHits(path, hits),
+                        )
+                        .into(),
+                    ));
+                }
+            }
+            Message::Ab1MoreHits(path, hits) => {
+                let location = Location::Path(path);
+                if let Some(ref mut items) = self.items_opt
+                    && let Some(item) = items
+                        .iter_mut()
+                        .find(|item| item.location_opt.as_ref() == Some(&location))
+                {
+                    set_ab1_hits(item, hits);
+                    set_ab1_more_hits(item, MoreHits::Loaded);
                 }
             }
             Message::Ab1Read(path, read) => {
@@ -2666,6 +2719,7 @@ impl Tab {
                     for item in items.iter_mut() {
                         if item.metadata.is_ab1()
                             && item.metadata.seq_id_hits().is_empty()
+                            && item.metadata.ab1_more_hits() != MoreHits::Loaded
                             && let Some(hits) =
                                 item.ab1_cached_hits().filter(|hits| !hits.is_empty())
                         {
@@ -5386,6 +5440,7 @@ impl Tab {
                 && let (Some(item), None) = (selected.next(), selected.next())
                 && item.metadata.is_ab1()
                 && item.metadata.seq_id_hits().is_empty()
+                && item.metadata.ab1_more_hits() == MoreHits::NotLoaded
                 && let Some(path) = item.path_opt().cloned()
             {
                 struct Wrapper {

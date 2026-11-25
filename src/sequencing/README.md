@@ -138,7 +138,7 @@ flowchart TD
     HITS --> MC["AB1_SEQ_CACHE[path]<br/>(16S also: SIXTEEN_S_HITS_CACHE[sample_id])"]
     HITS --> SUS["SusceptibilityCalls<br/>+ combined is_susceptible (§6)"]
     HITS --> SP["species<br/>(16S/rpoB: ties joined, e.g. 'gastri/kansasii')"]
-    SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores top 5 hits per source)"]
+    SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores hits ≥98%, max 10 per source)"]
 ```
 
 `parse_ab1_filename` ([`ab1_filename.rs`](ab1_filename.rs)) is the only place keywords are
@@ -311,7 +311,7 @@ classDiagram
         species_gtdb / identity_gtdb
         is_susceptible: Option~bool~
         susceptibility_calls: SusceptibilityCalls
-        seq_id_hits: Vec~SeqIdHit~ (top 5 per source)
+        seq_id_hits: Vec~SeqIdHit~ (≥98%, max 10 per source)
         analysis_version: u32
     }
     class SusceptibilityCalls {
@@ -373,7 +373,7 @@ classDiagram
 
 | Cache | Key → value | Where | Purpose |
 |---|---|---|---|
-| `AB1_SEQ_CACHE` | canonical path → (mtime, size, top 10 `SeqIdHit` per reference source) | memory | The preview panel reads hits without aligning on the UI thread. |
+| `AB1_SEQ_CACHE` | canonical path → (mtime, size, `SeqIdHit`s with identity ≥ 98 %, at most 10 per reference source) | memory | The preview panel reads hits without aligning on the UI thread. Lower hits are re-aligned on request ("Show alignments below 98% identity") and never cached. |
 | `SIXTEEN_S_HITS_CACHE` | sample_id → 16S hits | memory | Another file from the same sample can show its 16S species, even if the files are in different directories. |
 | `ab1_scan_cache.sqlite` / `ab1_scan_cache_2.sqlite` | canonical path → (mtime, size, version, record JSON) | disk (`ab1_cache_path`, else the user cache dir) | Rescanning unchanged files skips alignment. Rows of files no longer found under the scan dir are pruned. |
 | `ab1_preview_cache.sqlite` | same | disk | Same, for files opened outside the scan directories. |

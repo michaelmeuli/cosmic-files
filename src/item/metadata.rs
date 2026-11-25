@@ -177,6 +177,18 @@ impl ItemMetadata {
         )
     }
 
+    /// State of the preview's "show alignments below 98 %" request; `NotLoaded` for items
+    /// without AB1 data.
+    pub fn ab1_more_hits(&self) -> crate::sequencing::MoreHits {
+        match self {
+            Self::Path {
+                sequence_opt: Some(sequence),
+                ..
+            } => sequence.more_hits,
+            _ => crate::sequencing::MoreHits::NotLoaded,
+        }
+    }
+
     pub fn rrl_position_2058_2059_call(&self) -> RrlPosition2058_2059 {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt

@@ -20,13 +20,15 @@ use walkdir::WalkDir;
 
 pub use super::ab1_filename::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use super::{
-    DESC_MASSILIENSE, MIN_SEQ_ID_IDENTITY, RefSource, SeqIdHit, SusceptibilityCalls, best_snp_hit,
+    DESC_MASSILIENSE, MAX_HITS_PER_SOURCE, MIN_SEQ_ID_IDENTITY, RefSource, SeqIdHit,
+    SusceptibilityCalls, best_snp_hit,
     disk_cache::DiskCache,
     erm41::{Erm41SusceptibilityCalls, identify_sequence_erm41, is_susceptible_erm41},
     hits_from,
     hsp65::identify_sequence_hsp65,
     parse_ab1_quality, parse_ab1_sequence,
     pnca::{PncaSusceptibilityCalls, identify_sequence_pnca, is_susceptible_pnca},
+    retain_cacheable,
     rpob::{RpobSusceptibilityCalls, identify_sequence_rpob, is_susceptible_rpob},
     rrl::{
         RrlSusceptibilityCalls, identify_sequence_rrl_ntm, is_susceptible_rrl,
@@ -225,7 +227,8 @@ pub struct SampleSusceptibilityRecord {
 /// 10: GTDB amplicon references add M. abscessus subsp. bolletii and massiliense genomes
 ///     (cosmic-seq 64ba579).
 /// 11: rpoB species call is the top hit's description (no complex labels, no tie joining).
-pub(crate) const ANALYSIS_VERSION: u32 = 11;
+/// 12: cached hits are limited to identity ≥ 98 % and 10 per source (was 5 in scan records).
+pub(crate) const ANALYSIS_VERSION: u32 = 12;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -482,12 +485,12 @@ pub fn scan_ab1_directory(
         let key = canonical_path.to_string_lossy().into_owned();
         seen.insert(key.clone());
 
-        // Disk cache hit: mtime/size unchanged and seq_id_hits stored → reuse previous result.
+        // Disk cache hit: mtime/size unchanged and the record current → reuse previous result.
+        // A record without hits is reused too: its hits were all below the cache's 98 % filter
+        // (`retain_cacheable`), and re-aligning on every scan would only give the same.
         if let Some(cache) = &disk_cache {
             match cache.get(&key, mtime_secs, file_size) {
-                Some(cached)
-                    if !cached.seq_id_hits.is_empty() && cached_record_current(&cached) =>
-                {
+                Some(cached) if cached_record_current(&cached) => {
                     log::debug!(
                         "ab1_scan: disk cache hit for {} ({} hits)",
                         path.display(),
@@ -535,7 +538,7 @@ pub fn scan_ab1_directory(
         Option<SystemTime>,
     )| {
         analyse_ab1_file(&path, file_created, (mtime_secs, file_size))
-            .map(|(_, record)| (key, mtime_secs, file_size, record))
+            .map(|record| (key, mtime_secs, file_size, record))
     };
     match SCAN_POOL.as_ref() {
         Some(pool) if n_misses > 1 => {
@@ -598,19 +601,11 @@ pub fn scan_ab1_directory(
     records
 }
 
-/// Run the full alignment pipeline on one AB1 file: infer the gene from the filename, align the
-/// quality-trimmed read against that gene's references, and derive the susceptibility calls.
-///
-/// Populates [`AB1_SEQ_CACHE`] (with `stamp`, the file's [`file_stamp`]) and, for 16S reads,
-/// [`SIXTEEN_S_HITS_CACHE`] as a side effect. Returns the top 10 hits alongside the record,
-/// whose `seq_id_hits` keeps only the top 5. Returns `None` if the file can't be read.
-fn analyse_ab1_file(
-    path: &Path,
-    file_created: Option<SystemTime>,
-    stamp: (u64, u64),
-) -> Option<(Vec<SeqIdHit>, SampleSusceptibilityRecord)> {
-    // Canonicalize so the key matches the \\?\ -prefixed paths the file manager uses.
-    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+/// The alignment step of the pipeline for one AB1 file: infer the gene from the filename and
+/// align the quality-trimmed read against that gene's references. Returns
+/// `(sample_id, gene, file_name, hits)`, with the top [`MAX_HITS_PER_SOURCE`] hits per source
+/// and no identity filter. Writes no cache. Returns `None` if the file can't be read.
+fn align_ab1(path: &Path) -> Option<(String, Option<Ab1Gene>, String, Vec<SeqIdHit>)> {
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -628,7 +623,6 @@ fn analyse_ab1_file(
 
     // Dispatch on the gene `parse_ab1_filename` inferred, so the gene label in the record and
     // the analysis that runs can never disagree (it is the single source of keyword matching).
-    let is_16s = gene == Some(Ab1Gene::Rrs16S);
 
     let ab1_seq = parse_ab1_sequence(&bytes);
     let ab1_qual = parse_ab1_quality(&bytes);
@@ -652,55 +646,83 @@ fn analyse_ab1_file(
         _ => Vec::new(),
     };
     // Each identify_sequence_* function returns hits already sorted descending by identity;
-    // keep only the top 10 per reference source before cloning into the long-lived caches
-    // below, since scanning directories with many AB1 files otherwise accumulates one full
-    // (unbounded) hit list per file for the life of the process. Per source, so one database
-    // can't crowd the other out.
-    truncate_per_source(&mut seq_id_hits, 10);
+    // keep only the top MAX_HITS_PER_SOURCE per reference source, since scanning directories
+    // with many AB1 files otherwise accumulates one full (unbounded) hit list per file. Per
+    // source, so one database can't crowd the other out.
+    truncate_per_source(&mut seq_id_hits, MAX_HITS_PER_SOURCE);
     // pncA calls (~190 catalogue sites per hit) are only ever read from the top hit — here and
-    // in the preview's `ab1_susceptibility` — so drop them from the rest before caching.
+    // in the preview's `ab1_susceptibility` — so drop them from the rest.
     for hit in seq_id_hits.iter_mut().skip(1) {
         hit.pnca_snp_calls = Vec::new();
     }
+    Some((sample_id, gene, file_name, seq_id_hits))
+}
+
+/// Run the full pipeline on one AB1 file: align it ([`align_ab1`]) and derive the species and
+/// susceptibility calls from the unfiltered hits.
+///
+/// Only the hits that pass [`retain_cacheable`] (identity ≥ 98 %, at most
+/// [`MAX_HITS_PER_SOURCE`] per source) are stored: in [`AB1_SEQ_CACHE`] (with `stamp`, the
+/// file's [`file_stamp`]), for 16S reads in [`SIXTEEN_S_HITS_CACHE`], and in the returned
+/// record's `seq_id_hits`. The record's species, identity and calls still come from all hits,
+/// so the reports don't depend on the filter. Returns `None` if the file can't be read.
+fn analyse_ab1_file(
+    path: &Path,
+    file_created: Option<SystemTime>,
+    stamp: (u64, u64),
+) -> Option<SampleSusceptibilityRecord> {
+    // Canonicalize so the key matches the \\?\ -prefixed paths the file manager uses.
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let (sample_id, gene, file_name, all_hits) = align_ab1(path)?;
+
+    let (is_susceptible, susceptibility_calls) = susceptibility_from_hits(&all_hits);
+    let ncbi_hits = hits_from(&all_hits, RefSource::Ncbi);
+    let gtdb_hits = hits_from(&all_hits, RefSource::Gtdb);
+    let species = species_call(gene, &ncbi_hits);
+    let identity = ncbi_hits.first().map(|h| h.identity);
+    let species_gtdb = species_call(gene, &gtdb_hits);
+    let identity_gtdb = gtdb_hits.first().map(|h| h.identity);
+
+    let mut seq_id_hits = all_hits;
+    retain_cacheable(&mut seq_id_hits);
 
     // Populate the in-memory cache using the canonical path so it matches what item_from_entry() uses.
     log::debug!(
-        "ab1_scan: alignment done for {} → {} hits (top: {:?}, canonical={})",
+        "ab1_scan: alignment done for {} → {} cached hits ≥98% (top: {:?}, canonical={})",
         path.display(),
         seq_id_hits.len(),
         seq_id_hits.first().map(|h| (&h.description, h.identity)),
         canonical_path.display()
     );
     insert_hits(canonical_path, stamp, seq_id_hits.clone());
-    if is_16s && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write() {
+    if gene == Some(Ab1Gene::Rrs16S)
+        && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
+    {
         guard.insert(sample_id.clone(), seq_id_hits.clone());
     }
 
-    let (is_susceptible, susceptibility_calls) = susceptibility_from_hits(&seq_id_hits);
-
-    let ncbi_hits = hits_from(&seq_id_hits, RefSource::Ncbi);
-    let gtdb_hits = hits_from(&seq_id_hits, RefSource::Gtdb);
-    let record = SampleSusceptibilityRecord {
+    Some(SampleSusceptibilityRecord {
         sample_id,
         gene: gene.map(|g| g.label().to_string()),
         file_name,
         file_path: path.to_path_buf(),
         file_created,
         susceptibility_calls,
-        species: species_call(gene, &ncbi_hits),
-        identity: ncbi_hits.first().map(|h| h.identity),
-        species_gtdb: species_call(gene, &gtdb_hits),
-        identity_gtdb: gtdb_hits.first().map(|h| h.identity),
+        species,
+        identity,
+        species_gtdb,
+        identity_gtdb,
         is_susceptible,
-        seq_id_hits: {
-            let mut top = seq_id_hits.clone();
-            truncate_per_source(&mut top, 5);
-            top
-        },
+        seq_id_hits,
         analysis_version: ANALYSIS_VERSION,
-    };
+    })
+}
 
-    Some((seq_id_hits, record))
+/// All hits for one AB1 file for the preview's "show alignments below 98 %" request: the top
+/// [`MAX_HITS_PER_SOURCE`] per source without the cache's identity filter. Nothing is cached.
+/// Blocking: call from a worker thread.
+pub(crate) fn analyse_ab1_all_hits(path: &Path) -> Vec<SeqIdHit> {
+    align_ab1(path).map(|(.., hits)| hits).unwrap_or_default()
 }
 
 /// Put a disk-cached record's hits into the in-memory caches the preview reads from. `stamp`
@@ -767,8 +789,8 @@ pub fn preload_disk_cache(cache_file: &Path) -> usize {
 /// Results for one AB1 file for the preview panel. Looks them up, in order, in
 /// [`AB1_SEQ_CACHE`], the scan caches `scan_cache_files` (opened read-only, only if they
 /// exist), and the preview cache `cache_file`, each only while the file's mtime and size are
-/// unchanged. Only when none has them does it run [`analyse_ab1_file`] and store all of its
-/// hits in `cache_file`. Either way the hits end up in [`AB1_SEQ_CACHE`], keyed by canonical
+/// unchanged. Only when none has them does it run [`analyse_ab1_file`] and store its record
+/// (cached hits only: ≥ 98 %, at most 10 per source) in `cache_file`. Either way the hits end up in [`AB1_SEQ_CACHE`], keyed by canonical
 /// path. Blocking: call from a worker thread.
 pub(crate) fn analyse_ab1_for_preview(
     path: &Path,
@@ -789,8 +811,9 @@ pub(crate) fn analyse_ab1_for_preview(
 
     for scan_cache_file in scan_cache_files {
         if let Some(cache) = DiskCache::open_existing(scan_cache_file)
+            // A current record with no hits counts too: its hits were all below the cache's
+            // 98 % filter, and aligning again would only give the same.
             && let Some(record) = cache.get(&key, mtime_secs, file_size)
-            && !record.seq_id_hits.is_empty()
             && cached_record_current(&record)
         {
             log::debug!(
@@ -821,11 +844,9 @@ pub(crate) fn analyse_ab1_for_preview(
     }
 
     // Not cached: align without holding the lock, so other previews' cache hits aren't blocked.
-    let Some((seq_id_hits, mut record)) = analyse_ab1_file(path, file_created, stamp) else {
+    let Some(record) = analyse_ab1_file(path, file_created, stamp) else {
         return Vec::new();
     };
-    // Unlike the scan record (top 5, for the report), keep every hit the preview displays.
-    record.seq_id_hits.clone_from(&seq_id_hits);
 
     let mut guard = PREVIEW_DISK_CACHE
         .lock()
@@ -835,7 +856,7 @@ pub(crate) fn analyse_ab1_for_preview(
     {
         cache.put(&key, mtime_secs, file_size, &record);
     }
-    seq_id_hits
+    record.seq_id_hits
 }
 
 /// Write `records` to a CSV file at `out_path`.
