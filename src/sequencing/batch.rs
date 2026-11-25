@@ -224,7 +224,8 @@ pub struct SampleSusceptibilityRecord {
 ///    M. bolletii and M. massiliense type strains.
 /// 10: GTDB amplicon references add M. abscessus subsp. bolletii and massiliense genomes
 ///     (cosmic-seq 64ba579).
-pub(crate) const ANALYSIS_VERSION: u32 = 10;
+/// 11: rpoB species call is the top hit's description (no complex labels, no tie joining).
+pub(crate) const ANALYSIS_VERSION: u32 = 11;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -409,16 +410,10 @@ fn species_from_16s3end(hits: &[&SeqIdHit]) -> Option<String> {
     Some(first.description.clone())
 }
 
-/// For rpoB hits, concatenates species epithets of ties into e.g. "Mycobacterium gastri/kansasii".
+/// For rpoB hits, the best hit's description as the reference writes it: rpoB resolves species
+/// and subspecies, so ties are not joined and no complex label is used.
 pub(crate) fn species_from_rpob_hits(hits: &[&SeqIdHit]) -> Option<String> {
-    let first = hits.first()?;
-    if first.description.contains("abscessus") {
-        return Some("M. abscessus complex".to_string());
-    }
-    if first.description.contains("chelonae") {
-        return Some("M. chelonae".to_string());
-    }
-    join_epithets(&tied_hits(hits))
+    hits.first().map(|hit| hit.description.clone())
 }
 
 /// Walk `scan_path` recursively, analyse every `.ab1` file, and return a
@@ -1328,6 +1323,26 @@ mod tests {
             call_16s(&[("Mycobacteroides abscessus subsp. massiliense", 99.0)]),
             Some("M. chelonae / M. abscessus complex".to_string())
         );
+    }
+
+    #[test]
+    fn species_rpob_is_top_hit() {
+        let call = |hits: &[(&str, f32)]| {
+            let hits: Vec<SeqIdHit> = hits.iter().map(|&(d, i)| hit(d, i)).collect();
+            species_from_rpob_hits(&hits.iter().collect::<Vec<_>>())
+        };
+        assert_eq!(
+            call(&[
+                ("Mycobacterium gastri", 100.0),
+                ("Mycobacterium kansasii", 100.0)
+            ]),
+            Some("Mycobacterium gastri".to_string())
+        );
+        assert_eq!(
+            call(&[("Mycobacteroides abscessus subsp. massiliense", 99.0)]),
+            Some("Mycobacteroides abscessus subsp. massiliense".to_string())
+        );
+        assert_eq!(call(&[]), None);
     }
 
     #[test]

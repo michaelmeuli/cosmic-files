@@ -440,7 +440,9 @@ separate the members of a complex, so `species_from_16s_hits` names hits tied wi
 their group (`species_group`, keyed by the first two words of the description with NCBI's split
 genera such as *Mycobacteroides* and bracketed `[Mycobacterium]` read as GTDB's *Mycobacterium*), e.g.
 "M. kansasii complex"; ungrouped ties are joined by epithet ("Mycobacterium szulgai/malmoense").
-rpoB and 16S 3′-end calls are not grouped.
+rpoB and 16S 3′-end calls are not grouped. The rpoB call is the best hit's description as the
+reference writes it (e.g. "Mycobacteroides abscessus subsp. massiliense"): no complex label, and
+ties are not joined.
 
 Within each source, `dedup_substring_same_desc` removes any reference that is a substring of
 another reference with the same species name. Every `SeqIdHit` carries its `source`. The batch
