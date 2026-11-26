@@ -61,6 +61,7 @@ rayon = "1.12"
 async-ssh2-tokio = { version = "0.12.1", optional = true }
 russh-sftp = { version = "~2.1", optional = true }
 keyring = { version = "3", features = ["windows-native", "linux-native-sync-persistent", "apple-native", "crypto-rust"], optional = true }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls-tls"], optional = true }
 mime = "0.3.17"
 serde_json = "1.0.149"
 csv = "1.4.0"
@@ -147,7 +148,7 @@ dbus-config = ["libcosmic/dbus-config"]
 desktop = ["libcosmic/desktop", "dep:cosmic-mime-apps", "dep:xdg"]
 desktop-applet = []
 gvfs = ["dep:gio", "dep:glib"]
-russh = ["dep:async-ssh2-tokio", "dep:russh-sftp", "dep:keyring"]
+russh = ["dep:async-ssh2-tokio", "dep:russh-sftp", "dep:keyring", "dep:lettre"]
 io-uring = ["compio/io-uring"]
 jemalloc = ["dep:tikv-jemallocator"]
 notify = ["dep:notify-rust"]

@@ -236,11 +236,23 @@ pub struct TBConfig {
     /// `ab1_scan_path`. The password is kept in the OS keyring, not here.
     pub microsynth_username: String,
     pub report_max_age_days: u32,
+    /// SMTP server for the "new Microsynth files" email (empty = no email). The SMTP password
+    /// is kept in the OS keyring, not here.
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_username: String,
+    /// Sender address of the email.
+    pub email_from: String,
+    /// Recipient addresses, comma separated.
+    pub email_to: String,
 }
 
 /// Default cutoff for [`TBConfig::report_max_age_days`]: samples older than this
 /// are excluded from the generated PDF report.
 const DEFAULT_REPORT_MAX_AGE_DAYS: u32 = 60;
+
+/// Default for [`TBConfig::smtp_port`] (STARTTLS submission).
+const DEFAULT_SMTP_PORT: u16 = 587;
 
 impl Default for TBConfig {
     fn default() -> Self {
@@ -261,6 +273,11 @@ impl Default for TBConfig {
             ntfy_topic: String::new(),
             microsynth_username: String::new(),
             report_max_age_days: DEFAULT_REPORT_MAX_AGE_DAYS,
+            smtp_host: String::new(),
+            smtp_port: DEFAULT_SMTP_PORT,
+            smtp_username: String::new(),
+            email_from: String::new(),
+            email_to: String::new(),
         }
     }
 }

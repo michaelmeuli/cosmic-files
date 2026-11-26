@@ -31,8 +31,10 @@ const KEYRING_SERVICE: &str = "cosmic-files-microsynth";
 const MANIFEST_NAME: &str = ".microsynth_sync.json";
 
 /// Outcome of one [`sync_ab1`] run.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncSummary {
+    /// Paths of the `.ab1` files written in this run (the "new" files).
+    pub new_files: Vec<PathBuf>,
     /// Remote files (archives or loose `.ab1`) fetched in this run.
     pub downloaded: usize,
     /// `.ab1` files written to disk (extracted from archives or copied).
@@ -288,10 +290,10 @@ fn write_file(local: &Path, data: &[u8], mtime: u64) -> anyhow::Result<()> {
 
 /// Extracts every `.ab1` entry of a zip archive directly into `out_dir`, dropping any
 /// folders inside the archive. Extracted files get `mtime` so rescans hit the AB1 disk
-/// cache. Returns the number of `.ab1` files written.
-fn extract_ab1_from_zip(data: &[u8], out_dir: &Path, mtime: u64) -> anyhow::Result<usize> {
+/// cache. Returns the paths of the `.ab1` files written.
+fn extract_ab1_from_zip(data: &[u8], out_dir: &Path, mtime: u64) -> anyhow::Result<Vec<PathBuf>> {
     let mut archive = zip::ZipArchive::new(Cursor::new(data)).context("opening zip")?;
-    let mut written = 0;
+    let mut written = Vec::new();
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         if !entry.is_file() {
@@ -312,7 +314,7 @@ fn extract_ab1_from_zip(data: &[u8], out_dir: &Path, mtime: u64) -> anyhow::Resu
         let mut buf = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
         entry.read_to_end(&mut buf)?;
         write_file(&local, &buf, mtime)?;
-        written += 1;
+        written.push(local);
     }
     Ok(written)
 }
@@ -417,16 +419,21 @@ pub async fn sync_ab1(
                 match fetch(&sftp, file).await {
                     Ok(data) => {
                         summary.downloaded += 1;
-                        write_file(&local, &data, file.mtime).map(|()| 1)
+                        write_file(&local, &data, file.mtime).map(|()| vec![local.clone()])
                     }
                     Err(e) => Err(e),
                 }
             }
         };
         match result {
-            Ok(n) => {
-                log::debug!("microsynth: {} → {n} .ab1 file(s)", file.relative);
-                summary.ab1_written += n;
+            Ok(written) => {
+                log::debug!(
+                    "microsynth: {} → {} .ab1 file(s)",
+                    file.relative,
+                    written.len()
+                );
+                summary.ab1_written += written.len();
+                summary.new_files.extend(written);
             }
             Err(e) => {
                 log::warn!("microsynth: {} failed: {e:#}", file.remote);
@@ -593,8 +600,10 @@ mod tests {
             ("report.pdf", b"%PDF"),
         ]);
         let dir = temp_dir("zip");
-        let n = extract_ab1_from_zip(&data, &dir, 1_700_000_000).unwrap();
-        assert_eq!(n, 2);
+        let written = extract_ab1_from_zip(&data, &dir, 1_700_000_000).unwrap();
+        assert_eq!(written.len(), 2);
+        assert!(written.contains(&dir.join("s1_rrl.ab1")));
+        assert!(written.contains(&dir.join("s2.AB1")));
         assert_eq!(std::fs::read(dir.join("s1_rrl.ab1")).unwrap(), b"AB1A");
         assert_eq!(std::fs::read(dir.join("s2.AB1")).unwrap(), b"AB1B");
         // No folders are created, and non-AB1 entries are ignored.
@@ -606,7 +615,9 @@ mod tests {
         assert!(!dir.join("s1_rrl.seq").exists());
         assert!(!dir.join("report.pdf").exists());
         // Second extraction writes nothing: files already match.
-        assert_eq!(extract_ab1_from_zip(&data, &dir, 1_700_000_000).unwrap(), 0);
+        assert!(extract_ab1_from_zip(&data, &dir, 1_700_000_000)
+            .unwrap()
+            .is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -616,13 +627,14 @@ mod tests {
         let newer = make_zip(&[("x.ab1", b"NEW")]);
         let older = make_zip(&[("x.ab1", b"OLD-VERSION")]);
         assert_eq!(
-            extract_ab1_from_zip(&newer, &dir, 2_000_000_000).unwrap(),
+            extract_ab1_from_zip(&newer, &dir, 2_000_000_000)
+                .unwrap()
+                .len(),
             1
         );
-        assert_eq!(
-            extract_ab1_from_zip(&older, &dir, 1_000_000_000).unwrap(),
-            0
-        );
+        assert!(extract_ab1_from_zip(&older, &dir, 1_000_000_000)
+            .unwrap()
+            .is_empty());
         assert_eq!(std::fs::read(dir.join("x.ab1")).unwrap(), b"NEW");
         std::fs::remove_dir_all(&dir).unwrap();
     }

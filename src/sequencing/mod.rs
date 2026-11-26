@@ -38,8 +38,11 @@ pub mod ab1_filename;
 pub mod batch;
 pub mod bed;
 pub(crate) mod disk_cache;
+#[cfg(feature = "russh")]
+pub mod email_notify;
 pub mod erm41;
 pub mod hsp65;
+pub mod kansasii_align_pdf;
 #[cfg(feature = "russh")]
 pub mod microsynth;
 pub mod ntfy_notify;
@@ -1332,9 +1335,7 @@ pub fn build_report_pdf(
     records: &[batch::SampleSusceptibilityRecord],
     report_max_age_days: u32,
 ) -> Vec<u8> {
-    use printpdf::*;
-
-    let max_age = std::time::Duration::from_secs(u64::from(report_max_age_days) * 24 * 60 * 60);
+    let max_age =std::time::Duration::from_secs(u64::from(report_max_age_days) * 24 * 60 * 60);
     let now = std::time::SystemTime::now();
 
     let filtered: Vec<&batch::SampleSusceptibilityRecord> = records
@@ -1346,8 +1347,28 @@ pub fn build_report_pdf(
         })
         .collect();
 
+    build_report_pdf_inner(&filtered, "AB1 Susceptibility Report")
+}
+
+/// Report of only the given records (the files newly downloaded from Microsynth): same table
+/// and gene/identity filter as [`build_report_pdf`], but no age filter.
+pub fn build_new_files_report_pdf(records: &[&batch::SampleSusceptibilityRecord]) -> Vec<u8> {
+    let filtered: Vec<&batch::SampleSusceptibilityRecord> = records
+        .iter()
+        .copied()
+        .filter(|r| r.gene.is_some() && r.best_identity().is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY))
+        .collect();
+    build_report_pdf_inner(&filtered, "AB1 Report - new Microsynth files")
+}
+
+fn build_report_pdf_inner(
+    filtered: &[&batch::SampleSusceptibilityRecord],
+    title: &str,
+) -> Vec<u8> {
+    use printpdf::*;
+
     let (doc, page1, layer1) = PdfDocument::new(
-        "AB1 Susceptibility Report",
+        title,
         Mm(PDF_PAGE_W),
         Mm(PDF_PAGE_H),
         "Layer 1",
@@ -1362,7 +1383,7 @@ pub fn build_report_pdf(
 
     layer.use_text(
         format!(
-            "AB1 Susceptibility Report  -  {}  ({} records)",
+            "{title}  -  {}  ({} records)",
             pdf_current_date(),
             filtered.len()
         ),
@@ -1379,7 +1400,7 @@ pub fn build_report_pdf(
 
     let mut layer_n = 2usize;
 
-    for rec in &filtered {
+    for rec in filtered {
         if y < PDF_MARGIN_B {
             let (new_page, new_layer) =
                 doc.add_page(Mm(PDF_PAGE_W), Mm(PDF_PAGE_H), format!("Layer {layer_n}"));

@@ -560,6 +560,24 @@ pub enum Message {
     SyncMicrosynth,
     #[cfg(feature = "russh")]
     MicrosynthSyncComplete(Result<crate::sequencing::microsynth::SyncSummary, String>),
+    /// Edit one of the SMTP / email settings.
+    #[cfg(feature = "russh")]
+    SetSmtp(SmtpField, String),
+    #[cfg(feature = "russh")]
+    SmtpPasswordInput(String),
+    #[cfg(feature = "russh")]
+    SaveSmtpPassword,
+}
+
+/// The text settings of the "new Microsynth files" email.
+#[cfg(feature = "russh")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SmtpField {
+    Host,
+    Port,
+    Username,
+    From,
+    To,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -878,6 +896,16 @@ pub struct App {
     /// Whether the OS keyring holds a password for the configured Microsynth user.
     #[cfg(feature = "russh")]
     microsynth_password_saved: bool,
+    /// Unsaved text in the SMTP password field (never persisted).
+    #[cfg(feature = "russh")]
+    smtp_password_input: String,
+    /// Whether the OS keyring holds a password for the configured SMTP user.
+    #[cfg(feature = "russh")]
+    smtp_password_saved: bool,
+    /// `.ab1` files written by the latest Microsynth sync, reported (and cleared) by the next
+    /// scan.
+    #[cfg(feature = "russh")]
+    pending_new_ab1: Vec<std::path::PathBuf>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
     layer_sizes: FxHashMap<window::Id, Size>,
     #[cfg(all(feature = "wayland", feature = "desktop-applet"))]
@@ -2619,6 +2647,85 @@ impl App {
         }
     }
 
+    /// After a scan that followed a Microsynth sync: builds the report of only the files that
+    /// sync wrote plus the kansasii-complex alignment PDF, saves both to `out_dir` and emails
+    /// them. Does nothing when the sync wrote no files.
+    #[cfg(feature = "russh")]
+    fn report_new_files(
+        &mut self,
+        records: &[crate::sequencing::SampleSusceptibilityRecord],
+        out_dir: &std::path::Path,
+    ) {
+        use crate::sequencing::{
+            build_new_files_report_pdf, email_notify, kansasii_align_pdf::build_kansasii_alignment_pdf,
+        };
+        let new_files = std::mem::take(&mut self.pending_new_ab1);
+        if new_files.is_empty() {
+            return;
+        }
+        let names: std::collections::HashSet<String> = new_files
+            .iter()
+            .filter_map(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect();
+        let selected: Vec<&crate::sequencing::SampleSusceptibilityRecord> = records
+            .iter()
+            .filter(|r| names.contains(&r.file_name))
+            .collect();
+        if selected.is_empty() {
+            return;
+        }
+
+        let mut attachments = vec![(
+            "ab1_new_files_report.pdf".to_string(),
+            build_new_files_report_pdf(&selected),
+        )];
+        if let Some(pdf) = build_kansasii_alignment_pdf(&selected) {
+            attachments.push(("kansasii_complex_alignment.pdf".to_string(), pdf));
+        }
+        for (name, bytes) in &attachments {
+            if let Err(e) = std::fs::write(out_dir.join(name), bytes) {
+                log::warn!("{name} write failed: {e}");
+            }
+        }
+
+        let cfg = email_notify::EmailConfig::from_tb_config(&self.config.tb_config);
+        if !cfg.is_configured() {
+            log::info!("new Microsynth files: email not configured, PDFs saved only");
+            return;
+        }
+        let subject = format!(
+            "New AB1 files from Microsynth - {} file(s)",
+            selected.len()
+        );
+        let body = format!(
+            "{} new AB1 file(s) were downloaded from Microsynth ({} in the report).\n\
+             Attached: new-files report{}.",
+            names.len(),
+            selected.len(),
+            if attachments.len() > 1 {
+                " and M. kansasii complex alignment"
+            } else {
+                " (no M. kansasii complex reads, so no alignment PDF)"
+            }
+        );
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let password = email_notify::load_password(&cfg.username).unwrap_or_default();
+                if !cfg.username.is_empty() && password.is_empty() {
+                    anyhow::bail!("no SMTP password in keyring");
+                }
+                email_notify::send_report_email(&cfg, &password, &subject, &body, attachments)
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => log::info!("new Microsynth files: email sent"),
+                Ok(Err(e)) => log::warn!("new Microsynth files: email failed: {e:#}"),
+                Err(e) => log::warn!("new Microsynth files: email task failed: {e}"),
+            }
+        });
+    }
+
     /// Message that starts the periodic AB1 run: sync-then-scan, or just scan.
     fn ab1_scan_message(&self) -> Message {
         #[cfg(feature = "russh")]
@@ -2656,6 +2763,44 @@ impl App {
                 )
                 .into(),
         )
+    }
+
+    /// SMTP / email settings rows for the "new Microsynth files" report.
+    #[cfg(feature = "russh")]
+    fn email_settings(&self) -> Vec<Element<'_, Message>> {
+        let c = &self.config.tb_config;
+        let field = |label: &'static str, hint: &'static str, value: &str, f: SmtpField| {
+            Element::from(
+                widget::settings::item::builder(label).control(
+                    widget::text_input(hint, value.to_string())
+                        .on_input(move |v| Message::SetSmtp(f, v)),
+                ),
+            )
+        };
+        let placeholder = if self.smtp_password_saved {
+            "saved in keyring (type to replace, Enter to save)"
+        } else {
+            "Enter to save in keyring"
+        };
+        vec![
+            field("SMTP host (new-files email)", "smtp.example.org", &c.smtp_host, SmtpField::Host),
+            field("SMTP port", "587", &c.smtp_port.to_string(), SmtpField::Port),
+            field("SMTP username", "", &c.smtp_username, SmtpField::Username),
+            widget::settings::item::builder("SMTP password")
+                .control(
+                    widget::secure_input(placeholder, &self.smtp_password_input, None, true)
+                        .on_input(Message::SmtpPasswordInput)
+                        .on_submit(|_| Message::SaveSmtpPassword),
+                )
+                .into(),
+            field("Email from", "lab@example.org", &c.email_from, SmtpField::From),
+            field("Email to (comma separated)", "a@example.org, b@example.org", &c.email_to, SmtpField::To),
+        ]
+    }
+
+    #[cfg(not(feature = "russh"))]
+    fn email_settings(&self) -> Vec<Element<'_, Message>> {
+        Vec::new()
     }
 
     #[cfg(not(feature = "russh"))]
@@ -2710,6 +2855,7 @@ impl App {
                 )
                 .add_maybe(self.microsynth_settings_username())
                 .add_maybe(self.microsynth_settings_password())
+                .extend(self.email_settings())
                 .add(
                     widget::settings::item::builder("AB1 cache file").control(
                         widget::text_input("", &self.config.tb_config.ab1_cache_path)
@@ -2987,12 +3133,22 @@ impl Application for App {
             microsynth_password_input: String::new(),
             #[cfg(feature = "russh")]
             microsynth_password_saved: false,
+            #[cfg(feature = "russh")]
+            smtp_password_input: String::new(),
+            #[cfg(feature = "russh")]
+            smtp_password_saved: false,
+            #[cfg(feature = "russh")]
+            pending_new_ab1: Vec::new(),
         };
 
         #[cfg(feature = "russh")]
         {
             app.microsynth_password_saved = crate::sequencing::microsynth::load_password(
                 &app.config.tb_config.microsynth_username,
+            )
+            .is_some();
+            app.smtp_password_saved = crate::sequencing::email_notify::load_password(
+                &app.config.tb_config.smtp_username,
             )
             .is_some();
         }
@@ -6676,9 +6832,57 @@ impl Application for App {
                 });
             }
             #[cfg(feature = "russh")]
+            Message::SetSmtp(field, v) => {
+                let mut tb_config = self.config.tb_config.clone();
+                let v = v.trim().to_string();
+                match field {
+                    SmtpField::Host => tb_config.smtp_host = v,
+                    SmtpField::Port => match v.parse::<u16>() {
+                        Ok(port) => tb_config.smtp_port = port,
+                        Err(_) => return Task::none(),
+                    },
+                    SmtpField::Username => {
+                        tb_config.smtp_username = v;
+                        self.smtp_password_saved = crate::sequencing::email_notify::load_password(
+                            &tb_config.smtp_username,
+                        )
+                        .is_some();
+                    }
+                    SmtpField::From => tb_config.email_from = v,
+                    SmtpField::To => tb_config.email_to = v,
+                }
+                config_set!(tb_config, tb_config);
+                return self.update_config();
+            }
+            #[cfg(feature = "russh")]
+            Message::SmtpPasswordInput(v) => {
+                self.smtp_password_input = v;
+            }
+            #[cfg(feature = "russh")]
+            Message::SaveSmtpPassword => {
+                let password = std::mem::take(&mut self.smtp_password_input);
+                if password.is_empty() {
+                    return Task::none();
+                }
+                match crate::sequencing::email_notify::store_password(
+                    &self.config.tb_config.smtp_username,
+                    &password,
+                ) {
+                    Ok(()) => {
+                        self.smtp_password_saved = true;
+                        log::info!("email: SMTP password saved to keyring");
+                    }
+                    Err(e) => log::warn!("email: saving SMTP password failed: {e:#}"),
+                }
+            }
+            #[cfg(feature = "russh")]
             Message::MicrosynthSyncComplete(result) => {
-                if let Err(e) = result {
-                    log::warn!("microsynth: sync failed: {e}");
+                match result {
+                    Ok(summary) => self.pending_new_ab1 = summary.new_files,
+                    Err(e) => {
+                        log::warn!("microsynth: sync failed: {e}");
+                        self.pending_new_ab1.clear();
+                    }
                 }
                 // Always scan, so files already on disk are analysed even if the download failed.
                 return self.update(Message::ScanAb1Directory);
@@ -6790,6 +6994,10 @@ impl Application for App {
                             log::warn!("ntfy notification failed: {e}");
                         }
                     });
+                }
+                #[cfg(feature = "russh")]
+                if let Some(dir) = pdf_path.parent() {
+                    self.report_new_files(&records, dir);
                 }
                 return self.refresh_ab1_items();
             }
