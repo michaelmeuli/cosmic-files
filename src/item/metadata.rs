@@ -6,7 +6,10 @@ use crate::sequencing::erm41::Erm41Position28;
 use crate::sequencing::rrl::RrlPosition2058_2059;
 use crate::sequencing::rrs3end::Rrs3EndPosition1248;
 use crate::sequencing::tb_data::TbProfilerJson;
-use crate::sequencing::{Ab1Channels, SeqData, SeqIdHit, SusceptibilityCalls};
+use crate::sequencing::{
+    Ab1Channels, DESC_ABSCESSUS, DESC_BOLLETII, DESC_MASSILIENSE, SeqData, SeqIdHit,
+    SusceptibilityCalls,
+};
 use crate::trash::{TrashItem, TrashItemSize};
 
 #[derive(Clone, Debug)]
@@ -275,7 +278,7 @@ impl ItemMetadata {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
                 .and_then(|s| s.seq_id_hits.first())
-                .map(|h| h.description == "Mycobacteroides abscessus subsp. abscessus")
+                .map(|h| h.description == DESC_ABSCESSUS)
                 .unwrap_or(false),
             _ => false,
         }
@@ -286,18 +289,23 @@ impl ItemMetadata {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
                 .and_then(|s| s.seq_id_hits.first())
-                .map(|h| h.description == "Mycobacteroides abscessus subsp. bolletii")
+                .map(|h| h.description == DESC_BOLLETII)
                 .unwrap_or(false),
             _ => false,
         }
     }
 
+    /// Matches both spellings: erm(41) hits use [`DESC_MASSILIENSE`], NCBI hits of other genes
+    /// the full genus name.
     pub fn is_massiliense_seq_id(&self) -> bool {
         match self {
             Self::Path { sequence_opt, .. } => sequence_opt
                 .as_ref()
                 .and_then(|s| s.seq_id_hits.first())
-                .map(|h| h.description == "Mycobacteroides abscessus subsp. massiliense")
+                .map(|h| {
+                    h.description == DESC_MASSILIENSE
+                        || h.description == "Mycobacteroides abscessus subsp. massiliense"
+                })
                 .unwrap_or(false),
             _ => false,
         }

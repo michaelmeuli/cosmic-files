@@ -175,12 +175,12 @@ The heading of each pane is the lab's protocol name. In species previews, hits a
 
 | Preview | Species information | Gene-specific content | Verdict text |
 |---|---|---|---|
-| **erm(41)** | Identity to the three *M. abscessus* subspecies references | Position 28, loss-of-function SNPs, chromatogram around position 28 | Macrolide: susceptible or inducible resistance |
+| **erm(41)** | Identity to the three *M. abscessus* subspecies references | Position 28, loss-of-function SNPs, chromatogram around position 28 | Macrolide: susceptible or inducible resistance, with overrides (section 4) |
 | **hsp65** | 16S call of the same sample; GTDB hits | none | none |
 | **rpoB** | 16S call of the same sample; rpoB call per source; *M. chelonae* note when 16S and rpoB support it | Mtb regions only: WHO-catalogue sites | Mtb regions only: rifampicin |
 | **16S** | Own 16S call per source; NCBI and GTDB hits | rrs aminoglycoside SNPs, listed between the two sections | none |
 | **16S 3′ end** | 16S call of the same sample; *marinum* / *ulcerans* note | Position 1248, rrs SNPs, chromatogram, hits per source | none (position 1248 gives the species) |
-| **rrl** | 16S call of the same sample; hits per source | Catalogue SNPs, chromatogram around *E. coli* 2058/2059 | Macrolide, from 2058/2059 |
+| **rrl** | 16S call of the same sample; hits per source | Catalogue SNPs, chromatogram around *E. coli* 2058/2059 | Macrolide, from 2058/2059 and catalogue SNPs |
 | **pncA** | Best hit only | WHO-catalogue sites, alignment link | Pyrazinamide |
 | **TBProfiler** | none | Database version, resistance variants by confidence, *E. coli* coordinates, buttons to open or download the result files | per variant |
 
@@ -192,21 +192,22 @@ the 16S lines read "No species identified".
 
 The combined verdict (`susceptibility_from_hits` in [batch.rs](../src/sequencing/batch.rs)) is
 the first gene with a result, in the order erm(41) → rrl → rrs → rrs 3′ end → pncA → rpoB. The
-scan and the preview call the same function, but what a pane displays can differ from the report:
+scan and the preview call the same function, and the verdict sentence of a pane shows the
+combined call of its gene, including these overrides:
 
-- **erm(41) pane text uses position 28 only.** The combined verdict also treats loss-of-function
-  SNPs and *M. abscessus* subsp. *massiliense* as susceptible. A read with T28 can show
-  "inducible macrolide resistance" in the pane while the report says susceptible.
-- **erm(41) subspecies checks do not match.** The pane compares hit names with
-  "Mycobacteroides abscessus subsp. …", but erm(41) hits are named "M. abscessus subsp. …". As a
-  result the "erm(41) *position*" heading is not shown, and the chromatogram is not hidden for
-  *massiliense*.
-- **rrl pane text uses positions 2058/2059 only.** A resistance SNP elsewhere appears in the SNP
-  list and counts in the combined verdict, but the sentence below can still say susceptible.
-- **The preview may work from fewer hits.** It uses the cached hits (≥ 98 %), while the scan
-  computes its calls from all hits before filtering.
+| Gene | Override | What the pane says |
+|---|---|---|
+| erm(41) | *M. abscessus* subsp. *massiliense* is always susceptible | Susceptible, with the reason, even with T28 |
+| erm(41) | A loss-of-function SNP makes the read susceptible | Susceptible, with the reason, even with T28 |
+| rrl | A catalogued resistance SNP makes the read resistant | Resistant, even when A2058 and A2059 are wildtype or not called |
 
-Treat the SNP list and the report together; do not rely on the verdict sentence alone.
+For *massiliense*, the erm(41) pane also leaves out the chromatogram. The "erm(41) *position 28*"
+heading is shown for *abscessus* and *bolletii* only.
+
+One difference remains: **the preview may work from fewer hits.** It uses the cached hits
+(≥ 98 %), while the scan computes its calls from all hits before filtering. A pane can therefore
+differ from the report for a read with lower-identity hits; **Show alignments below 98%
+identity** recomputes the pane's calls from the unfiltered hits.
 
 ## 5. Reports
 

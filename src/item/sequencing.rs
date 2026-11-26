@@ -10,6 +10,8 @@ use super::{Item, ItemMetadata};
 use crate::fl;
 use crate::location::Location;
 use crate::sequencing::batch::{Ab1Gene, RpoBRegion, parse_ab1_filename};
+use crate::sequencing::erm41::{Erm41SusceptibilityCalls, is_susceptible_erm41_by_lof_snps};
+use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls};
 use crate::sequencing::rrs3end::Rrs3EndPosition1248;
 use crate::sequencing::{
     Ab1Channels, Ab1Read, CACHE_MIN_IDENTITY, MAX_HITS_PER_SOURCE, MoreHits, RefSource, SeqData,
@@ -166,6 +168,46 @@ fn push_source_section<'a>(
 /// preview and the report always agree.
 pub fn ab1_susceptibility(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCalls) {
     crate::sequencing::batch::susceptibility_from_hits(hits)
+}
+
+/// Verdict sentence of the erm(41) preview, from the combined erm(41) call (position 28 with
+/// the *massiliense* and loss-of-function overrides). The second element names the override
+/// behind a susceptible verdict, if one applies. `None`: no verdict.
+fn erm41_verdict_text(
+    calls: &Erm41SusceptibilityCalls,
+    is_massiliense: bool,
+) -> Option<(&'static str, Option<&'static str>)> {
+    Some(match calls.is_susceptible? {
+        true => {
+            let reason = if is_massiliense {
+                Some("M. abscessus subsp. massiliense: erm(41) is non-functional.")
+            } else if is_susceptible_erm41_by_lof_snps(&calls.lof_snp_calls) == Some(true) {
+                Some("erm(41) carries a loss-of-function mutation.")
+            } else {
+                None
+            };
+            ("Predicted to be susceptible to macrolides.", reason)
+        }
+        false => ("Predicted inducible macrolide resistance.", None),
+    })
+}
+
+/// Verdict sentence of the rrl preview, from the combined rrl call (positions 2058/2059 and
+/// the catalogue SNPs), worded by what positions 2058/2059 show. `None`: no verdict.
+fn rrl_verdict_text(calls: &RrlSusceptibilityCalls) -> Option<&'static str> {
+    Some(match (calls.is_susceptible?, calls.position_2058_2059) {
+        (true, _) => "E. coli positions A2058 and A2059 are wt (macrolide susceptible).",
+        (false, Some(RrlPosition2058_2059::ResistanceConferringMutation)) => {
+            "Mutation in E. coli A2058 and/or A2059. Predicted macrolide resistance."
+        }
+        (false, Some(RrlPosition2058_2059::SusceptibleWildtype)) => {
+            "A2058 and A2059 are wt, but a catalogued resistance mutation was found. \
+             Predicted macrolide resistance."
+        }
+        (false, Some(RrlPosition2058_2059::Undetermined) | None) => {
+            "Catalogued resistance mutation found. Predicted macrolide resistance."
+        }
+    })
 }
 
 impl Item {
@@ -615,7 +657,8 @@ impl Item {
                 .height(Length::Fixed(200.0));
                 details = details.push(canvas);
                 details = details.push(widget::text::body(""));
-            } else {
+            } else if !self.metadata.is_massiliense_seq_id() {
+                // No placeholder for massiliense: its chromatogram is left out on purpose.
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(chromatogram_placeholder(
                     &self.metadata,
@@ -623,24 +666,14 @@ impl Item {
                 )));
                 details = details.push(widget::text::body(""));
             }
-            match self
-                .metadata
-                .susceptibility_calls()
-                .erm41
-                .position_28
-                .and_then(|p| p.is_susceptible())
-            {
-                Some(true) => {
-                    details = details.push(widget::text::heading(
-                        "Predicted to be susceptible to macrolides.",
-                    ))
+            if let Some((verdict, reason)) = erm41_verdict_text(
+                &self.metadata.susceptibility_calls().erm41,
+                self.metadata.is_massiliense_seq_id(),
+            ) {
+                details = details.push(widget::text::heading(verdict));
+                if let Some(reason) = reason {
+                    details = details.push(widget::text::body(reason));
                 }
-                Some(false) => {
-                    details = details.push(widget::text::heading(
-                        "Predicted inducible macrolide resistance.",
-                    ))
-                }
-                None => {}
             }
         }
 
@@ -1232,24 +1265,8 @@ impl Item {
                 )));
                 details = details.push(widget::text::body(""));
             }
-            match self
-                .metadata
-                .susceptibility_calls()
-                .rrl
-                .position_2058_2059
-                .and_then(|p| p.is_susceptible())
-            {
-                Some(true) => {
-                    details = details.push(widget::text::heading(
-                        "E. coli positions A2058 and A2059 are wt (macrolide susceptible).",
-                    ))
-                }
-                Some(false) => {
-                    details = details.push(widget::text::heading(
-                        "Mutation in E. coli A2058 and/or A2059. Predicted macrolide resistance.",
-                    ))
-                }
-                None => {}
+            if let Some(verdict) = rrl_verdict_text(&self.metadata.susceptibility_calls().rrl) {
+                details = details.push(widget::text::heading(verdict));
             }
         }
 
@@ -1616,6 +1633,10 @@ impl ChromatogramProgram<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sequencing::erm41::{
+        Erm41LofCall, Erm41Position28, identify_sequence_erm41, is_susceptible_erm41,
+    };
+    use crate::sequencing::{DESC_ABSCESSUS, DESC_BOLLETII, DESC_MASSILIENSE};
 
     #[test]
     fn read_ab1_parses_lengths_and_chromatogram() {
@@ -1645,5 +1666,119 @@ mod tests {
         let seq = cached_seq_data(Path::new("does/not/exist.ab1"), &metadata);
         assert!(seq.read_opt.is_none());
         assert!(seq.seq_id_hits.is_empty());
+    }
+
+    fn erm41_calls(position_28: Erm41Position28, lof: bool) -> Erm41SusceptibilityCalls {
+        let lof_snp_calls = vec![Erm41LofCall {
+            ref_pos: 0,
+            query_base: Some(if lof { b'T' } else { b'C' }),
+            wt_base: b'C',
+            lof_alts: [(b'T', ("lof".to_string(), None))].into(),
+        }];
+        Erm41SusceptibilityCalls {
+            is_susceptible: is_susceptible_erm41(Some(&position_28), &lof_snp_calls),
+            position_28: Some(position_28),
+            lof_snp_calls,
+        }
+    }
+
+    #[test]
+    fn erm41_verdict_follows_the_combined_call() {
+        let resistant = erm41_calls(Erm41Position28::T28, false);
+        assert_eq!(
+            erm41_verdict_text(&resistant, false),
+            Some(("Predicted inducible macrolide resistance.", None))
+        );
+
+        let lof = erm41_calls(Erm41Position28::T28, true);
+        let (verdict, reason) = erm41_verdict_text(&lof, false).unwrap();
+        assert_eq!(verdict, "Predicted to be susceptible to macrolides.");
+        assert!(reason.unwrap().contains("loss-of-function"));
+
+        // `susceptibility_from_hits` sets massiliense susceptible whatever position 28 says.
+        let massiliense = Erm41SusceptibilityCalls {
+            is_susceptible: Some(true),
+            ..erm41_calls(Erm41Position28::T28, false)
+        };
+        let (verdict, reason) = erm41_verdict_text(&massiliense, true).unwrap();
+        assert_eq!(verdict, "Predicted to be susceptible to macrolides.");
+        assert!(reason.unwrap().contains("massiliense"));
+
+        let wildtype = erm41_calls(Erm41Position28::C28, false);
+        assert_eq!(erm41_verdict_text(&wildtype, false).unwrap().1, None);
+
+        assert_eq!(
+            erm41_verdict_text(&Erm41SusceptibilityCalls::default(), false),
+            None
+        );
+    }
+
+    #[test]
+    fn rrl_verdict_follows_the_combined_call() {
+        use RrlPosition2058_2059::{ResistanceConferringMutation, SusceptibleWildtype};
+        let text = |is_susceptible, position_2058_2059| {
+            rrl_verdict_text(&RrlSusceptibilityCalls {
+                is_susceptible,
+                position_2058_2059,
+                ..Default::default()
+            })
+        };
+        assert!(
+            text(Some(true), Some(SusceptibleWildtype))
+                .unwrap()
+                .contains("macrolide susceptible")
+        );
+        assert!(
+            text(Some(false), Some(ResistanceConferringMutation))
+                .unwrap()
+                .starts_with("Mutation in E. coli")
+        );
+        // Resistance SNP elsewhere: must not read as susceptible.
+        let rare = text(Some(false), Some(SusceptibleWildtype)).unwrap();
+        assert!(rare.contains("are wt, but") && rare.contains("macrolide resistance"));
+        assert!(
+            text(Some(false), None)
+                .unwrap()
+                .starts_with("Catalogued resistance mutation")
+        );
+        assert_eq!(text(None, None), None);
+    }
+
+    #[test]
+    fn erm41_hits_are_recognised_by_subspecies() {
+        type Check = fn(&ItemMetadata) -> bool;
+        let cases: [(&str, Check); 3] = [
+            (DESC_ABSCESSUS, ItemMetadata::is_abscessus_seq_id),
+            (DESC_BOLLETII, ItemMetadata::is_bolletii_seq_id),
+            (DESC_MASSILIENSE, ItemMetadata::is_massiliense_seq_id),
+        ];
+        let hits = identify_sequence_erm41(b"ACGTACGTACGTACGTACGT");
+        for (description, check) in cases {
+            let mut hit = hits
+                .iter()
+                .find(|h| h.description == description)
+                .unwrap()
+                .clone();
+            hit.identity = 100.0;
+            let metadata = ItemMetadata::Path {
+                metadata: std::fs::metadata(".").unwrap(),
+                children_opt: None,
+                tbprofilerjson_opt: None,
+                is_ab1: true,
+                sequence_opt: Some(SeqData {
+                    read_opt: None,
+                    seq_id_hits: vec![hit],
+                    more_hits: MoreHits::NotLoaded,
+                }),
+                is_tbprofiler_result_as_sample: false,
+                is_tbprofiler_groupable_raw_result_file: false,
+                sample_json_path_opt: None,
+                sample_csv_path_opt: None,
+                sample_docx_path_opt: None,
+                is_susceptible: None,
+                susceptibility_calls: SusceptibilityCalls::default(),
+            };
+            assert!(check(&metadata), "{description}");
+        }
     }
 }
