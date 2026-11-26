@@ -229,7 +229,8 @@ pub struct SampleSusceptibilityRecord {
 /// 11: rpoB species call is the top hit's description (no complex labels, no tie joining).
 /// 12: cached hits are limited to identity ≥ 98 % and 10 per source (was 5 in scan records).
 /// 13: chelonae-abscessus group label is "M.chelonae/abscessus" (cosmic-seq `species_groups.tsv`).
-pub(crate) const ANALYSIS_VERSION: u32 = 13;
+/// 14: GTDB rrs pool adds the 5′ 16S amplicons (Mbak283f/259r, Mbak283f/264r) for Mbak14 reads.
+pub(crate) const ANALYSIS_VERSION: u32 = 14;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets

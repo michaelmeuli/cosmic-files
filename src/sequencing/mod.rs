@@ -138,11 +138,16 @@ const REF_AMPLICON_RPOB_XPERT: &str = concat!(
     "\n",
     include_str!("../../res/sequences/references/rpoB_Xpert_F2_R2.fasta"),
 );
-/// Amplicon-level 16S references (rrs_289_261 + IMMF/IMMR2 primers), merged into the rrs pool.
+/// Amplicon-level 16S references (rrs_289_261 + IMMF/IMMR2 + Mbak283f/259r/264r primers), merged
+/// into the rrs pool. The Mbak files cover the 5′ part sequenced with Mbak14.
 const REF_AMPLICON_RRS: &str = concat!(
     include_str!("../../res/sequences/references/rrs_289_261.fasta"),
     "\n",
     include_str!("../../res/sequences/references/16S_IMMF_IMMR2.fasta"),
+    "\n",
+    include_str!("../../res/sequences/references/16S_Mbak283f_Mbak259r.fasta"),
+    "\n",
+    include_str!("../../res/sequences/references/16S_Mbak283f_Mbak264r.fasta"),
 );
 /// Amplicon-level 16S 3'-end references (Bact1098s/Bact1525a primers), merged into the rrs3end pool.
 const REF_AMPLICON_RRS3END: &str =
