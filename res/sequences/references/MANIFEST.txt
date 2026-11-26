@@ -1,10 +1,10 @@
-date:    2026-11-24T22:09:46+01:00
-host:    u24-cva0000-201
+date:    2026-11-26T08:31:33+01:00
+host:    u24-cva0000-117
 user:    mimeul
 repo:    cosmic-seq
-commit:  64ba579ad02aba306a0b159dea4add67281addf8 (clean)
+commit:  64ba579ad02aba306a0b159dea4add67281addf8 (dirty)
 script:  scripts/05_export_cosmic_files.py
-env:     env_cosmic (conda list sha256 822d7876f477)
+env:     none (conda list sha256 none)
 inputs:
   /shares/sander.imm.uzh/MM/kansasii/output/cosmic-seq/results/references/fasta
   /shares/sander.imm.uzh/MM/kansasii/output/cosmic-seq/results/species_groups/species_groups.tsv

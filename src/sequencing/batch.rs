@@ -228,7 +228,8 @@ pub struct SampleSusceptibilityRecord {
 ///     (cosmic-seq 64ba579).
 /// 11: rpoB species call is the top hit's description (no complex labels, no tie joining).
 /// 12: cached hits are limited to identity ≥ 98 % and 10 per source (was 5 in scan records).
-pub(crate) const ANALYSIS_VERSION: u32 = 12;
+/// 13: chelonae-abscessus group label is "M.chelonae/abscessus" (cosmic-seq `species_groups.tsv`).
+pub(crate) const ANALYSIS_VERSION: u32 = 13;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -1342,7 +1343,7 @@ mod tests {
         );
         assert_eq!(
             call_16s(&[("Mycobacteroides abscessus subsp. massiliense", 99.0)]),
-            Some("M. chelonae / M. abscessus complex".to_string())
+            Some("M.chelonae/abscessus".to_string())
         );
     }
 
@@ -1368,7 +1369,7 @@ mod tests {
 
     #[test]
     fn species_16s_group_ignores_genus_synonyms() {
-        let label = Some("M. chelonae / M. abscessus complex".to_string());
+        let label = Some("M.chelonae/abscessus".to_string());
         // NCBI split genus, GTDB genus, and NCBI's bracketed misplaced genus all match.
         for description in [
             "Mycobacteroides stephanolepidis",
