@@ -51,6 +51,7 @@ pub mod rpob;
 pub mod rrl;
 pub mod rrs;
 pub mod rrs3end;
+pub mod rrs_mtb;
 pub mod serde_helpers;
 pub mod tb_data;
 
@@ -63,6 +64,7 @@ use pnca::{PncaSnpCall, PncaSusceptibilityCalls};
 use rpob::{RpobSnpCall, RpobSusceptibilityCalls};
 use rrl::{RrlPosition2058_2059, RrlSnpCall, RrlSusceptibilityCalls};
 use rrs::{RrsSnpCall, RrsSusceptibilityCalls};
+use rrs_mtb::{RrsMtbSnpCall, RrsMtbSusceptibilityCalls};
 use rrs3end::{Rrs3EndPosition1248, RrsSnpCall3End, RrsSusceptibilityCalls3End};
 
 pub const MIN_SEQ_ID_IDENTITY: f32 = 80.0;
@@ -138,11 +140,9 @@ const REF_AMPLICON_RPOB_XPERT: &str = concat!(
     "\n",
     include_str!("../../res/sequences/references/rpoB_Xpert_F2_R2.fasta"),
 );
-/// Amplicon-level 16S references (rrs_289_261 + IMMF/IMMR2 + Mbak283f/259r/264r primers), merged
-/// into the rrs pool. The Mbak files cover the 5′ part sequenced with Mbak14.
+/// Amplicon-level 16S references (IMMF/IMMR2 + Mbak283f/259r/264r primers), merged into the rrs
+/// pool. The Mbak files cover the 5′ part sequenced with Mbak14.
 const REF_AMPLICON_RRS: &str = concat!(
-    include_str!("../../res/sequences/references/rrs_289_261.fasta"),
-    "\n",
     include_str!("../../res/sequences/references/16S_IMMF_IMMR2.fasta"),
     "\n",
     include_str!("../../res/sequences/references/16S_Mbak283f_Mbak259r.fasta"),
@@ -152,6 +152,9 @@ const REF_AMPLICON_RRS: &str = concat!(
 /// Amplicon-level 16S 3'-end references (Bact1098s/Bact1525a primers), merged into the rrs3end pool.
 const REF_AMPLICON_RRS3END: &str =
     include_str!("../../res/sequences/references/16S_Bact1098s_Bact1525a.fasta");
+/// Amplicon-level 16S references of the *M. tuberculosis* complex rrs assay (#289/#261 primers),
+/// merged into the [`rrs_mtb`] pool.
+const REF_AMPLICON_RRS_MTB: &str = include_str!("../../res/sequences/references/rrs_289_261.fasta");
 /// Amplicon-level 23S references (MCLR19F/MCLR21R primers), merged into the rrl pool.
 const REF_AMPLICON_RRL: &str =
     include_str!("../../res/sequences/references/23S_MCLR19F_MCLR21R.fasta");
@@ -234,6 +237,10 @@ const REF_PNCA: &str = concat!(
 /// WHO catalogue's rpoB codon numbering (RRDR = codons 426–452) is relative to this sequence.
 const REF_RPOB_H37RV: &str = include_str!("../../res/sequences/rpob/rpob_h37rv.fasta");
 
+/// *M. tuberculosis* H37Rv rrs (1537 bp), fetched from NCBI at build time. The WHO catalogue's
+/// rrs nucleotide numbering is relative to this sequence.
+const REF_RRS_H37RV: &str = include_str!("../../res/sequences/rrs/rrs_h37rv.fasta");
+
 /// Susceptibility calls derived from AB1 capillary sequencing, keyed by gene target.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SusceptibilityCalls {
@@ -241,6 +248,8 @@ pub struct SusceptibilityCalls {
     pub rrl: RrlSusceptibilityCalls,
     pub rrs: RrsSusceptibilityCalls,
     pub rrs3end: RrsSusceptibilityCalls3End,
+    #[serde(default)]
+    pub rrs_mtb: RrsMtbSusceptibilityCalls,
     pub pnca: PncaSusceptibilityCalls,
     #[serde(default)]
     pub rpob: RpobSusceptibilityCalls,
@@ -298,6 +307,19 @@ impl std::fmt::Display for SusceptibilityCalls {
         }
         if !rrs3end.is_empty() {
             parts.push(rrs3end.join(", ").to_string());
+        }
+
+        let mut rrs_mtb: Vec<String> = self
+            .rrs_mtb
+            .snp_calls
+            .iter()
+            .map(|c| c.call_tag())
+            .collect();
+        if !rrs_mtb.is_empty() && !self.rrs_mtb.species_validated {
+            rrs_mtb.push("[catalogue not validated for this species]".to_string());
+        }
+        if !rrs_mtb.is_empty() {
+            parts.push(rrs_mtb.join(", "));
         }
 
         let pnca: Vec<String> = self
@@ -1213,6 +1235,9 @@ pub struct SeqIdHit {
     /// Calls at each rrs aminoglycoside-resistance SNP position from the 16S 3' end amplicon
     /// (see [`rrs3end`]), populated instead of `rrs_snp_calls` for that target.
     pub rrs_snp_calls_3end: Vec<RrsSnpCall3End>,
+    /// *M. tuberculosis* rrs calls (see [`rrs_mtb`]), on the top hit of #289/#261 reads only.
+    #[serde(default)]
+    pub rrs_mtb_snp_calls: Vec<RrsMtbSnpCall>,
     /// Calls at each erm(41) loss-of-function variant position.
     pub erm41_snp_calls: Vec<Erm41LofCall>,
     /// Calls at each pncA pyrazinamide-resistance nucleotide/codon position.
@@ -1612,6 +1637,7 @@ mod tests {
             rrl_snp_calls: vec![],
             rrs_snp_calls: vec![],
             rrs_snp_calls_3end: vec![],
+            rrs_mtb_snp_calls: vec![],
             erm41_snp_calls: vec![],
             pnca_snp_calls: vec![],
             rpob_snp_calls: vec![],
@@ -1660,6 +1686,7 @@ mod tests {
             rrl_snp_calls: vec![],
             rrs_snp_calls: vec![],
             rrs_snp_calls_3end: vec![],
+            rrs_mtb_snp_calls: vec![],
             erm41_snp_calls: vec![],
             pnca_snp_calls: vec![],
             rpob_snp_calls: vec![],

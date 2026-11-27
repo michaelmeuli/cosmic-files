@@ -21,12 +21,13 @@ use std::sync::LazyLock;
 type RrsSnpMap = BTreeMap<usize, (u8, BTreeMap<u8, (Vec<String>, String)>)>;
 
 /// The base observed at rrs position 1248, which discriminates *M. marinum* from
-/// *M. ulcerans*.
+/// *M. ulcerans*. It does not identify a species on its own: many others share A1248, so
+/// [`Display`](std::fmt::Display) gives the base only.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Rrs3EndPosition1248 {
-    /// *M. marinum*.
+    /// *M. marinum* (and many other species).
     A1248,
-    /// *M. ulcerans*.
+    /// *M. ulcerans*, when the pair is marinum / ulcerans.
     G1248,
     C1248,
     T1248,
@@ -37,8 +38,8 @@ pub enum Rrs3EndPosition1248 {
 impl std::fmt::Display for Rrs3EndPosition1248 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::A1248 => write!(f, "A1248 (M. marinum)"),
-            Self::G1248 => write!(f, "G1248 (M. ulcerans)"),
+            Self::A1248 => write!(f, "A1248"),
+            Self::G1248 => write!(f, "G1248"),
             Self::C1248 => write!(f, "C1248"),
             Self::T1248 => write!(f, "T1248"),
             Self::Undetermined => write!(f, "Position 1248 not found"),
@@ -382,6 +383,7 @@ pub fn identify_sequence_16s3end(query: &[u8]) -> Vec<SeqIdHit> {
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end,
+                rrs_mtb_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
                 rpob_snp_calls: vec![],

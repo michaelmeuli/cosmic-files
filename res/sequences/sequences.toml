@@ -97,6 +97,13 @@ output    = "rpob/rpob_h37rv.fasta"
 
 # --- rrs (16S rRNA) ---
 
+# M. tuberculosis H37Rv rrs (MTB000019, 1537 bp): the WHO catalogue numbers rrs mutations on it.
+[[genome]]
+accession = "NC_000962.3"
+seq_start = 1471846
+seq_stop  = 1473382
+output    = "rrs/rrs_h37rv.fasta"
+
 [[append]]
 accession = "AF456240.1"      # Mycobacterium marinum ATCC 927 — 16S rRNA (near-complete)
 fasta     = "myco_rrs.fasta"

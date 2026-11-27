@@ -503,6 +503,7 @@ pub fn identify_sequence_erm41(query: &[u8]) -> Vec<SeqIdHit> {
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end: vec![],
+                rrs_mtb_snp_calls: vec![],
                 erm41_snp_calls,
                 pnca_snp_calls: vec![],
                 rpob_snp_calls: vec![],

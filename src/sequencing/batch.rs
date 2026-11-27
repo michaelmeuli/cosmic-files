@@ -38,6 +38,9 @@ use super::{
         RrsSusceptibilityCalls, identify_sequence_16s, is_susceptible_rrs,
         is_susceptible_rrs_by_snp_calls_rare,
     },
+    rrs_mtb::{
+        RrsMtbSusceptibilityCalls, identify_sequence_rrs_mtb, is_mtbc, is_susceptible_rrs_mtb,
+    },
     rrs3end::{
         RrsSusceptibilityCalls3End, identify_sequence_16s3end, is_susceptible_rrs_3end,
         is_susceptible_rrs_by_snp_calls_rare_3end,
@@ -197,7 +200,8 @@ pub struct SampleSusceptibilityRecord {
     #[serde(default)]
     pub identity_gtdb: Option<f32>,
     /// Combined susceptibility verdict across all genes, from [`susceptibility_from_hits`]:
-    /// erm41 (a *massiliense* top hit is susceptible) → rrl → rrs → rrs3end → pncA → rpoB,
+    /// erm41 (a *massiliense* top hit is susceptible) → rrl → rrs → rrs3end → rrs_mtb → pncA →
+    /// rpoB,
     /// first `Some` wins.
     pub is_susceptible: Option<bool>,
     /// Top alignment hits, alignments included, stored in the disk cache so the preview panel
@@ -230,7 +234,10 @@ pub struct SampleSusceptibilityRecord {
 /// 12: cached hits are limited to identity ≥ 98 % and 10 per source (was 5 in scan records).
 /// 13: chelonae-abscessus group label is "M.chelonae/abscessus" (cosmic-seq `species_groups.tsv`).
 /// 14: GTDB rrs pool adds the 5′ 16S amplicons (Mbak283f/259r, Mbak283f/264r) for Mbak14 reads.
-pub(crate) const ANALYSIS_VERSION: u32 = 14;
+/// 15: Mtb rrs reads (#289/#261) are their own gene with WHO-catalogue calls; their amplicons
+///     left the 5′ rrs pool.
+/// 16: Mtb rrs calls have their own fields (`rrs_mtb`), no longer the rrs3end ones.
+pub(crate) const ANALYSIS_VERSION: u32 = 16;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -279,7 +286,8 @@ pub(crate) fn rpob_susceptibility_calls(hit: &SeqIdHit) -> RpobSusceptibilityCal
 /// The calls come from the top hit, except the rrl/rrs/rrs3end catalogue SNPs, which come from
 /// the best same-species hit that has them ([`best_snp_hit`]). A *massiliense* top hit is
 /// erm(41)-susceptible, since its erm(41) is non-functional. The combined verdict is the first
-/// per-gene verdict that is `Some`, in the order erm41 → rrl → rrs → rrs3end → pncA → rpoB.
+/// per-gene verdict that is `Some`, in the order erm41 → rrl → rrs → rrs3end → rrs_mtb →
+/// pncA → rpoB.
 #[must_use]
 pub fn susceptibility_from_hits(hits: &[SeqIdHit]) -> (Option<bool>, SusceptibilityCalls) {
     let Some(hit) = hits.first() else {
@@ -288,6 +296,11 @@ pub fn susceptibility_from_hits(hits: &[SeqIdHit]) -> (Option<bool>, Susceptibil
     let rrl_hit = best_snp_hit(hits, |h| !h.rrl_snp_calls.is_empty()).unwrap_or(hit);
     let rrs_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls.is_empty()).unwrap_or(hit);
     let rrs3end_hit = best_snp_hit(hits, |h| !h.rrs_snp_calls_3end.is_empty()).unwrap_or(hit);
+    // Mtb rrs calls sit on the top hit itself.
+    let mtb_species_validated = !hit.rrs_mtb_snp_calls.is_empty() && {
+        let all: Vec<&SeqIdHit> = hits.iter().collect();
+        tied_hits(&all).iter().any(|h| is_mtbc(&h.description))
+    };
     let rrl_pos = hit.rrl_position_2058_2059_opt.as_ref();
 
     let calls = SusceptibilityCalls {
@@ -322,6 +335,11 @@ pub fn susceptibility_from_hits(hits: &[SeqIdHit]) -> (Option<bool>, Susceptibil
                 &rrs3end_hit.rrs_snp_calls_3end,
             ),
         },
+        rrs_mtb: RrsMtbSusceptibilityCalls {
+            snp_calls: hit.rrs_mtb_snp_calls.clone(),
+            is_susceptible: is_susceptible_rrs_mtb(&hit.rrs_mtb_snp_calls),
+            species_validated: mtb_species_validated,
+        },
         pnca: PncaSusceptibilityCalls {
             snp_calls: hit.pnca_snp_calls.clone(),
             is_susceptible: is_susceptible_pnca(&hit.pnca_snp_calls),
@@ -334,6 +352,7 @@ pub fn susceptibility_from_hits(hits: &[SeqIdHit]) -> (Option<bool>, Susceptibil
         .or(calls.rrl.is_susceptible)
         .or(calls.rrs.is_susceptible)
         .or(calls.rrs3end.is_susceptible)
+        .or(calls.rrs_mtb.is_susceptible)
         .or(calls.pnca.is_susceptible)
         .or(calls.rpob.is_susceptible);
     (verdict, calls)
@@ -642,6 +661,7 @@ fn align_ab1(path: &Path) -> Option<(String, Option<Ab1Gene>, String, Vec<SeqIdH
                 Ab1Gene::Rrl => identify_sequence_rrl_ntm(trimmed),
                 Ab1Gene::Rrs16S => identify_sequence_16s(trimmed),
                 Ab1Gene::Rrs3End => identify_sequence_16s3end(trimmed),
+                Ab1Gene::RrsMtb => identify_sequence_rrs_mtb(trimmed),
                 Ab1Gene::PncA => identify_sequence_pnca(trimmed),
             }
         }
@@ -886,9 +906,10 @@ pub(crate) fn within_report_age(
 /// erm41_position_28, erm41_lof_snp_calls, erm41_susceptible, rrl_position_2058_2059,
 /// rrl_snp_calls, rrl_susceptible, rrs_snp_calls, rrs_susceptible, rrs3end_position_1248,
 /// rrs3end_snp_calls, rrs3end_susceptible, pnca_snp_calls, pnca_susceptible, file_created,
-/// rpob_snp_calls, rpob_susceptible, rpob_species_validated, species_gtdb, identity_gtdb_pct`.
-/// `species`/`identity_pct` are the NCBI call; later additions (rpoB, GTDB) are appended so
-/// existing column positions stay stable.
+/// rpob_snp_calls, rpob_susceptible, rpob_species_validated, species_gtdb, identity_gtdb_pct,
+/// rrs_mtb_snp_calls, rrs_mtb_susceptible, rrs_mtb_species_validated`.
+/// `species`/`identity_pct` are the NCBI call; later additions (rpoB, GTDB, Mtb rrs) are
+/// appended so existing column positions stay stable.
 pub fn write_ab1_csv(
     records: &[SampleSusceptibilityRecord],
     out_path: &std::path::Path,
@@ -925,6 +946,9 @@ pub fn write_ab1_csv(
         "rpob_species_validated",
         "species_gtdb",
         "identity_gtdb_pct",
+        "rrs_mtb_snp_calls",
+        "rrs_mtb_susceptible",
+        "rrs_mtb_species_validated",
     ])?;
 
     for rec in records {
@@ -1010,6 +1034,16 @@ pub fn write_ab1_csv(
             (false, false) => "false",
         };
 
+        let rrs_mtb = &rec.susceptibility_calls.rrs_mtb;
+        let rrs_mtb_sus = fmt_susceptible(rrs_mtb.is_susceptible);
+        let rrs_mtb_snps =
+            snp_calls_str(rrs_mtb.snp_calls.iter().map(|s| (s.ref_pos, s.call_tag())));
+        let rrs_mtb_validated = match (rrs_mtb.snp_calls.is_empty(), rrs_mtb.species_validated) {
+            (true, _) => "",
+            (false, true) => "true",
+            (false, false) => "false",
+        };
+
         let overall = fmt_susceptible(rec.is_susceptible);
 
         wtr.write_record([
@@ -1042,6 +1076,9 @@ pub fn write_ab1_csv(
             &rec.identity_gtdb
                 .map(|i| format!("{:.1}", i))
                 .unwrap_or_default(),
+            rrs_mtb_snps.as_str(),
+            rrs_mtb_sus.as_str(),
+            rrs_mtb_validated,
         ])?;
     }
 
@@ -1050,10 +1087,10 @@ pub fn write_ab1_csv(
 }
 
 /// Write records that flag a rare resistance mutation (`is_susceptible_rare == Some(false)` for
-/// rrl, rrs or rrs3end) to `out_path`. Same leading columns as `write_ab1_csv` plus
+/// rrl, rrs or rrs3end, or a resistant Mtb rrs call) to `out_path`. Same leading columns as `write_ab1_csv` plus
 /// `rrl_susceptible_rare` and `rrs_susceptible_rare`, then `file_created, species_gtdb,
-/// identity_gtdb_pct, rrs3end_snp_calls, rrs3end_susceptible_rare` (later additions appended so
-/// existing column positions stay stable).
+/// identity_gtdb_pct, rrs3end_snp_calls, rrs3end_susceptible_rare, rrs_mtb_snp_calls,
+/// rrs_mtb_susceptible` (later additions appended so existing column positions stay stable).
 ///
 /// Filters like [`write_ab1_csv`]: known gene, best identity ≥ [`MIN_SEQ_ID_IDENTITY`], and
 /// `file_created` (when known) within `report_max_age_days`. When no record qualifies, an
@@ -1075,7 +1112,8 @@ pub fn write_rare_mutations_csv(
                 && within_report_age(rec.file_created, report_max_age_days, now)
                 && (calls.rrl.is_susceptible_rare == Some(false)
                     || calls.rrs.is_susceptible_rare == Some(false)
-                    || calls.rrs3end.is_susceptible_rare == Some(false))
+                    || calls.rrs3end.is_susceptible_rare == Some(false)
+                    || calls.rrs_mtb.is_susceptible == Some(false))
         })
         .collect();
 
@@ -1111,6 +1149,8 @@ pub fn write_rare_mutations_csv(
         "identity_gtdb_pct",
         "rrs3end_snp_calls",
         "rrs3end_susceptible_rare",
+        "rrs_mtb_snp_calls",
+        "rrs_mtb_susceptible",
     ])?;
 
     for rec in &rare {
@@ -1173,6 +1213,11 @@ pub fn write_rare_mutations_csv(
                 .map(|s| (s.ref_pos, s.call_tag())),
         );
 
+        let rrs_mtb = &rec.susceptibility_calls.rrs_mtb;
+        let rrs_mtb_sus = fmt_susceptible(rrs_mtb.is_susceptible);
+        let rrs_mtb_snps =
+            snp_calls_str(rrs_mtb.snp_calls.iter().map(|s| (s.ref_pos, s.call_tag())));
+
         let overall = fmt_susceptible(rec.is_susceptible);
 
         wtr.write_record([
@@ -1201,6 +1246,8 @@ pub fn write_rare_mutations_csv(
                 .unwrap_or_default(),
             rrs3end_snps.as_str(),
             rrs3end_sus_rare.as_str(),
+            rrs_mtb_snps.as_str(),
+            rrs_mtb_sus.as_str(),
         ])?;
     }
 
@@ -1304,6 +1351,7 @@ mod tests {
             rrl_snp_calls: Vec::new(),
             rrs_snp_calls: Vec::new(),
             rrs_snp_calls_3end: Vec::new(),
+            rrs_mtb_snp_calls: Vec::new(),
             erm41_snp_calls: Vec::new(),
             pnca_snp_calls: Vec::new(),
             rpob_snp_calls: Vec::new(),
@@ -1467,6 +1515,7 @@ mod tests {
                 rrl_snp_calls: Vec::new(),
                 rrs_snp_calls: Vec::new(),
                 rrs_snp_calls_3end: Vec::new(),
+                rrs_mtb_snp_calls: Vec::new(),
                 erm41_snp_calls: Vec::new(),
                 pnca_snp_calls: Vec::new(),
                 rpob_snp_calls: Vec::new(),
@@ -1582,6 +1631,30 @@ mod tests {
         assert!(!out.exists());
         // Nothing to remove is fine too.
         write_rare_mutations_csv(&[], &out, 30).unwrap();
+    }
+
+    #[test]
+    fn resistant_mtb_rrs_read_is_in_the_rare_mutations_csv() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("rare_mutations.csv");
+        let mut h = hit("Mycobacterium tuberculosis", 99.0);
+        h.rrs_mtb_snp_calls = vec![super::super::rrs_mtb::RrsMtbSnpCall {
+            ref_pos: 1400,
+            query_base: Some(b'G'),
+            wt_base: b'A',
+            ecoli_pos: 1408,
+            resistance_bases: [(b'G', vec!["amikacin".to_string()])].into_iter().collect(),
+            uncertain_alts: Vec::new(),
+        }];
+        let (verdict, calls) = susceptibility_from_hits(&[h]);
+        assert_eq!(verdict, Some(false));
+        let mut rec = cached_record(&dir.path().join("2024000002_rrs289.ab1"));
+        rec.identity = Some(99.0);
+        rec.susceptibility_calls = calls;
+
+        write_rare_mutations_csv(&[rec], &out, 0).unwrap();
+        let csv = std::fs::read_to_string(&out).unwrap();
+        assert!(csv.contains("A1401G (amikacin"), "{csv}");
     }
 
     #[test]

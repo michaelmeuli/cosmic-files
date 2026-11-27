@@ -129,7 +129,9 @@ rebuild. Paths are relative to `res/sequences/`.
 | `REF_AMPLICON_RPOB_RRDR` | `references/rpoB_TR1_TR2b.fasta` | GTDB |
 | `REF_AMPLICON_RPOB_5PRIME` | `references/rpoB_Tb176f_Tb176r.fasta` | GTDB |
 | `REF_AMPLICON_RPOB_XPERT` | `references/rpoB_Xpert_F1_R`, `_F2_R`, `_F2_R2` (`.fasta`) | GTDB |
-| `REF_AMPLICON_RRS` | `references/rrs_289_261`, `16S_IMMF_IMMR2`, `16S_Mbak283f_Mbak259r`, `16S_Mbak283f_Mbak264r` (`.fasta`) | GTDB |
+| `REF_AMPLICON_RRS` | `references/16S_IMMF_IMMR2`, `16S_Mbak283f_Mbak259r`, `16S_Mbak283f_Mbak264r` (`.fasta`) | GTDB |
+| `REF_AMPLICON_RRS_MTB` | `references/rrs_289_261.fasta` | GTDB |
+| `REF_RRS_H37RV` | `rrs/rrs_h37rv.fasta` | NCBI, via `sequences.toml` |
 | `REF_AMPLICON_RRS3END` | `references/16S_Bact1098s_Bact1525a.fasta` | GTDB |
 | `REF_AMPLICON_RRL` | `references/23S_MCLR19F_MCLR21R.fasta` | GTDB |
 | `REF_SPECIES_GROUPS` | `references/species_groups.tsv` | species → complex label |

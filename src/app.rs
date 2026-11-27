@@ -2524,6 +2524,8 @@ impl App {
                                         Some(item.preview_rpob(items, region))
                                     } else if item.is_16s() {
                                         Some(item.preview_16s())
+                                    } else if item.is_rrs_mtb() {
+                                        Some(item.preview_rrs_mtb())
                                     } else if item.is_16s3end() {
                                         Some(item.preview_16s3end(items))
                                     } else if item.is_rrl_ntm() {

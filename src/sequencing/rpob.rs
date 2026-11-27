@@ -522,6 +522,7 @@ pub fn identify_sequence_rpob(query: &[u8], region: RpoBRegion) -> Vec<SeqIdHit>
                 rrl_snp_calls: vec![],
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end: vec![],
+                rrs_mtb_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
                 rpob_snp_calls: vec![],

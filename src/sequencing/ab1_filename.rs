@@ -28,8 +28,10 @@ pub enum Ab1Gene {
     RpoB(RpoBRegion),
     /// 16S rRNA 5' part (Mbak283f/264r/259r, sequenced with Mbak14).
     Rrs16S,
-    /// 16S rRNA 3' end (Bact-1098s / 1525a, Mtb rrs #289 / #261).
+    /// 16S rRNA 3' end (Bact-1098s / 1525a), species ID.
     Rrs3End,
+    /// *M. tuberculosis* complex rrs, aminoglycoside / capreomycin resistance (#289 / #261).
+    RrsMtb,
     /// 23S rRNA (MCLR 19F / 21R, SP1 F / SP2 R mod).
     Rrl,
     /// pncA (pncA-Ber-fw / rv).
@@ -46,6 +48,7 @@ impl Ab1Gene {
             Self::RpoB(region) => region.label(),
             Self::Rrs16S => "16S",
             Self::Rrs3End => "16S 3'-End",
+            Self::RrsMtb => "rrs Mtb",
             Self::Rrl => "rrl",
             Self::PncA => "pncA",
         }
@@ -272,13 +275,21 @@ fn gene_from_marker(m: &str) -> Option<Ab1Gene> {
         return Some(Ab1Gene::Rrs16S);
     }
 
-    // 16S 3' end: Bact-1098s / Bact-1525a, Mtb rrs amplicon #289 / #261.
-    if compact.contains("1098s")
-        || compact.contains("1525a")
-        || m.contains("#289")
+    // 16S 3' end: Bact-1098s / Bact-1525a.
+    if compact.contains("1098s") || compact.contains("1525a") {
+        return Some(Ab1Gene::Rrs3End);
+    }
+
+    // Mtb rrs amplicon: `#289` / `#261`, or `rrs` with a standalone 289 / 261. Any other `rrs`
+    // name is a 16S 3' end read.
+    let rrs_token = any_tok(&|t| t.starts_with("rrs"));
+    if m.contains("#289")
         || m.contains("#261")
-        || any_tok(&|t| t.starts_with("rrs"))
+        || (rrs_token && (has_standalone_num(m, "289") || has_standalone_num(m, "261")))
     {
+        return Some(Ab1Gene::RrsMtb);
+    }
+    if rrs_token {
         return Some(Ab1Gene::Rrs3End);
     }
 
@@ -398,7 +409,12 @@ mod tests {
             ("Mbak259r", Some(Rrs16S)),
             ("Mbak-14", Some(Rrs16S)),
             ("Bact-1098s", Some(Rrs3End)),
-            ("rrs_#289", Some(Rrs3End)),
+            ("rrs_#289", Some(RrsMtb)),
+            ("#261", Some(RrsMtb)),
+            ("rrs_261", Some(RrsMtb)),
+            ("rrs289", Some(RrsMtb)),
+            ("rrs", Some(Rrs3End)),
+            ("289", None),
             ("SP2 R mod", Some(Rrl)),
             ("SP1 F", Some(Rrl)),
             ("23S", None),
