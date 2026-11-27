@@ -241,7 +241,13 @@ pub struct SampleSusceptibilityRecord {
 /// 18: GTDB hsp65 pool adds the TB-11 / TB-12w amplicons.
 /// 19: rrl/rrs catalogue SNPs also found when the top NCBI hit names the species differently
 ///     (Mycobacteroides abscessus, M. massiliense, M. bolletii).
-pub(crate) const ANALYSIS_VERSION: u32 = 19;
+/// 20: pncA indels are called; a frameshift no longer reads as susceptible.
+/// 21: a 16S tie containing a species group is named by the group(s) only.
+/// 22: pncA indels listed in the WHO catalogue give its verdict.
+/// 23: pncA changes at unlisted positions (including premature stops) give no verdict instead of
+///     susceptible.
+/// 24: GTDB M. europaeum_A (GCF_003284975.1) no longer gives a 16S call the simiae complex.
+pub(crate) const ANALYSIS_VERSION: u32 = 24;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets
@@ -406,29 +412,35 @@ fn join_epithets(ties: &[&SeqIdHit]) -> Option<String> {
     })
 }
 
-/// For 16S hits: 16S does not separate the members of a complex, so tied hits are named by their
-/// species group ([`species_group`], cosmic-seq `species_groups.tsv`), e.g. "M. kansasii complex".
-/// Ties in no group are joined by epithet as in [`join_epithets`]; a tie that spans several groups
-/// lists them, e.g. "M. kansasii complex / Mycobacterium szulgai".
+/// Reference genomes that give a 16S call no species group although their species name has one.
+/// GCF_003284975.1 is GTDB's *M. europaeum_A*: [`super::parse_multi_fasta`] strips the suffix, so
+/// it would count as *M. europaeum* (simiae complex), but its 16S differs from that species' and
+/// matches MAC references.
+const UNGROUPED_16S_ACCESSIONS: &[&str] = &["GCF_003284975.1"];
+
+/// For 16S hits: 16S does not separate the members of a complex, so if any tied hit belongs to a
+/// species group ([`species_group`], cosmic-seq `species_groups.tsv`), the call is the group
+/// alone, e.g. "M. kansasii complex", and tied species in no group are left out. A tie that spans
+/// several groups lists them, e.g. "M. avium complex (MAC) / M. simiae complex". Ties without any
+/// group are joined by epithet as in [`join_epithets`]. Hits in [`UNGROUPED_16S_ACCESSIONS`]
+/// count as having no group.
 pub(crate) fn species_from_16s_hits(hits: &[&SeqIdHit]) -> Option<String> {
     let ties = tied_hits(hits);
-    let mut parts: Vec<String> = Vec::new();
-    let mut ungrouped: Vec<&SeqIdHit> = Vec::new();
-    let mut ungrouped_at = None;
-    for hit in &ties {
-        if let Some(label) = species_group(&hit.description) {
-            if !parts.iter().any(|part| part == label) {
-                parts.push(label.to_string());
-            }
-        } else {
-            ungrouped_at.get_or_insert(parts.len());
-            ungrouped.push(hit);
+    let mut groups: Vec<&str> = Vec::new();
+    for label in ties
+        .iter()
+        .filter(|hit| !UNGROUPED_16S_ACCESSIONS.contains(&hit.accession.as_str()))
+        .filter_map(|hit| species_group(&hit.description))
+    {
+        if !groups.contains(&label) {
+            groups.push(label);
         }
     }
-    if let Some(at) = ungrouped_at {
-        parts.insert(at, join_epithets(&ungrouped)?);
+    if groups.is_empty() {
+        join_epithets(&ties)
+    } else {
+        Some(groups.join(" / "))
     }
-    (!parts.is_empty()).then(|| parts.join(" / "))
 }
 
 /// For 16S 3'-end hits, only *M. marinum*/*M. ulcerans* (the pair position 1248 discriminates)
@@ -1533,7 +1545,32 @@ mod tests {
                 ("Mycobacterium szulgai", 99.0),
                 ("Mycobacterium persicum", 99.0),
             ]),
-            Some("M. kansasii complex / Mycobacterium szulgai".to_string())
+            Some("M. kansasii complex".to_string())
+        );
+        // An unnamed GTDB species tied with a complex member is left out.
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium lentiflavum", 99.2),
+                ("Mycobacterium sp041287235", 99.2),
+            ]),
+            Some("M. simiae complex".to_string())
+        );
+        // A tie across two complexes keeps both.
+        assert_eq!(
+            call_16s(&[
+                ("Mycobacterium sp001672975", 99.1),
+                ("Mycobacterium colombiense", 99.1),
+                ("Mycobacterium europaeum", 99.1),
+            ]),
+            Some("M. avium complex (MAC) / M. simiae complex".to_string())
+        );
+        // GTDB's M. europaeum_A, read as "europaeum", adds no simiae complex.
+        let colombiense = hit("Mycobacterium colombiense", 99.1);
+        let mut europaeum_a = hit("Mycobacterium europaeum", 99.1);
+        europaeum_a.accession = "GCF_003284975.1".to_string();
+        assert_eq!(
+            species_from_16s_hits(&[&colombiense, &europaeum_a]),
+            Some("M. avium complex (MAC)".to_string())
         );
         // "abscessus" in another genus is no longer caught by a substring rule.
         assert_eq!(

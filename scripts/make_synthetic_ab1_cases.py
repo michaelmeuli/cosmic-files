@@ -18,6 +18,7 @@ The data are artificial: never mix them into a folder of patient reads.
 
 import argparse
 import math
+import re
 import struct
 import sys
 from pathlib import Path
@@ -456,8 +457,34 @@ def pnca_cases(cases):
     add(f"{untested[0]}_untested", untested[1], verdict="-", calls="(mutation, untested)",
         pane="uncatalogued variant, no verdict")
     i = flank + 150
-    add("frameshift_c.151del", seq[:i] + seq[i + 1:], verdict="S",
-        pane="APP GAP: frameshifts are not called, read reported susceptible")
+    add("frameshift_c.151del", seq[:i] + seq[i + 1:], verdict="R",
+        calls="catalogue p.His51fs", pane="listed frameshift: resistant")
+    first = flank + 2  # c.3
+    add("frameshift_unlisted_c.3del", seq[:first] + seq[first + 1:], verdict="-",
+        calls="frameshift (check read)", pane="not in the catalogue: no verdict")
+    first = flank + 6  # codon 3
+    add("inframe_unlisted_c.7_9del", seq[:first] + seq[first + 3:], verdict="-",
+        calls="in-frame indel (not assessed)", pane="not in the catalogue: no verdict")
+    first = flank + 378  # codons 127-129
+    add("inframe_Glu127_Asp129del", seq[:first] + seq[first + 9:], verdict="R",
+        calls="catalogue p.Glu127_Asp129del", pane="listed in-frame deletion: resistant")
+    first = flank - 5  # c.-5
+    assert seq[first] == "G"
+    add("promoter_c.-5delG", seq[:first] + seq[first + 1:], verdict="R",
+        calls="catalogue c.-5delG", pane="listed promoter deletion: resistant")
+    substitution = r"p\.[A-Z][a-z]{2}(\d+)(?:[A-Z][a-z]{2}|\*)"
+    listed_codons = {int(m[1]) for name, conf in pnca_catalogue()
+                     if conf and (m := re.fullmatch(substitution, name))}
+    # First codon the catalogue lists no substitution for that one base change makes a stop.
+    codon, stopped = next(
+        (c, seq[:i] + new + seq[i + 3:])
+        for c, _ in pnca_codons(seq, flank) if c not in listed_codons
+        for i in [flank + (c - 1) * 3]
+        for p in range(3) for b in "ACGT"
+        for new in [seq[i:i + p] + b + seq[i + p + 1:i + 3]]
+        if CODONS[new] == "*")
+    add(f"premature_stop_unlisted_codon{codon}", stopped, verdict="-",
+        calls="premature stop (check read)", pane="not in the catalogue: no verdict")
     add("partial_read", seq[:330], verdict="-", pane="sites uncovered, no verdict")
     add("Asp12Ala_revcomp", revcomp(aa(12, "Asp", "Ala")), verdict="R", calls="p.Asp12Ala",
         pane="reverse strand")

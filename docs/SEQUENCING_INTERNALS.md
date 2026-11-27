@@ -246,15 +246,19 @@ hit's species. Genus synonyms (*Mycobacteroides* etc.) and subspecies are ignore
 | **rrs_mtb** | `myco_rrs.fasta` + `references/rrs_289_261.fasta`; calls against `rrs/rrs_h37rv.fasta` | WHO-catalogue bases at 1401, 1402, 1403, 1483, 1484, stored in `rrs_mtb_snp_calls` of the top hit and reported in the `rrs_mtb` columns. Only ever resistant or undetermined. | `Vec<RrsMtbSnpCall>` |
 | **hsp65** | `references/hsp65_TB11_TB12.fasta` + `hsp65_TB11_TB12w.fasta` | Trims Telenti and Patel primer sets, then species ID only (no SNP calls). | — |
 | **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter. Rifampicin calls: `rpob/rpob_h37rv.fasta` (H37Rv Rv0667 CDS) | Species ID; for the Mtb regions the read is also aligned to H37Rv and every RRDR codon (426–452), the catalogued codons outside it (V170F, I491F) and RRDR indels are called against the WHO catalogue | `Vec<RpobSnpCall>` (top hit only) |
-| **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site. | `Vec<PncaSnpCall>` |
+| **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site, plus every insertion or deletion inside the alignment. An indel is named in HGVS notation (frameshift: first changed codon; in frame: from the translated sequence; promoter: 3′-most position) and looked up among the catalogue's specific indel rows; the generic `frameshift_variant` and ablation rows are not applied. | `Vec<PncaSnpCall>` |
 
 **pncA verdict (`is_susceptible_pnca`):**
 
 - **Resistant** if any site carries a catalogued allele with confidence rank < 2
   ("Assoc w R" or "Assoc w R - Interim").
-- **Susceptible** only if every site is covered and wildtype.
-- Otherwise **undetermined**: a site is uncovered, a variant is not in the catalogue, or the
-  evidence is weak.
+- **Susceptible** only if every site is covered and wildtype and the read has no indel and no
+  amino-acid or promoter change at an unlisted position (synonymous changes don't count). Such
+  changes are listed as untested; a premature stop or a codon with an unresolved base as "check
+  read".
+- Otherwise **undetermined**: a site is uncovered, a variant is not in the catalogue, the read
+  has an indel that isn't listed (a frameshift is shown as "check read"), or the evidence is weak.
+  A listed indel counts like a listed substitution, so it can give **resistant**.
 
 Ranks come from `tb_data::confidence_rank`, on a scale from 0 (strongest) to 5.
 
@@ -453,7 +457,12 @@ complex) maps species to a group label. 16S does not
 separate the members of a complex, so `species_from_16s_hits` names hits tied within 0.1 % by
 their group (`species_group`, keyed by the first two words of the description with NCBI's split
 genera such as *Mycobacteroides* and bracketed `[Mycobacterium]` read as GTDB's *Mycobacterium*), e.g.
-"M. kansasii complex"; ungrouped ties are joined by epithet ("Mycobacterium szulgai/malmoense").
+"M. kansasii complex". If any tied hit has a group, tied species without one are left out; a tie
+across groups lists each ("M. avium complex (MAC) / M. simiae complex"). Ties without any group
+are joined by epithet ("Mycobacterium szulgai/malmoense"). One exception:
+GCF_003284975.1, GTDB's *M. europaeum_A*, counts as ungrouped (`UNGROUPED_16S_ACCESSIONS`),
+because the stripped suffix would put it in the simiae complex although its 16S matches MAC
+references.
 rpoB and 16S 3′-end calls are not grouped. The rpoB call is the best hit's description as the
 reference writes it (e.g. "Mycobacteroides abscessus subsp. massiliense"): no complex label, and
 ties are not joined.
