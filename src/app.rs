@@ -542,6 +542,7 @@ pub enum Message {
     SetTbAb1OutDirPdf2(String),
     SetNtfyTopic(String),
     SetTbReportMaxAgeDays(String),
+    SetTbReportMaxAgeDays2(String),
     ScanAb1Directory,
     Ab1ScanComplete(Vec<crate::sequencing::SampleSusceptibilityRecord>),
     ScanAb1Directory2,
@@ -2855,6 +2856,16 @@ impl App {
                             .on_input(Message::SetTbAb1ScanPath),
                     ),
                 )
+                .add(
+                    widget::settings::item::builder("Report max sample age (days, 0 = no limit)")
+                        .control(
+                            widget::text_input(
+                                "60",
+                                self.config.tb_config.report_max_age_days.to_string(),
+                            )
+                            .on_input(Message::SetTbReportMaxAgeDays),
+                        ),
+                )
                 .add_maybe(self.microsynth_settings_username())
                 .add_maybe(self.microsynth_settings_password())
                 .extend(self.email_settings())
@@ -2883,6 +2894,16 @@ impl App {
                     ),
                 )
                 .add(
+                    widget::settings::item::builder("Report max sample age 2 (days, 0 = no limit)")
+                        .control(
+                            widget::text_input(
+                                "60",
+                                self.config.tb_config.report_max_age_days_2.to_string(),
+                            )
+                            .on_input(Message::SetTbReportMaxAgeDays2),
+                        ),
+                )
+                .add(
                     widget::settings::item::builder("AB1 cache file 2").control(
                         widget::text_input("", &self.config.tb_config.ab1_cache_path_2)
                             .on_input(Message::SetTbAb1CachePath2),
@@ -2907,15 +2928,6 @@ impl App {
                             &self.config.tb_config.ntfy_topic,
                         )
                         .on_input(Message::SetNtfyTopic),
-                    ),
-                )
-                .add(
-                    widget::settings::item::builder("Report max sample age (days, 0 = no limit)").control(
-                        widget::text_input(
-                            "60",
-                            self.config.tb_config.report_max_age_days.to_string(),
-                        )
-                        .on_input(Message::SetTbReportMaxAgeDays),
                     ),
                 )
                 .into(),
@@ -6903,6 +6915,14 @@ impl Application for App {
                     return self.update_config();
                 }
             }
+            Message::SetTbReportMaxAgeDays2(v) => {
+                if let Ok(days) = v.parse::<u32>() {
+                    let mut tb_config = self.config.tb_config.clone();
+                    tb_config.report_max_age_days_2 = days;
+                    config_set!(tb_config, tb_config);
+                    return self.update_config();
+                }
+            }
             Message::ScanAb1Directory => {
                 let scan_path = self.config.tb_config.ab1_scan_path.clone();
                 if scan_path.is_empty() {
@@ -7031,7 +7051,7 @@ impl Application for App {
                     return Task::none();
                 }
                 let ab1_cache_path = self.config.tb_config.ab1_cache_path_2.clone();
-                let max_age_days = self.config.tb_config.report_max_age_days;
+                let max_age_days = self.config.tb_config.report_max_age_days_2;
                 return Task::future(async move {
                     let records = tokio::task::spawn_blocking(move || {
                         let cache_path = crate::sequencing::batch::scan_cache_file(
@@ -7065,7 +7085,7 @@ impl Application for App {
                 if let Err(e) = crate::sequencing::batch::write_ab1_csv(
                     &records,
                     &out_path,
-                    self.config.tb_config.report_max_age_days,
+                    self.config.tb_config.report_max_age_days_2,
                 ) {
                     log::warn!("AB1 CSV write failed: {e}");
                 } else {
@@ -7079,7 +7099,7 @@ impl Application for App {
                 if let Err(e) = crate::sequencing::batch::write_rare_mutations_csv(
                     &records,
                     &rare_path,
-                    self.config.tb_config.report_max_age_days,
+                    self.config.tb_config.report_max_age_days_2,
                 ) {
                     log::warn!("Rare mutations CSV write failed: {e}");
                 } else {
@@ -7088,7 +7108,7 @@ impl Application for App {
 
                 let pdf_bytes = crate::sequencing::build_report_pdf(
                     &records,
-                    self.config.tb_config.report_max_age_days,
+                    self.config.tb_config.report_max_age_days_2,
                 );
                 let ab1_out_dir_pdf_2 = self.config.tb_config.ab1_out_dir_pdf_2.clone();
                 let pdf_path_2 = if !ab1_out_dir_pdf_2.is_empty() {

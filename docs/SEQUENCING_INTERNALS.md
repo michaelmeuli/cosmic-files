@@ -100,7 +100,8 @@ flowchart TD
 `Message::Ab1ScanComplete` writes the reports on the UI thread (`app.rs`). Both CSVs and the
 PDF include only records with a known gene and a best identity (NCBI or GTDB) of at least
 `MIN_SEQ_ID_IDENTITY` and created within `report_max_age_days` (`0` = no limit, as for the
-scan and the Microsynth download). `rare_mutations.csv` lists the
+scan and the Microsynth download). `Message::Ab1ScanComplete2` does the same for the second
+scan directory, with its own limit, `report_max_age_days_2`. `rare_mutations.csv` lists the
 records with a resistance SNP outside a position call (`is_susceptible_rare == Some(false)` for
 rrl, rrs or rrs3end) and those with a resistant Mtb rrs call. When none qualifies, an existing `rare_mutations.csv` is deleted, so it
 never shows an earlier scan's mutations. The PDF is

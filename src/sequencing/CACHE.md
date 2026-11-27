@@ -23,7 +23,7 @@ A record has no hits when the file name has no gene keyword, or when no alignmen
 
 **Startup preload:** `preload_disk_cache` loads every current row of the scan cache(s) (`scan_cache_files`) into the in-memory caches in one query. A row is current when its file still exists with the same mtime and size and `cached_record_current` holds. The preload runs at launch (`Message::PreloadAb1Cache`), ahead of the scan, which may first wait for a Microsynth sync. It opens the database read-only (`DiskCache::open_existing`), as do the preview's lookups in the scan caches. A database with another schema version is skipped, not rebuilt.
 
-**Pruning:** after a scan, rows for paths under the scan directory that the scan didn't see are deleted. This covers deleted files, renamed files and files outside `report_max_age_days`. Rows outside the scan directory are kept, so one database can serve several scan directories.
+**Pruning:** after a scan, rows for paths under the scan directory that the scan didn't see are deleted. This covers deleted files, renamed files and files outside the directory's age limit (`report_max_age_days`, or `report_max_age_days_2` for the second scan directory). Rows outside the scan directory are kept, so one database can serve several scan directories.
 
 **Location:** `ab1_cache_path` (a directory, or a file; a legacy `*.json` name maps to `*.sqlite`), otherwise the user cache dir (`dirs::cache_dir()/cosmic-files`). Avoid cloud-synced folders: opening a database there logs a warning. A database that isn't readable is moved to `*.corrupt` and rebuilt.
 

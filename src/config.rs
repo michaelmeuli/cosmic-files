@@ -235,9 +235,12 @@ pub struct TBConfig {
     /// Microsynth webshop username for SFTP download of AB1 files into
     /// `ab1_scan_path`. The password is kept in the OS keyring, not here.
     pub microsynth_username: String,
-    /// Maximum age in days of the AB1 files that are downloaded, scanned and reported
-    /// (`0` = no limit).
+    /// Maximum age in days of the AB1 files in `ab1_scan_path` that are downloaded from
+    /// Microsynth, scanned and reported (`0` = no limit).
     pub report_max_age_days: u32,
+    /// Maximum age in days of the AB1 files in `ab1_scan_path_2` that are scanned and
+    /// reported (`0` = no limit).
+    pub report_max_age_days_2: u32,
     /// SMTP server for the "new Microsynth files" email (empty = no email). The SMTP password
     /// is kept in the OS keyring, not here.
     pub smtp_host: String,
@@ -249,8 +252,9 @@ pub struct TBConfig {
     pub email_to: String,
 }
 
-/// Default cutoff for [`TBConfig::report_max_age_days`]: samples older than this
-/// are excluded from the generated PDF report.
+/// Default cutoff for [`TBConfig::report_max_age_days`] and
+/// [`TBConfig::report_max_age_days_2`]: samples older than this are excluded from the
+/// generated reports.
 const DEFAULT_REPORT_MAX_AGE_DAYS: u32 = 60;
 
 /// Default for [`TBConfig::smtp_port`] (STARTTLS submission).
@@ -275,6 +279,7 @@ impl Default for TBConfig {
             ntfy_topic: String::new(),
             microsynth_username: String::new(),
             report_max_age_days: DEFAULT_REPORT_MAX_AGE_DAYS,
+            report_max_age_days_2: DEFAULT_REPORT_MAX_AGE_DAYS,
             smtp_host: String::new(),
             smtp_port: DEFAULT_SMTP_PORT,
             smtp_username: String::new(),

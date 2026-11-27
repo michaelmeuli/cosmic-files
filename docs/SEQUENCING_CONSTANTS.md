@@ -193,11 +193,11 @@ their defaults.
 
 | Name | Default | Meaning |
 |---|---|---|
-| `DEFAULT_REPORT_MAX_AGE_DAYS` | 60 | Default of `report_max_age_days`, the age limit in days. |
+| `DEFAULT_REPORT_MAX_AGE_DAYS` | 60 | Default of `report_max_age_days` (`ab1_scan_path`) and `report_max_age_days_2` (`ab1_scan_path_2`), the age limits in days. |
 | `DEFAULT_SMTP_PORT` | 587 | Default of `smtp_port`. |
 
-`report_max_age_days = 0` means "no age limit" in the Microsynth download, the directory scan
-and the CSV, rare-mutation CSV and PDF reports.
+A value of `0` means "no age limit" in the directory scan and the CSV, rare-mutation CSV and
+PDF reports of that directory. `report_max_age_days` also limits the Microsynth download.
 
 ## 10. PDF layout
 
