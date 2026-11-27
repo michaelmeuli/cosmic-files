@@ -104,6 +104,12 @@ pub fn send_report_email(
 ) -> anyhow::Result<()> {
     anyhow::ensure!(cfg.is_configured(), "email is not configured");
     let message = build_message(cfg, subject, body, attachments)?;
+    transport(cfg, password)?.send(&message).context("sending email")?;
+    Ok(())
+}
+
+/// Connects (implicit TLS on 465, STARTTLS otherwise) and authenticates when a username is set.
+fn transport(cfg: &EmailConfig, password: &str) -> anyhow::Result<SmtpTransport> {
     let transport = if cfg.port == SMTPS_PORT {
         SmtpTransport::relay(&cfg.host)
     } else {
@@ -116,8 +122,7 @@ pub fn send_report_email(
     } else {
         transport.credentials(Credentials::new(cfg.username.clone(), password.to_string()))
     };
-    transport.build().send(&message).context("sending email")?;
-    Ok(())
+    Ok(transport.build())
 }
 
 #[cfg(test)]
@@ -160,6 +165,43 @@ mod tests {
         assert!(raw.contains("filename=\"a.pdf\""));
         assert!(raw.contains("filename=\"b.pdf\""));
         assert!(raw.contains("application/pdf"));
+    }
+
+    /// Logs in to the SMTP server from the saved config and keyring password, without
+    /// sending anything. Run with `cargo test smtp_login -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "contacts the configured SMTP server"]
+    fn smtp_login_with_saved_config() {
+        let (_, config) = crate::config::Config::load();
+        let c = EmailConfig::from_tb_config(&config.tb_config);
+        assert!(c.is_configured(), "email is not configured: {c:?}");
+        let password = load_password(&c.username).expect("no SMTP password in keyring");
+        let ok = transport(&c, &password)
+            .unwrap()
+            .test_connection()
+            .expect("SMTP connection/login failed");
+        assert!(ok, "SMTP server did not accept the connection");
+        println!("SMTP login OK: {}:{} as {}", c.host, c.port, c.username);
+    }
+
+    /// Sends one real test email with the saved config and keyring password.
+    /// Run with `cargo test smtp_send_test_email -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "sends a real email via the configured SMTP server"]
+    fn smtp_send_test_email() {
+        let (_, config) = crate::config::Config::load();
+        let c = EmailConfig::from_tb_config(&config.tb_config);
+        let password = load_password(&c.username).unwrap_or_default();
+        send_report_email(
+            &c,
+            &password,
+            "[TEST] New AB1 files from Microsynth - 0 file(s)",
+            "Test email from cosmic-files (email_notify::smtp_send_test_email).\n\
+             The real report email has this subject without [TEST] and carries the PDF reports.",
+            Vec::new(),
+        )
+        .expect("sending test email failed");
+        println!("test email sent from {} to {}", c.from, c.to);
     }
 
     #[test]
