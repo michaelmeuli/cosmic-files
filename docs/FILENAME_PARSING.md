@@ -201,7 +201,7 @@ exists in the hits.
 | Cache | Key | Role of the parsed values |
 |---|---|---|
 | `AB1_SEQ_CACHE` (memory) | canonical path | none |
-| `SIXTEEN_S_HITS_CACHE` (memory) | `sample_id` | filled only by `Rrs16S` reads |
+| `SIXTEEN_S_HITS_CACHE` (memory) | `sample_id` | filled only by `Rrs16S` reads that have hits |
 | SQLite scan and preview caches | canonical path | stores the whole record |
 
 A disk-cached record is reused only if `cached_record_current` accepts it: its
@@ -244,8 +244,9 @@ All other items get no gene preview, whatever their name. This includes folders 
 for the file being previewed:
 
 1. the first AB1 file in the current listing that parses to `Rrs16S` with the same
-   `sample_id`;
-2. if the listing has none, `SIXTEEN_S_HITS_CACHE`, which also covers other directories.
+   `sample_id` and has hits;
+2. if the listing has no such file, `SIXTEEN_S_HITS_CACHE`, which also covers other
+   directories.
 
 Its result feeds the 16S species lines in other genes' previews and the combined calls
 `is_chelonae`, `is_marinum` and `is_ulcerans`.
@@ -254,9 +255,9 @@ Consequences:
 
 - A file without a lab number has its stem as `sample_id`, so it is not linked to reads with
   other names.
-- A sibling found in the listing is used even if it has no hits; the cache is not consulted
-  then.
-- If a sample has several 16S reads, the cache keeps whichever was inserted last.
+- If a sample has several 16S reads with hits, the cache keeps whichever was inserted last.
+  A read that loses all its hits on re-analysis leaves the earlier entry in place until
+  restart.
 
 ## Changing the parser
 

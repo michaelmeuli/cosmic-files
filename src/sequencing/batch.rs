@@ -740,10 +740,8 @@ fn analyse_ab1_file(
         canonical_path.display()
     );
     insert_hits(canonical_path, stamp, seq_id_hits.clone());
-    if gene == Some(Ab1Gene::Rrs16S)
-        && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
-    {
-        guard.insert(sample_id.clone(), seq_id_hits.clone());
+    if gene == Some(Ab1Gene::Rrs16S) {
+        insert_16s_hits(&sample_id, &seq_id_hits);
     }
 
     Some(SampleSusceptibilityRecord {
@@ -778,10 +776,18 @@ fn insert_cached_record(
     record: &SampleSusceptibilityRecord,
 ) {
     insert_hits(canonical_path, stamp, record.seq_id_hits.clone());
-    if record.gene.as_deref() == Some(Ab1Gene::Rrs16S.label())
+    if record.gene.as_deref() == Some(Ab1Gene::Rrs16S.label()) {
+        insert_16s_hits(&record.sample_id, &record.seq_id_hits);
+    }
+}
+
+/// Stores a 16S read's hits for its sample in [`SIXTEEN_S_HITS_CACHE`]. A read without hits is
+/// skipped, so it can't replace the hits of another 16S read of the sample.
+fn insert_16s_hits(sample_id: &str, hits: &[SeqIdHit]) {
+    if !hits.is_empty()
         && let Ok(mut guard) = SIXTEEN_S_HITS_CACHE.write()
     {
-        guard.insert(record.sample_id.clone(), record.seq_id_hits.clone());
+        guard.insert(sample_id.to_string(), hits.to_vec());
     }
 }
 

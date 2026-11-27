@@ -359,21 +359,22 @@ impl Item {
         self.ab1_gene() == Some(Ab1Gene::RrsMtb)
     }
 
-    /// Returns the sample's 16S seq_id_hits, first by looking for a sibling 16S AB1 in the
+    /// Returns the sample's 16S seq_id_hits, first from a sibling 16S AB1 with hits in the
     /// currently listed `items`, then falling back to the project-wide
     /// [`SIXTEEN_S_HITS_CACHE`](crate::sequencing::batch::SIXTEEN_S_HITS_CACHE) populated by
-    /// background `scan_ab1_directory` runs — so the sibling is found even when it lives in a
-    /// different directory than the file being previewed.
+    /// background `scan_ab1_directory` runs — so a sibling is found even when it lives in a
+    /// different directory than the file being previewed. `None` if neither has any hits.
     fn sibling_16s_hits<'a>(&self, items: &'a [Item]) -> Option<Cow<'a, [SeqIdHit]>> {
         let (sample_id, _) = parse_ab1_filename(&self.name);
         // The sample ID is only parsed for the 16S AB1 files.
-        if let Some(sibling) = items
+        items
             .iter()
-            .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
-        {
-            return Some(sibling.seq_id_hits_cached());
-        }
-        crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id).map(Cow::Owned)
+            .filter(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
+            .map(Item::seq_id_hits_cached)
+            .find(|hits| !hits.is_empty())
+            .or_else(|| {
+                crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id).map(Cow::Owned)
+            })
     }
 
     pub fn is_chelonae(&self, items: &[Item]) -> bool {
@@ -1905,6 +1906,41 @@ mod tests {
         }
         std::fs::create_dir(dir.path().join("rpoB.ab1")).unwrap();
         assert_eq!(item("rpoB.ab1").ab1_gene(), None);
+    }
+
+    #[test]
+    fn sibling_16s_lookup_skips_reads_without_hits() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"").unwrap();
+            crate::item::item_from_path(path, Default::default()).unwrap()
+        };
+        // Sample IDs no other test uses: `SIXTEEN_S_HITS_CACHE` is shared by all tests.
+        let hit = identify_sequence_erm41(b"ACGTACGTACGTACGTACGT").remove(0);
+        let target = item("2099000001 hsp65.ab1");
+        let empty = item("2099000001 a_Mbak14.ab1");
+        let mut with_hits = item("2099000001 b_Mbak14.ab1");
+        let ItemMetadata::Path { sequence_opt, .. } = &mut with_hits.metadata else {
+            panic!("local item");
+        };
+        sequence_opt.as_mut().unwrap().seq_id_hits = vec![hit.clone()];
+
+        let items = [empty, with_hits];
+        let found = target.sibling_16s_hits(&items).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].accession, hit.accession);
+
+        // Only the empty sibling is listed and nothing is cached.
+        assert!(target.sibling_16s_hits(&items[..1]).is_none());
+
+        // Only the empty sibling is listed, but another directory's read is cached.
+        crate::sequencing::batch::SIXTEEN_S_HITS_CACHE
+            .write()
+            .unwrap()
+            .insert("2099000001".to_string(), vec![hit.clone()]);
+        let found = target.sibling_16s_hits(&items[..1]).unwrap();
+        assert_eq!(found[0].accession, hit.accession);
     }
 
     fn erm41_calls(position_28: Erm41Position28, lof: bool) -> Erm41SusceptibilityCalls {
