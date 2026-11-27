@@ -2908,7 +2908,7 @@ impl App {
                     ),
                 )
                 .add(
-                    widget::settings::item::builder("Report max sample age (days)").control(
+                    widget::settings::item::builder("Report max sample age (days, 0 = no limit)").control(
                         widget::text_input(
                             "60",
                             self.config.tb_config.report_max_age_days.to_string(),

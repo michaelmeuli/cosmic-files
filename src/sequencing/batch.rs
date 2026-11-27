@@ -861,12 +861,26 @@ pub(crate) fn analyse_ab1_for_preview(
     record.seq_id_hits
 }
 
+/// Whether a record passes the report age filter. `0` days means no limit; an unknown
+/// creation time always passes.
+pub(crate) fn within_report_age(
+    created: Option<SystemTime>,
+    max_age_days: u32,
+    now: SystemTime,
+) -> bool {
+    if max_age_days == 0 {
+        return true;
+    }
+    let max_age = Duration::from_secs(u64::from(max_age_days) * 86_400);
+    created.is_none_or(|created| now.duration_since(created).is_ok_and(|age| age <= max_age))
+}
+
 /// Write `records` to a CSV file at `out_path`.
 ///
 /// Filters the same way [`super::build_report_pdf`] does: `gene` must be known, the best
 /// identity of either reference source ([`SampleSusceptibilityRecord::best_identity`]) must
 /// meet [`MIN_SEQ_ID_IDENTITY`], and `file_created` (when known) must fall within
-/// `report_max_age_days`.
+/// `report_max_age_days` (see [`within_report_age`]).
 ///
 /// Columns: `file_name, sample_id, gene, overall_susceptible, species, identity_pct,
 /// erm41_position_28, erm41_lof_snp_calls, erm41_susceptible, rrl_position_2058_2059,
@@ -880,7 +894,6 @@ pub fn write_ab1_csv(
     out_path: &std::path::Path,
     report_max_age_days: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let max_age = Duration::from_secs(u64::from(report_max_age_days) * 24 * 60 * 60);
     let now = SystemTime::now();
 
     let file = std::fs::File::create(out_path)?;
@@ -921,10 +934,7 @@ pub fn write_ab1_csv(
         if rec.best_identity().is_none_or(|i| i < MIN_SEQ_ID_IDENTITY) {
             continue;
         }
-        if !rec
-            .file_created
-            .is_none_or(|created| now.duration_since(created).is_ok_and(|age| age <= max_age))
-        {
+        if !within_report_age(rec.file_created, report_max_age_days, now) {
             continue;
         }
 
@@ -1053,7 +1063,6 @@ pub fn write_rare_mutations_csv(
     out_path: &std::path::Path,
     report_max_age_days: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let max_age = Duration::from_secs(u64::from(report_max_age_days) * 24 * 60 * 60);
     let now = SystemTime::now();
     let rare: Vec<&SampleSusceptibilityRecord> = records
         .iter()
@@ -1063,9 +1072,7 @@ pub fn write_rare_mutations_csv(
                 && rec
                     .best_identity()
                     .is_some_and(|i| i >= MIN_SEQ_ID_IDENTITY)
-                && rec.file_created.is_none_or(|created| {
-                    now.duration_since(created).is_ok_and(|age| age <= max_age)
-                })
+                && within_report_age(rec.file_created, report_max_age_days, now)
                 && (calls.rrl.is_susceptible_rare == Some(false)
                     || calls.rrs.is_susceptible_rare == Some(false)
                     || calls.rrs3end.is_susceptible_rare == Some(false))
@@ -1537,6 +1544,16 @@ mod tests {
     }
 
     #[test]
+    fn report_age_filter() {
+        let now = SystemTime::now();
+        let days_ago = |days: u64| Some(now - Duration::from_secs(days * 86_400));
+        assert!(within_report_age(days_ago(40), 0, now));
+        assert!(!within_report_age(days_ago(40), 30, now));
+        assert!(within_report_age(days_ago(10), 30, now));
+        assert!(within_report_age(None, 30, now));
+    }
+
+    #[test]
     fn rare_mutations_csv_removed_when_nothing_qualifies() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("rare_mutations.csv");
@@ -1551,8 +1568,16 @@ mod tests {
                 .contains("2024000001")
         );
 
-        // Outside the age window: the earlier file must not linger.
+        // 0 days is no age limit.
         rec.file_created = Some(SystemTime::now() - Duration::from_secs(40 * 86_400));
+        write_rare_mutations_csv(std::slice::from_ref(&rec), &out, 0).unwrap();
+        assert!(
+            std::fs::read_to_string(&out)
+                .unwrap()
+                .contains("2024000001")
+        );
+
+        // Outside the age window: the earlier file must not linger.
         write_rare_mutations_csv(&[rec], &out, 30).unwrap();
         assert!(!out.exists());
         // Nothing to remove is fine too.
