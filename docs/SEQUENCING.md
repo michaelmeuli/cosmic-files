@@ -4,7 +4,7 @@ This fork of cosmic-files analyses Sanger reads (`.ab1` files). For each read it
 closest species and, for some genes, predicts drug resistance. This document explains where the
 reference sequences come from (**NCBI** and **GTDB**) and what each **preview pane** shows.
 
-For the internals, see [the module README](../src/sequencing/README.md) (pipeline, alignment, key
+For how the module works, see [SEQUENCING_INTERNALS.md](SEQUENCING_INTERNALS.md) (pipeline, alignment, key
 types) and [CACHE.md](../src/sequencing/CACHE.md) (caches).
 
 ## 1. Overview
@@ -214,4 +214,4 @@ identity** recomputes the pane's calls from the unfiltered hits.
 A background scan runs every 2 hours for each configured AB1 directory and writes
 `ab1_susceptibility_report.csv`, `rare_mutations.csv` (when there is something to list) and a PDF.
 Optional steps download new files from Microsynth, push the PDF to ntfy and email it. Details are
-in the [module README](../src/sequencing/README.md#2-end-to-end-pipeline-periodic-scan).
+in the [sequencing internals](SEQUENCING_INTERNALS.md#2-end-to-end-pipeline-periodic-scan).

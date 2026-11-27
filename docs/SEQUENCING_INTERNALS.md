@@ -1,4 +1,4 @@
-# `src/sequencing/` — how it works
+# Sequencing internals: how `src/sequencing/` works
 
 This module turns Sanger capillary reads (`.ab1` chromatogram files) into two results:
 
@@ -19,22 +19,22 @@ are the optional Microsynth download (`microsynth.rs`) and the ntfy push (`ntfy_
 
 | File | Role |
 |---|---|
-| [`mod.rs`](mod.rs) | Shared core: AB1 parsing (`parse_ab1_sequence`, `parse_ab1_quality`, `Ab1Channels::from_bytes`), quality trimming (`trim_to_min_quality`), primer trimming (`trim_start_end`), `reverse_complement`, alignment (`align_to_ref`, `trim_alignment_ends`, `base_at_ref_pos`), FASTA parsing, the embedded reference FASTAs, the key types (`SeqIdHit`, `SeqData`, `SusceptibilityCalls`), and the PDF report (`build_report_pdf`). |
-| [`ab1_filename.rs`](ab1_filename.rs) | Filename parsing (`parse_ab1_filename`): lab number → `sample_id`, marker keywords → `Ab1Gene` (see §3). |
-| [`batch.rs`](batch.rs) | Directory scanning (`scan_ab1_directory`), per-file pipeline (`analyse_ab1_file`), in-memory and on-disk caches, preview analysis (`analyse_ab1_for_preview`), CSV export (`write_ab1_csv`, `write_rare_mutations_csv`). |
-| [`erm41.rs`](erm41.rs) | erm(41) for the *M. abscessus* complex: subspecies ID plus position 28 and loss-of-function (LOF) SNP calls, which predict inducible macrolide resistance. |
-| [`rrl.rs`](rrl.rs) | 23S rRNA: species ID plus macrolide resistance at *E. coli* positions 2058/2059 and catalogue SNPs. |
-| [`rrs.rs`](rrs.rs) | 16S rRNA: species ID plus aminoglycoside-resistance SNPs. |
-| [`rrs3end.rs`](rrs3end.rs) | 16S rRNA 3′ end: position 1248 (*M. marinum* A vs *M. ulcerans* G) plus the same aminoglycoside SNP logic as `rrs.rs`. |
-| [`hsp65.rs`](hsp65.rs) | hsp65/groEL2: species ID (TB11/TB12 amplicons only) and primer trimming. |
-| [`rpob.rs`](rpob.rs) | rpoB: species ID per region; for the Mtb regions also rifampicin resistance (RRDR) from the WHO catalogue. |
-| [`pnca.rs`](pnca.rs) | pncA (*M. tuberculosis* complex): pyrazinamide resistance from the WHO catalogue. |
-| [`tb_data.rs`](tb_data.rs) | TBProfiler `*.results.json` deserialization, `confidence_rank`, and the TB → *E. coli* coordinate map. |
-| [`bed.rs`](bed.rs) | Parser for 5-column subspecies barcode BED files. |
-| [`microsynth.rs`](microsynth.rs) | *(feature `russh`)* SFTP download of AB1 archives from Microsynth into the scan directory. |
-| [`ntfy_notify.rs`](ntfy_notify.rs) | Sends the finished PDF report to an ntfy topic. |
-| [`disk_cache.rs`](disk_cache.rs) | SQLite on-disk cache of analysed files (`DiskCache`): per-file upserts, batched transactions, pruning (see §8). |
-| [`serde_helpers.rs`](serde_helpers.rs) | Serde adapters for the cached records (`BTreeMap<u8, _>`, `Option<SystemTime>`, alignment bytes as strings). |
+| [`mod.rs`](../src/sequencing/mod.rs) | Shared core: AB1 parsing (`parse_ab1_sequence`, `parse_ab1_quality`, `Ab1Channels::from_bytes`), quality trimming (`trim_to_min_quality`), primer trimming (`trim_start_end`), `reverse_complement`, alignment (`align_to_ref`, `trim_alignment_ends`, `base_at_ref_pos`), FASTA parsing, the embedded reference FASTAs, the key types (`SeqIdHit`, `SeqData`, `SusceptibilityCalls`), and the PDF report (`build_report_pdf`). |
+| [`ab1_filename.rs`](../src/sequencing/ab1_filename.rs) | Filename parsing (`parse_ab1_filename`): lab number → `sample_id`, marker keywords → `Ab1Gene` (see §3). |
+| [`batch.rs`](../src/sequencing/batch.rs) | Directory scanning (`scan_ab1_directory`), per-file pipeline (`analyse_ab1_file`), in-memory and on-disk caches, preview analysis (`analyse_ab1_for_preview`), CSV export (`write_ab1_csv`, `write_rare_mutations_csv`). |
+| [`erm41.rs`](../src/sequencing/erm41.rs) | erm(41) for the *M. abscessus* complex: subspecies ID plus position 28 and loss-of-function (LOF) SNP calls, which predict inducible macrolide resistance. |
+| [`rrl.rs`](../src/sequencing/rrl.rs) | 23S rRNA: species ID plus macrolide resistance at *E. coli* positions 2058/2059 and catalogue SNPs. |
+| [`rrs.rs`](../src/sequencing/rrs.rs) | 16S rRNA: species ID plus aminoglycoside-resistance SNPs. |
+| [`rrs3end.rs`](../src/sequencing/rrs3end.rs) | 16S rRNA 3′ end: position 1248 (*M. marinum* A vs *M. ulcerans* G) plus the same aminoglycoside SNP logic as `rrs.rs`. |
+| [`hsp65.rs`](../src/sequencing/hsp65.rs) | hsp65/groEL2: species ID (TB11/TB12 amplicons only) and primer trimming. |
+| [`rpob.rs`](../src/sequencing/rpob.rs) | rpoB: species ID per region; for the Mtb regions also rifampicin resistance (RRDR) from the WHO catalogue. |
+| [`pnca.rs`](../src/sequencing/pnca.rs) | pncA (*M. tuberculosis* complex): pyrazinamide resistance from the WHO catalogue. |
+| [`tb_data.rs`](../src/sequencing/tb_data.rs) | TBProfiler `*.results.json` deserialization, `confidence_rank`, and the TB → *E. coli* coordinate map. |
+| [`bed.rs`](../src/sequencing/bed.rs) | Parser for 5-column subspecies barcode BED files. |
+| [`microsynth.rs`](../src/sequencing/microsynth.rs) | *(feature `russh`)* SFTP download of AB1 archives from Microsynth into the scan directory. |
+| [`ntfy_notify.rs`](../src/sequencing/ntfy_notify.rs) | Sends the finished PDF report to an ntfy topic. |
+| [`disk_cache.rs`](../src/sequencing/disk_cache.rs) | SQLite on-disk cache of analysed files (`DiskCache`): per-file upserts, batched transactions, pruning (see §8). |
+| [`serde_helpers.rs`](../src/sequencing/serde_helpers.rs) | Serde adapters for the cached records (`BTreeMap<u8, _>`, `Option<SystemTime>`, alignment bytes as strings). |
 
 ```mermaid
 graph LR
@@ -141,7 +141,7 @@ flowchart TD
     SUS & SP & FN --> REC["SampleSusceptibilityRecord<br/>(stores hits ≥98%, max 10 per source)"]
 ```
 
-`parse_ab1_filename` ([`ab1_filename.rs`](ab1_filename.rs)) is the only place keywords are
+`parse_ab1_filename` ([`ab1_filename.rs`](../src/sequencing/ab1_filename.rs)) is the only place keywords are
 matched; both the batch scan and the preview pane (`Item::is_*`) use it. It finds the lab number
 (`YYYYNNNNNN`, or the older `YYYY_NNNNNN` / `NNNNNN-YY`, normalised to 10 digits) and then
 matches keywords only in the marker part of the name: the lab number, `_Peaktraced` and the run
@@ -379,7 +379,7 @@ classDiagram
 | `ab1_preview_cache.sqlite` | same | disk | Same, for files opened outside the scan directories. |
 | `.microsynth_sync.json` | archives already extracted | disk (scan dir) | Avoids downloading the same Microsynth archives again. |
 
-The disk caches are `DiskCache` ([`disk_cache.rs`](disk_cache.rs)); see [CACHE.md](CACHE.md)
+The disk caches are `DiskCache` ([`disk_cache.rs`](../src/sequencing/disk_cache.rs)); see [CACHE.md](../src/sequencing/CACHE.md)
 for how the layers interlock. A configured `ab1_cache_path` ending in `.json` (the old cache
 format) maps to the same name with `.sqlite`; the old JSON file is no longer read and can be
 deleted. Keep the cache outside cloud-synced folders (OneDrive, Dropbox, …): syncing an SQLite
