@@ -317,18 +317,13 @@ impl Item {
         crate::sequencing::batch::cached_hits(self.path_opt()?, metadata)
     }
 
-    fn is_fasta(&self) -> bool {
-        let lower = self.name.to_ascii_lowercase();
-        lower.ends_with(".fasta") || lower.ends_with(".fa")
-    }
-
     /// Gene inferred from the file name by the same parser the batch scan uses, so the preview
-    /// shows the analysis the scan ran. FASTA files get no gene preview.
+    /// shows the analysis the scan ran. Only local AB1 files get a gene preview.
     fn ab1_gene(&self) -> Option<Ab1Gene> {
-        if self.is_fasta() {
-            None
-        } else {
+        if self.metadata.is_ab1() && !self.metadata.is_dir() {
             parse_ab1_filename(&self.name).1
+        } else {
+            None
         }
     }
 
@@ -371,11 +366,11 @@ impl Item {
     /// different directory than the file being previewed.
     fn sibling_16s_hits<'a>(&self, items: &'a [Item]) -> Option<Cow<'a, [SeqIdHit]>> {
         let (sample_id, _) = parse_ab1_filename(&self.name);
-        // One filename parse per item (`is_16s` would parse it a second time).
-        if let Some(sibling) = items.iter().find(|it| {
-            let (id, gene) = parse_ab1_filename(&it.name);
-            gene == Some(Ab1Gene::Rrs16S) && id == sample_id && !it.is_fasta()
-        }) {
+        // The sample ID is only parsed for the 16S AB1 files.
+        if let Some(sibling) = items
+            .iter()
+            .find(|it| it.is_16s() && parse_ab1_filename(&it.name).0 == sample_id)
+        {
             return Some(sibling.seq_id_hits_cached());
         }
         crate::sequencing::batch::sixteen_s_hits_for_sample(&sample_id).map(Cow::Owned)
@@ -1890,6 +1885,26 @@ mod tests {
         let seq = cached_seq_data(Path::new("does/not/exist.ab1"), &metadata);
         assert!(seq.read_opt.is_none());
         assert!(seq.seq_id_hits.is_empty());
+    }
+
+    #[test]
+    fn only_ab1_files_get_a_gene_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = |name: &str| {
+            let path = dir.path().join(name);
+            if !path.exists() {
+                std::fs::write(&path, b"").unwrap();
+            }
+            crate::item::item_from_path(path, Default::default()).unwrap()
+        };
+        for name in ["2025500100 pncA.ab1", "2025500101 pncA.AB1"] {
+            assert!(item(name).is_pnca(), "{name}");
+        }
+        for name in ["pnca_notes.txt", "2025500100 pncA.fasta"] {
+            assert_eq!(item(name).ab1_gene(), None, "{name}");
+        }
+        std::fs::create_dir(dir.path().join("rpoB.ab1")).unwrap();
+        assert_eq!(item("rpoB.ab1").ab1_gene(), None);
     }
 
     fn erm41_calls(position_28: Erm41Position28, lof: bool) -> Erm41SusceptibilityCalls {
