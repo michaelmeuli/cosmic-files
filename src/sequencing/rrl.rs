@@ -452,6 +452,7 @@ pub fn identify_sequence_rrl_ntm(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end: vec![],
                 rrs_mtb_snp_calls: vec![],
+                rrl_mtb_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
                 rpob_snp_calls: vec![],

@@ -51,12 +51,13 @@ never merged: each is deduplicated, ranked, cut to its top 10 and turned into it
 | 16S (5′ part) | `myco_rrs.fasta` | `16S_IMMF_IMMR2`, `16S_Mbak283f_Mbak259r`, `16S_Mbak283f_Mbak264r` |
 | 16S 3′ end | `myco_rrs.fasta` | `16S_Bact1098s_Bact1525a` |
 | rrs, Mtb complex (#289/#261) | `myco_rrs.fasta`; calls on the H37Rv rrs reference (`rrs/`) | `rrs_289_261` |
-| rrl (23S) | `myco_rrl.fasta` | `23S_MCLR19F_MCLR21R` |
+| rrl (23S), NTM | `myco_rrl.fasta` | `23S_MCLR19F_MCLR21R` |
+| rrl, Mtb complex (SP1/SP2) | `myco_rrl.fasta`; calls on the H37Rv rrl reference (`rrl/`) | `23S_SP1F_SP2Rmod` |
 | rpoB, NTM region | `myco_rpob.fasta` (entries ≥ 400 bp) | `rpoB_2573f_3337r` (entries ≥ 400 bp) |
 | rpoB, Mtb RRDR | none | `rpoB_TR1_TR2b` |
 | rpoB, Mtb 5′ region | none | `rpoB_Tb176f_Tb176r` |
 | rpoB, Mtb Xpert region | none | `rpoB_Xpert_F1_R`, `_F2_R`, `_F2_R2` |
-| hsp65 | none | `hsp65_TB11_TB12` |
+| hsp65 | none | `hsp65_TB11_TB12`, `hsp65_TB11_TB12w` |
 | erm(41) | three subspecies references (*abscessus*, *bolletii*, *massiliense*) | none |
 | pncA | H37Rv, *M. bovis*, *M. canettii* | none |
 
@@ -107,7 +108,8 @@ Then run it again without `--dry-run` (or use `--from <dir>` for a local copy), 
 - **Resistance calls need NCBI.** Catalogue positions refer to full-length ntm-db sequences
   (accession contains `:`). GTDB amplicons are too short and numbered differently. For rrl and
   rrs, `best_snp_hit` takes the species of the best NCBI hit and uses the best hit of that species
-  that carries SNP calls.
+  that carries SNP calls. Genus synonyms and subspecies are ignored for this, and *M. massiliense*
+  and *M. bolletii* count as *M. abscessus*.
 - **Some species exist only in GTDB.** For *M. persicum*, *M. pseudokansasii*, *M. ostraviense*,
   *M. innocens* and *M. attenuatum*, the amplicons are the only references.
 - **The two calls can differ**, because the reference sets and species boundaries differ. Both are
@@ -143,10 +145,11 @@ code is in [item/sequencing.rs](../src/item/sequencing.rs). The keywords are a s
 | 4 | 16S | `Mbak…` |
 | 5 | rrs Mtb | `#289`, `#261`, or `rrs…` with 289 / 261 |
 | 6 | 16S 3′ end | `1098s`, `1525a`, other `rrs…` |
-| 7 | rrl | `rrl…`, `MCLR` / `MCRL`, `clr`, `SP1` / `SP2` |
-| 8 | pncA | `pncA…` |
-| 9 | TBProfiler | a TBProfiler `*.results.json` report (by content, not name) |
-| 10 | standard file preview | everything else |
+| 7 | rrl Mtb | `SP1` / `SP2` |
+| 8 | rrl | `rrl…`, `MCLR` / `MCRL`, `clr` |
+| 9 | pncA | `pncA…` |
+| 10 | TBProfiler | a TBProfiler `*.results.json` report (by content, not name) |
+| 11 | standard file preview | everything else |
 
 The gene previews are chosen by name alone. Only `.fasta` and `.fa` files are excluded, so another
 file type with a matching name also opens a gene preview. Selecting several files shows the
@@ -182,9 +185,10 @@ The heading of each pane is the lab's protocol name. In species previews, hits a
 | **erm(41)** | Identity to the three *M. abscessus* subspecies references | Position 28, loss-of-function SNPs, chromatogram around position 28 | Macrolide: susceptible or inducible resistance, with overrides (section 4) |
 | **hsp65** | 16S call of the same sample; GTDB hits | none | none |
 | **rpoB** | 16S call of the same sample; rpoB call per source; *M. chelonae* note when 16S and rpoB support it | Mtb regions only: WHO-catalogue sites | Mtb regions only: rifampicin |
-| **16S** | Own 16S call per source; NCBI and GTDB hits | rrs aminoglycoside SNPs, listed between the two sections | none |
+| **16S** | Own 16S call per source; NCBI and GTDB hits | Covered rrs aminoglycoside SNPs, between the two sections; if none is covered, a note that resistance is not assessed | none |
 | **16S 3′ end** | 16S call of the same sample; *marinum* / *ulcerans* note | Position 1248, rrs SNPs, chromatogram, hits per source | none (position 1248 separates *marinum* from *ulcerans* only; the pane names one only if the sample's 16S read points to that pair) |
 | **rrs Mtb** | Hits per source | WHO-catalogue bases at H37Rv 1401, 1402, 1403, 1483, 1484 | Aminoglycoside / capreomycin: resistant, or "no resistance mutation found" without a verdict |
+| **rrl Mtb** | Hits per source | H37Rv rrl positions from the WHO catalogue and protocol 32.43604 | Linezolid: resistant (with the source), or "no resistance mutation found" without a verdict |
 | **rrl** | 16S call of the same sample; hits per source | Catalogue SNPs, chromatogram around *E. coli* 2058/2059 | Macrolide, from 2058/2059 and catalogue SNPs |
 | **pncA** | Best hit only | WHO-catalogue sites, alignment link | Pyrazinamide |
 | **TBProfiler** | none | Database version, resistance variants by confidence, *E. coli* coordinates, buttons to open or download the result files | per variant |
@@ -196,7 +200,7 @@ the 16S lines read "No species identified".
 ## 4. Verdicts: preview and report
 
 The combined verdict (`susceptibility_from_hits` in [batch.rs](../src/sequencing/batch.rs)) is
-the first gene with a result, in the order erm(41) → rrl → rrs → rrs 3′ end → rrs Mtb → pncA → rpoB. The
+the first gene with a result, in the order erm(41) → rrl → rrs → rrs 3′ end → rrs Mtb → rrl Mtb → pncA → rpoB. The
 scan and the preview call the same function, and the verdict sentence of a pane shows the
 combined call of its gene, including these overrides:
 

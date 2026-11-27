@@ -14,20 +14,20 @@ references" below say which applies.
 ## 1. Summary
 
 The file-name dispatch fits the primer names well, and the species lists, rpoB regions, erm(41),
-rrl positions and pncA are plausible. The main open problem is in
-panes that show **NTM wording for *M. tuberculosis* complex assays**.
+rrl positions and pncA are plausible. Findings 1 to 8 are fixed; finding 9 was
+closed without a code change.
 
 | # | Finding | Pane | Weight |
 |---|---|---|---|
 | 1 | "Position 1248 = A: *M. marinum*" appears for many other species | 16S 3′ end | **fixed** |
 | 2 | Mtb rrs reads get no resistance call | 16S 3′ end | **fixed** |
-| 3 | Mtb 23S reads get an NTM heading and a macrolide verdict only | rrl | medium |
-| 4 | 16S 5′ pane lists resistance positions its reads do not cover | 16S | medium |
+| 3 | Mtb 23S reads get an NTM heading and a macrolide verdict only | rrl | **fixed** |
+| 4 | 16S 5′ pane lists resistance positions its reads do not cover | 16S | **fixed** |
 | 5 | A 3′-end amplicon is in the 5′ reference pool | 16S | **fixed** |
-| 6 | Chromatogram text and *massiliense* exception look copied from erm(41) | 16S 3′ end | low |
-| 7 | Protocol numbers in headings differ from PRIMERS.md | several | low |
-| 8 | Routine hsp65 amplicon file is not used | hsp65 | low |
-| 9 | Very short GTDB references in the 3′-end pool | 16S 3′ end | to check |
+| 6 | Chromatogram text and *massiliense* exception look copied from erm(41) | 16S 3′ end | **fixed** |
+| 7 | Protocol numbers in headings differ from PRIMERS.md | several | **fixed** |
+| 8 | Routine hsp65 amplicon file is not used | hsp65 | **fixed** |
+| 9 | Odd-length GTDB references in the 3′-end pool | 16S 3′ end | closed, no change |
 
 ## 2. Primers, file names and references
 
@@ -35,15 +35,15 @@ panes that show **NTM wording for *M. tuberculosis* complex assays**.
 |---|---|---|---|
 | Mbak283f / 264r / 259r / Mbak14 | 16S | Mbak283f_Mbak259r, Mbak283f_Mbak264r, IMMF_IMMR2 | Fits (finding 5 fixed) |
 | IMM F / IMM R2 | **not recognised** from the primer name | IMMF_IMMR2 | No preview unless the name also has another keyword. These are amplification primers, so this may never matter. |
-| Bact-1098s / 1525a | 16S 3′ end | Bact1098s_Bact1525a | Fits; findings 1 and 9 |
+| Bact-1098s / 1525a | 16S 3′ end | Bact1098s_Bact1525a | Fits (finding 1 fixed; see finding 9) |
 | #289 / #261 (Mtb rrs) | rrs Mtb (`#289`, `#261`, or `rrs…` with 289 / 261) | rrs_289_261 | Fixed (finding 2). A name with `289` but no `#` or `rrs` is not recognised. |
 | rpoB-2573f / 3337r | rpoB, NTM | 2573f_3337r | Fits |
 | TR1 / TR2b | rpoB RRDR | TR1_TR2b | Fits |
 | Tb176-f / -r | rpoB 5′ | Tb176f_Tb176r | Fits |
 | rpoB-F1 / F2 / R / R2 (Xpert) | rpoB Xpert; a bare `rpoB-R` counts as NTM | three Xpert files | Known limit, noted in the parser |
-| TB-11 / TB-12w / TB-12 | hsp65 | TB11_TB12 only | Finding 8 |
+| TB-11 / TB-12w / TB-12 | hsp65 | TB11_TB12 and TB11_TB12w | Fits (finding 8 fixed) |
 | MCLR 19F / 21R | rrl | MCLR19F_MCLR21R | Fits |
-| SP1 F / SP2 R mod (Mtb) | rrl | MCLR19F_MCLR21R | References are suitable: the SP product lies entirely inside the MCLR product (checked on *M. tuberculosis* and *M. abscessus* references). Finding 3. |
+| SP1 F / SP2 R mod (Mtb) | rrl Mtb | SP1F_SP2Rmod | Fixed (finding 3) |
 | erm41f2 / r2, erm41f / r | erm(41) | none; three NCBI references | Fits |
 | erm(41) promoter | erm(41) | none | Only about 115 of the 400 bp are coding sequence. It includes position 28, but the promoter itself is not analysed. |
 | CME-1Y / CME-2 (erm39) | none | none | Correctly excluded |
@@ -97,6 +97,12 @@ pncA and rpoB, or state in the pane that resistance is not assessed.
 
 ### 3. Mtb 23S reads are treated as NTM
 
+**Fixed (2026-11-27):** SP1 / SP2 reads are their own assay with a preview (protocol 32.43604).
+Linezolid resistance is reported for WHO-associated mutations and for those named in the protocol,
+each with its source; wild type gives no verdict, and no macrolide call is made. rplC (protocol
+32.43617) is not assessed. An NTM read sequenced with SP primers now gets this pane, with a species
+warning. Not yet checked with real reads. The description below is of the earlier behaviour.
+
 *Seen in code.*
 
 SP1 F / SP2 R mod belongs to protocol 32.43604 (clarithromycin and linezolid, *M. tuberculosis*
@@ -106,6 +112,10 @@ positions 2058/2059. **Linezolid positions are not called**, and the pane does n
 **Suggestion:** distinguish the two assays in the file-name parser, as for the rpoB regions.
 
 ### 4. 16S 5′ pane lists uncovered resistance positions
+
+**Fixed (2026-11-27):** uncovered positions are left out of the pane and the reports. With none
+covered, the pane says that resistance is not assessed. The description below is of the earlier
+behaviour.
 
 *Seen in code.*
 
@@ -131,6 +141,9 @@ include it.
 
 ### 6. Chromatogram of the 3′-end pane
 
+**Fixed (2026-11-27):** the caption describes the window that is shown, and the chromatogram no
+longer depends on the top hit. The description below is of the earlier behaviour.
+
 *Seen in code.*
 
 - The caption says "Shown are bases 19-39", the erm(41) range. The window is 10 bases on each side
@@ -139,6 +152,10 @@ include it.
   "16S 3-End chromatogram view is not available."
 
 ### 7. Headings and protocol numbers
+
+**Fixed (2026-11-27):** headings give the protocol number without revision, and the 16S 5′ pane
+names 32.43522 (32.43501 is not in the current handbook folder). The research protocol keeps its
+name (NZM 21). The description below is of the earlier behaviour.
 
 *Seen in code.*
 
@@ -156,6 +173,9 @@ Which protocol the 16S heading should name is a lab decision.
 
 ### 8. hsp65: only the TB-12 amplicons
 
+**Fixed (2026-11-27):** the pool is built from both files, with duplicates removed. The
+description below is of the earlier behaviour.
+
 *Checked on references.*
 
 PRIMERS.md lists TB-11 + **TB-12w** as routine and TB-12 as fallback. The program uses only
@@ -164,21 +184,36 @@ file only, so the practical effect is small.
 
 **Suggestion:** include both files.
 
-### 9. Short references
+### 9. Odd-length references in the 3′-end pool
 
-*Counted on references; effect not tested.*
+**Closed without a code change (2026-11-27).** This finding first assumed that short entries are
+16S fragments that could reach a high identity from little evidence. The measurements below do not
+support that.
 
-13 *Mycobacterium* entries in the Bact amplicon file are shorter than 300 bp, and the file's
-shortest entry is 51 bp. Identity is calculated over the aligned reference span, so a fragment can
-reach a high identity from little evidence. Only the NTM rpoB pool has a length filter.
+*Checked on references.* *Mycobacterium* entries of `16S_Bact1098s_Bact1525a.fasta`; the expected
+product is about 448 bp. The last column is the share of an entry's 16-base stretches that occur
+anywhere in the NCBI 16S references (`myco_rrs.fasta`, either strand).
 
-**Suggestion:** test reads against the pool, and consider a minimum reference length.
+| Length (bp) | Entries | 16-base stretches found in NCBI 16S |
+|---|---|---|
+| under 400 | 17 (shortest 51) | none, in all 17 |
+| 400–500 | 674 | median 100 %; 9 entries below 10 % |
+| over 500 (up to 3000) | 90 | 89 entries below 10 % |
 
-## 4. Suggested order
+The 17 short entries have 2 or 3 mismatches per primer, and none is 98 % or more identical
+(compared without gaps) to part of another species' product of 400 bp or more. The odd-length
+entries therefore look like **off-target products of the in-silico PCR**, not pieces of 16S. A 16S
+read is not expected to match them well.
 
-1. Finding 1: done.
-2. Finding 3: say what is not assessed, then add the calls.
-3. Findings 4, 6 and 7: small changes to text and pool assignment.
-4. Findings 8 and 9: test with real reads first.
+**Not tested:** the program did not align any read against these entries for this check, and no
+real read was used. The comparison used shared 16-base stretches and ungapped matching.
+
+**If wanted later:** the entries come from cosmic-seq, where a limit on the product length of the
+in-silico PCR would remove most of them. Do not edit the exported file by hand.
+
+## 4. What is left
+
+1. Findings 1 to 8 are fixed. None of the fixes has been checked with real reads yet.
+2. Finding 9 is closed; the odd-length entries can be removed in cosmic-seq if wanted.
 
 Changes to calls require a higher `ANALYSIS_VERSION`, so that cached results are recomputed.

@@ -12,6 +12,7 @@ use crate::location::Location;
 use crate::sequencing::batch::{Ab1Gene, RpoBRegion, parse_ab1_filename};
 use crate::sequencing::erm41::{Erm41SusceptibilityCalls, is_susceptible_erm41_by_lof_snps};
 use crate::sequencing::rrl::{RrlPosition2058_2059, RrlSusceptibilityCalls};
+use crate::sequencing::rrl_mtb::{RrlMtbSnpCall, rrl_mtb_findings};
 use crate::sequencing::rrs_mtb::RrsMtbSnpCall;
 use crate::sequencing::rrs3end::Rrs3EndPosition1248;
 use crate::sequencing::{
@@ -220,6 +221,23 @@ fn rrs_mtb_statement(calls: &[RrsMtbSnpCall]) -> String {
     }
 }
 
+/// Resistance statement of the Mtb 23S preview. Never "susceptible": a wild-type read only says
+/// that no resistance mutation was found.
+fn rrl_mtb_statement(calls: &[RrlMtbSnpCall]) -> String {
+    if calls.is_empty() {
+        return "Read does not align to M. tuberculosis rrl; resistance not assessed.".to_string();
+    }
+    let findings = rrl_mtb_findings(calls);
+    if !findings.is_empty() {
+        format!("Predicted linezolid resistance: {}.", findings.join("; "))
+    } else if calls.iter().any(|c| c.query_base.is_none()) {
+        "Not all listed positions are covered; resistance not assessed.".to_string()
+    } else {
+        "No resistance mutation found at the listed positions. No susceptibility verdict."
+            .to_string()
+    }
+}
+
 /// Verdict sentence of the rrl preview, from the combined rrl call (positions 2058/2059 and
 /// the catalogue SNPs), worded by what positions 2058/2059 show. `None`: no verdict.
 fn rrl_verdict_text(calls: &RrlSusceptibilityCalls) -> Option<&'static str> {
@@ -336,6 +354,10 @@ impl Item {
 
     pub fn is_16s3end(&self) -> bool {
         self.ab1_gene() == Some(Ab1Gene::Rrs3End)
+    }
+
+    pub fn is_rrl_mtb(&self) -> bool {
+        self.ab1_gene() == Some(Ab1Gene::RrlMtb)
     }
 
     pub fn is_rrs_mtb(&self) -> bool {
@@ -725,7 +747,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(16).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43505-2-Mykobakterien NTM 65kDa"));
+        details = details.push(widget::text::heading("32.43505-Mykobakterien NTM 65kDa"));
 
         if hits.is_empty()
             || self
@@ -938,7 +960,9 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(32 + rrs_snp_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43501-1-Mtb-NTM Kulturen-LC"));
+        details = details.push(widget::text::heading(
+            "32.43522-Mtb-Komplex NTM Kulturen Differenzierung (LC480-II)",
+        ));
 
         if hits.is_empty()
             || self
@@ -991,15 +1015,29 @@ impl Item {
             details = push_source_section(details, &hits, RefSource::Ncbi, "16S");
             if let Some(snp_hit) = best_snp_hit {
                 details = details.push(widget::text::body(""));
-                details = details.push(widget::text::body(
-                    "16S rRNA amikacin resistance SNPs (rrs):",
-                ));
-                details = details.push(widget::text::body(format!(
-                    "(Using commit: {} of ntm-db repository)",
-                    env!("NTM_DB_COMMIT")
-                )));
-                for snp in &snp_hit.rrs_snp_calls {
-                    details = details.push(widget::text::body(snp.call_tag().to_string()));
+                // Uncovered positions have an empty tag; Mbak reads cover none of them.
+                let covered: Vec<String> = snp_hit
+                    .rrs_snp_calls
+                    .iter()
+                    .map(|snp| snp.call_tag())
+                    .filter(|tag| !tag.is_empty())
+                    .collect();
+                if covered.is_empty() {
+                    details = details.push(widget::text::body(
+                        "Amikacin positions (rrs) are not covered by this read; resistance not \
+                         assessed.",
+                    ));
+                } else {
+                    details = details.push(widget::text::body(
+                        "16S rRNA amikacin resistance SNPs (rrs):",
+                    ));
+                    details = details.push(widget::text::body(format!(
+                        "(Using commit: {} of ntm-db repository)",
+                        env!("NTM_DB_COMMIT")
+                    )));
+                    for tag in covered {
+                        details = details.push(widget::text::body(tag));
+                    }
                 }
             }
             details = push_source_section(details, &hits, RefSource::Gtdb, "16S");
@@ -1026,7 +1064,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(42 + rrs_snp_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43506-1-16SEnd"));
+        details = details.push(widget::text::heading("32.43506-16SEnd"));
 
         if hits.is_empty()
             || self
@@ -1106,12 +1144,11 @@ impl Item {
                 .metadata
                 .ab1_chromatogram()
                 .filter(|c| c.rrs3end_view_state_opt.is_some())
-                && !self.metadata.is_massiliense_seq_id()
             {
                 let view_state = chrom.rrs3end_view_state_opt.unwrap();
                 details = details.push(widget::text::body(""));
                 details = details.push(widget::text::body(
-                    "Shown are bases 19-39, with E. coli position 1248 in bold.",
+                    "Shown are 10 bases on each side of E. coli position 1248, which is in bold.",
                 ));
                 if view_state.is_reverse {
                     details = details.push(widget::text::body("reverse complement"));
@@ -1178,7 +1215,7 @@ impl Item {
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(40).spacing(space_xxxs);
         details = details.push(widget::text::heading(
-            "32.43613-2-Mtb-Komplex rrs-Seq. Amikacin Capreomycin",
+            "32.43613-Mtb-Komplex rrs-Seq. Amikacin Capreomycin",
         ));
 
         if hits.is_empty()
@@ -1246,6 +1283,90 @@ impl Item {
         column.into()
     }
 
+    /// Preview of an *M. tuberculosis* complex 23S read (SP1 F / SP2 R mod): the linezolid sites
+    /// and a resistance statement. No macrolide verdict and no susceptible verdict.
+    pub fn preview_rrl_mtb(&self) -> Element<'_, Message> {
+        let cosmic_theme::Spacing {
+            space_xxxs,
+            space_m,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let hits = self.seq_id_hits_cached();
+
+        let mut column = widget::column::with_capacity(1).spacing(space_m);
+        let mut details = widget::column::with_capacity(48).spacing(space_xxxs);
+        details = details.push(widget::text::heading(
+            "32.43604-Mtb-Komplex 23S CLR-LIN-Seq. Linezolid",
+        ));
+
+        if hits.is_empty()
+            || self
+                .metadata
+                .sequence_length_trimmed()
+                .is_some_and(|n| n < 100)
+            || hits
+                .first()
+                .is_none_or(|h| h.identity < crate::sequencing::MIN_SEQ_ID_IDENTITY)
+        {
+            details = details.push(widget::text::body(
+                self.no_alignment_text(&hits, "Could not align sequence to references."),
+            ));
+            if let Some(sequence_length) = self.metadata.sequence_length() {
+                details = details.push(widget::text::body(format!(
+                    "Sequence length: {}",
+                    sequence_length
+                )));
+            }
+        }
+        if let Some(sequence_length_trimmed) = self.metadata.sequence_length_trimmed() {
+            details = details.push(widget::text::body(format!(
+                "Trimmed sequence length: {}",
+                sequence_length_trimmed
+            )));
+        }
+        if let Some(avg_qual) = self.metadata.sequence_avg_quality_trimmed() {
+            details = details.push(widget::text::body(format!(
+                "Average quality score: {:.1}",
+                avg_qual
+            )));
+        }
+        if hits.first().is_some_and(|h| {
+            h.identity >= crate::sequencing::MIN_SEQ_ID_IDENTITY
+                && self
+                    .metadata
+                    .sequence_length_trimmed()
+                    .is_none_or(|n| n >= 100)
+        }) {
+            let rrl = &self.metadata.susceptibility_calls().rrl_mtb;
+            details = details.push(widget::text::body(""));
+            details = details.push(widget::text::heading("Linezolid resistance calls"));
+            details = details.push(widget::text::body(
+                "(rrl, WHO mutation catalogue and protocol 32.43604):",
+            ));
+            for call in &rrl.snp_calls {
+                details = details.push(widget::text::body(format!("    {}", call.call_tag())));
+            }
+            details = details.push(widget::text::heading(rrl_mtb_statement(&rrl.snp_calls)));
+            details = details.push(widget::text::body(
+                "rplC (linezolid, protocol 32.43617) is not assessed here.",
+            ));
+            if !rrl.snp_calls.is_empty() && !rrl.species_validated {
+                details = details.push(widget::text::body(
+                    "Warning: best species hit is not M. tuberculosis complex; the catalogue and \
+                     protocol apply only to that complex.",
+                ));
+            }
+            for source in RefSource::ALL {
+                details = push_source_section(details, &hits, source, "rrl");
+            }
+        }
+
+        details = self.push_load_more(details);
+        column = column.push(details);
+        column.into()
+    }
+
     pub fn preview_rrl_ntm(&self, items: &[Item]) -> Element<'_, Message> {
         let cosmic_theme::Spacing {
             space_xxxs,
@@ -1263,7 +1384,7 @@ impl Item {
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(30 + rrl_snp_count).spacing(space_xxxs);
         details = details.push(widget::text::heading(
-            "32.43605-1-PCR - NTM 23S CLR-Sequenzierung",
+            "32.43605-PCR - NTM 23S CLR-Sequenzierung",
         ));
 
         if hits.is_empty()
@@ -1398,7 +1519,7 @@ impl Item {
 
         let mut column = widget::column::with_capacity(1).spacing(space_m);
         let mut details = widget::column::with_capacity(9 + pnca_called_count).spacing(space_xxxs);
-        details = details.push(widget::text::heading("32.43616-2-MtbKomplex-pncA-Seq"));
+        details = details.push(widget::text::heading("32.43616-MtbKomplex-pncA-Seq"));
 
         if hits.is_empty()
             || self

@@ -124,7 +124,7 @@ rebuild. Paths are relative to `res/sequences/`.
 | `REF_ERM41_MASSILENSE` | `erm41/erm41_massiliense_CCUG_48898.fasta` | single reference (the constant name is spelled with one "I") |
 | `REF_PNCA` | `pnca/pnca_h37rv`, `pnca_bovis_AF2122_97`, `pnca_canettii_CIPT_140010059` (`.fasta`) | CDS + 50 bp promoter |
 | `REF_RPOB_H37RV` | `rpob/rpob_h37rv.fasta` | H37Rv Rv0667 CDS (3519 bp), coordinate system for rifampicin calls |
-| `REF_AMPLICON_HSP65` | `references/hsp65_TB11_TB12.fasta` | GTDB (cosmic-seq) |
+| `REF_AMPLICON_HSP65` | `references/hsp65_TB11_TB12`, `hsp65_TB11_TB12w` (`.fasta`) | GTDB (cosmic-seq) |
 | `REF_AMPLICON_RPOB` | `references/rpoB_2573f_3337r.fasta` | GTDB |
 | `REF_AMPLICON_RPOB_RRDR` | `references/rpoB_TR1_TR2b.fasta` | GTDB |
 | `REF_AMPLICON_RPOB_5PRIME` | `references/rpoB_Tb176f_Tb176r.fasta` | GTDB |
@@ -134,6 +134,8 @@ rebuild. Paths are relative to `res/sequences/`.
 | `REF_RRS_H37RV` | `rrs/rrs_h37rv.fasta` | NCBI, via `sequences.toml` |
 | `REF_AMPLICON_RRS3END` | `references/16S_Bact1098s_Bact1525a.fasta` | GTDB |
 | `REF_AMPLICON_RRL` | `references/23S_MCLR19F_MCLR21R.fasta` | GTDB |
+| `REF_AMPLICON_RRL_MTB` | `references/23S_SP1F_SP2Rmod.fasta` | GTDB |
+| `REF_RRL_H37RV` | `rrl/rrl_h37rv.fasta` | NCBI, via `sequences.toml` |
 | `REF_SPECIES_GROUPS` | `references/species_groups.tsv` | species → complex label |
 
 The `references/` folder is synced from cosmic-seq with `scripts/sync_cosmic_seq.py`; do not edit

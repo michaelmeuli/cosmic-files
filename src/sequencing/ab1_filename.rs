@@ -32,8 +32,10 @@ pub enum Ab1Gene {
     Rrs3End,
     /// *M. tuberculosis* complex rrs, aminoglycoside / capreomycin resistance (#289 / #261).
     RrsMtb,
-    /// 23S rRNA (MCLR 19F / 21R, SP1 F / SP2 R mod).
+    /// 23S rRNA, NTM macrolide resistance (MCLR 19F / 21R).
     Rrl,
+    /// *M. tuberculosis* complex 23S rRNA, linezolid resistance (SP1 F / SP2 R mod).
+    RrlMtb,
     /// pncA (pncA-Ber-fw / rv).
     PncA,
 }
@@ -50,6 +52,7 @@ impl Ab1Gene {
             Self::Rrs3End => "16S 3'-End",
             Self::RrsMtb => "rrs Mtb",
             Self::Rrl => "rrl",
+            Self::RrlMtb => "rrl Mtb",
             Self::PncA => "pncA",
         }
     }
@@ -293,16 +296,16 @@ fn gene_from_marker(m: &str) -> Option<Ab1Gene> {
         return Some(Ab1Gene::Rrs3End);
     }
 
-    // 23S: `rrl`, MCLR 19F / 21R (also typed `MCRL`), `clr`, SP1 F / SP2 R mod. A bare `23S`
-    // is not enough: in the routine corpus it only occurs on non-mycobacterial 23S reads
+    // Mtb 23S: SP1 F / SP2 R mod. Checked first: these names often say `rrl` too.
+    if any_tok(&|t| (t.starts_with("sp1") || t.starts_with("sp2")) && no_digit_at(t, 3)) {
+        return Some(Ab1Gene::RrlMtb);
+    }
+
+    // NTM 23S: `rrl`, MCLR 19F / 21R (also typed `MCRL`), `clr`. A bare `23S` is not enough: in the routine corpus it only occurs on non-mycobacterial 23S reads
     // (*H. pylori* `Hpy_23S_fw`, `23S ExoSAP_MN23SVDFn`), while every mycobacterial rrl read
     // also names one of the primers above.
     if any_tok(&|t| {
-        t.starts_with("rrl")
-            || t.starts_with("mclr")
-            || t.starts_with("mcrl")
-            || t == "clr"
-            || ((t.starts_with("sp1") || t.starts_with("sp2")) && no_digit_at(t, 3))
+        t.starts_with("rrl") || t.starts_with("mclr") || t.starts_with("mcrl") || t == "clr"
     }) {
         return Some(Ab1Gene::Rrl);
     }
@@ -415,8 +418,8 @@ mod tests {
             ("rrs289", Some(RrsMtb)),
             ("rrs", Some(Rrs3End)),
             ("289", None),
-            ("SP2 R mod", Some(Rrl)),
-            ("SP1 F", Some(Rrl)),
+            ("SP2 R mod", Some(RrlMtb)),
+            ("SP1 F", Some(RrlMtb)),
             ("23S", None),
             ("MCRL 21R", Some(Rrl)),
             ("16-23S-ITS-1f", None),
@@ -440,7 +443,7 @@ mod tests {
             // Mycobacterial rrl.
             ("rrl_mcrl21f.ab1", "rrl_mcrl21f", Some(Rrl)),
             ("2014500121 clr f_mclr19f.ab1", "2014500121", Some(Rrl)),
-            ("2024500100 rrl-r_SP2 R mod.ab1", "2024500100", Some(Rrl)),
+            ("2024500100 rrl-r_SP2 R mod.ab1", "2024500100", Some(RrlMtb)),
             // rpoB regions.
             ("2023341228rpoB_rpoB-2573f.ab1", "2023341228", NTM),
             ("2023333227_rpoBS_3337r.ab1", "2023333227", NTM),

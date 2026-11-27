@@ -537,6 +537,7 @@ mod tests {
             rrs_snp_calls: Vec::new(),
             rrs_snp_calls_3end: Vec::new(),
             rrs_mtb_snp_calls: Vec::new(),
+            rrl_mtb_snp_calls: Vec::new(),
             erm41_snp_calls: Vec::new(),
             pnca_snp_calls: Vec::new(),
             rpob_snp_calls: Vec::new(),

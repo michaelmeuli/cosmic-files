@@ -131,9 +131,10 @@ pub struct RrsSnpCall {
 
 impl RrsSnpCall {
     /// Human-readable tag, e.g. `A1401G (amikacin, E.coli: A1401G)` for a resistance alt, or
-    /// `A1401A (E.coli: A1401A)`/`A1401?` otherwise — always includes the *E. coli*-numbered
+    /// `A1401A (E.coli: A1401A)` otherwise — always includes the *E. coli*-numbered
     /// equivalent when known, since that's the numbering most aminoglycoside-resistance
-    /// literature uses.
+    /// literature uses. Empty for a position the read doesn't cover, so panes and reports leave
+    /// it out.
     pub fn call_tag(&self) -> String {
         let ecoli_prefix: Option<&str> = self
             .resistance_bases
@@ -142,9 +143,7 @@ impl RrsSnpCall {
             .map(|(_, nom)| &nom[..nom.len().saturating_sub(1)]);
 
         match self.query_base {
-            None => {
-                format!("{}{}{}", self.wt_base as char, self.ref_pos + 1, "?")
-            }
+            None => String::new(),
             Some(b) if b == self.wt_base => match ecoli_prefix {
                 Some(p) => format!(
                     "{}{}{} (E.coli: {}{})",
@@ -278,6 +277,7 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
                 rrs_snp_calls,
                 rrs_snp_calls_3end: vec![],
                 rrs_mtb_snp_calls: vec![],
+                rrl_mtb_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
                 rpob_snp_calls: vec![],
@@ -292,4 +292,30 @@ pub fn identify_sequence_16s(query: &[u8]) -> Vec<SeqIdHit> {
         .collect();
     super::sort_hits_by_identity(&mut hits);
     hits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uncovered_positions_have_no_tag() {
+        let call = |query_base| RrsSnpCall {
+            ref_pos: 1372,
+            query_base,
+            wt_base: b'T',
+            resistance_bases: [(b'A', (vec!["amikacin".to_string()], "T1406A".to_string()))]
+                .into_iter()
+                .collect(),
+        };
+        assert_eq!(call(None).call_tag(), "");
+        assert_eq!(call(Some(b'T')).call_tag(), "T1373T (E.coli: T1406T)");
+        assert_eq!(
+            call(Some(b'A')).call_tag(),
+            "T1373A (amikacin, E.coli: T1406A)"
+        );
+        let mut calls = crate::sequencing::SusceptibilityCalls::default();
+        calls.rrs.snp_calls = vec![call(None)];
+        assert_eq!(calls.to_string(), "");
+    }
 }

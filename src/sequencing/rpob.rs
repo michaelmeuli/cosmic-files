@@ -50,12 +50,13 @@ impl RpoBRegion {
         }
     }
 
-    /// Lab protocol the region is sequenced with, shown as the preview heading.
+    /// Lab protocol the region is sequenced with, shown as the preview heading. Protocol
+    /// numbers carry no revision, so headings stay right when a protocol is revised.
     pub fn protocol(self) -> &'static str {
         match self {
-            Self::Ntm => "32.43504-3-Mykobakterien NTM rpob-seq",
-            Self::MtbRrdr => "32.43612-2-Mtb-Komplex rpoB-81bp-Coreregion Rifampicin",
-            Self::Mtb5Prime => "32.43619-2-Mtb-Komplex rpoB-5'End-Region",
+            Self::Ntm => "32.43504-Mykobakterien NTM rpob-seq",
+            Self::MtbRrdr => "32.43612-Mtb-Komplex rpoB-81bp-Coreregion Rifampicin",
+            Self::Mtb5Prime => "32.43619-Mtb-Komplex rpoB-5'End-Region",
             Self::MtbXpert => "NZM 21-MTB-Komplex rpoB-seq aus MTB-RIF GeneXpert",
         }
     }
@@ -523,6 +524,7 @@ pub fn identify_sequence_rpob(query: &[u8], region: RpoBRegion) -> Vec<SeqIdHit>
                 rrs_snp_calls: vec![],
                 rrs_snp_calls_3end: vec![],
                 rrs_mtb_snp_calls: vec![],
+                rrl_mtb_snp_calls: vec![],
                 erm41_snp_calls: vec![],
                 pnca_snp_calls: vec![],
                 rpob_snp_calls: vec![],

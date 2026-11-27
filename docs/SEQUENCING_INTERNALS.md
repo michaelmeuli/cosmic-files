@@ -24,10 +24,11 @@ are the optional Microsynth download (`microsynth.rs`) and the ntfy push (`ntfy_
 | [`batch.rs`](../src/sequencing/batch.rs) | Directory scanning (`scan_ab1_directory`), per-file pipeline (`analyse_ab1_file`), in-memory and on-disk caches, preview analysis (`analyse_ab1_for_preview`), CSV export (`write_ab1_csv`, `write_rare_mutations_csv`). |
 | [`erm41.rs`](../src/sequencing/erm41.rs) | erm(41) for the *M. abscessus* complex: subspecies ID plus position 28 and loss-of-function (LOF) SNP calls, which predict inducible macrolide resistance. |
 | [`rrl.rs`](../src/sequencing/rrl.rs) | 23S rRNA: species ID plus macrolide resistance at *E. coli* positions 2058/2059 and catalogue SNPs. |
+| [`rrl_mtb.rs`](../src/sequencing/rrl_mtb.rs) | *M. tuberculosis* complex 23S (SP1/SP2): linezolid calls against H37Rv rrl (WHO catalogue and protocol 32.43604). |
 | [`rrs.rs`](../src/sequencing/rrs.rs) | 16S rRNA: species ID plus aminoglycoside-resistance SNPs. |
 | [`rrs3end.rs`](../src/sequencing/rrs3end.rs) | 16S rRNA 3′ end: position 1248 (*M. marinum* A vs *M. ulcerans* G) plus the same aminoglycoside SNP logic as `rrs.rs`. |
 | [`rrs_mtb.rs`](../src/sequencing/rrs_mtb.rs) | *M. tuberculosis* complex rrs (#289/#261): WHO-catalogue calls against H37Rv rrs. |
-| [`hsp65.rs`](../src/sequencing/hsp65.rs) | hsp65/groEL2: species ID (TB11/TB12 amplicons only) and primer trimming. |
+| [`hsp65.rs`](../src/sequencing/hsp65.rs) | hsp65/groEL2: species ID (TB11/TB12 and TB11/TB12w amplicons only) and primer trimming. |
 | [`rpob.rs`](../src/sequencing/rpob.rs) | rpoB: species ID per region; for the Mtb regions also rifampicin resistance (RRDR) from the WHO catalogue. |
 | [`pnca.rs`](../src/sequencing/pnca.rs) | pncA (*M. tuberculosis* complex): pyrazinamide resistance from the WHO catalogue. |
 | [`tb_data.rs`](../src/sequencing/tb_data.rs) | TBProfiler `*.results.json` deserialization, `confidence_rank`, and the TB → *E. coli* coordinate map. |
@@ -46,10 +47,11 @@ graph LR
     tab["tab.rs<br/>(file preview)"] --> batch
 
     batch --> core["mod.rs core<br/>AB1 parse · trim · align_to_ref"]
-    batch --> erm41 & rrl & rrs & rrs3end & rrs_mtb & hsp65 & rpob & pnca
+    batch --> erm41 & rrl & rrl_mtb & rrs & rrs3end & rrs_mtb & hsp65 & rpob & pnca
 
     erm41 --> core
     rrl --> core
+    rrl_mtb --> core
     rrs --> core
     rrs3end --> core
     rrs_mtb --> core
@@ -103,7 +105,7 @@ PDF include only records with a known gene and a best identity (NCBI or GTDB) of
 scan and the Microsynth download). `Message::Ab1ScanComplete2` does the same for the second
 scan directory, with its own limit, `report_max_age_days_2`. `rare_mutations.csv` lists the
 records with a resistance SNP outside a position call (`is_susceptible_rare == Some(false)` for
-rrl, rrs or rrs3end) and those with a resistant Mtb rrs call. When none qualifies, an existing `rare_mutations.csv` is deleted, so it
+rrl, rrs or rrs3end) and those with a resistant Mtb rrs or rrl call. When none qualifies, an existing `rare_mutations.csv` is deleted, so it
 never shows an earlier scan's mutations. The PDF is
 sent to ntfy only when a topic is configured. A bare topic name goes to the public
 `https://ntfy.sh` server, where anyone who knows the topic can read the report, so it logs a
@@ -135,7 +137,8 @@ flowchart TD
     D -- "Rrs16S: Mbak*" --> S16["rrs::identify_sequence_16s"]
     D -- "Rrs3End: 1098s, 1525a, other rrs" --> S3["rrs3end::identify_sequence_16s3end"]
     D -- "RrsMtb: #289, #261" --> SM["rrs_mtb::identify_sequence_rrs_mtb"]
-    D -- "Rrl: rrl, mclr, clr, 23S, SP1, SP2" --> RL["rrl::identify_sequence_rrl_ntm"]
+    D -- "Rrl: rrl, mclr, clr" --> RL["rrl::identify_sequence_rrl_ntm"]
+    D -- "RrlMtb: SP1, SP2" --> RLM["rrl_mtb::identify_sequence_rrl_mtb"]
     D -- "PncA: pncA" --> PN["pnca::identify_sequence_pnca"]
     D -- "None (incl. rpoB MAB / marinum / other genus)" --> X["no hits"]
 
@@ -229,17 +232,19 @@ Two kinds of call recur:
 
 The `rrl`, `rrs` and `rrs3end` modules make catalogue calls only for ntm-db full-gene references,
 whose accession contains `:`. This is because the catalogue coordinates refer to those
-sequences. `best_snp_hit()` then finds the hit with SNP data among the hits that share the
-top hit's species.
+sequences. `best_snp_hit()` then finds the hit with SNP data among the hits of the best NCBI
+hit's species. Genus synonyms (*Mycobacteroides* etc.) and subspecies are ignored for this, and
+*M. massiliense* and *M. bolletii* count as *M. abscessus*.
 
 | Module | References | Diagnostic logic | Result |
 |---|---|---|---|
 | **erm41** | 3 subspecies FASTAs: *abscessus* ATCC 19977, *bolletii* CIP 108541, *massiliense* CCUG 48898 | Primer trim (`ERM41_FWD_START/END`) → anchor call at **position 28** (C/G/A = susceptible, **T28 = inducible resistance**) → LOF SNPs from ntm-db `Mycobacterium_abscessus/variants.csv`. **Any observed LOF allele overrides position 28 and gives susceptible.** *massiliense* is always susceptible, because its erm(41) is non-functional. | `Erm41Position28`, `Vec<Erm41LofCall>` |
 | **rrl** | `myco_rrl.fasta` (NCBI query limited to 1200–3500 bp at build time; no runtime length filter) + `references/23S_MCLR19F_MCLR21R.fasta` | Anchor call at **2058/2059**: A/A = wildtype (susceptible), any other pair of A/C/G/T = resistance; an `N` or IUPAC ambiguity code from the basecaller gives no call → catalogue SNPs from ntm-db `variants.csv` (abscessus, avium, intracellulare). Any resistance allele gives resistant. A wildtype 2058/2059 combined with a resistance SNP elsewhere is reported as a **rare** mutation. | `RrlPosition2058_2059`, `Vec<RrlSnpCall>` |
+| **rrl_mtb** | `myco_rrl.fasta` + `references/23S_SP1F_SP2Rmod.fasta`; calls against `rrl/rrl_h37rv.fasta` | Linezolid: WHO-catalogue alleles, `n.2269_2270insT`, and the single and double mutations of protocol 32.43604, in `rrl_mtb_snp_calls` of the top hit. Only ever resistant or undetermined; no macrolide call. | `Vec<RrlMtbSnpCall>` |
 | **rrs** | `myco_rrs.fasta` (NCBI query limited to 1200–3500 bp at build time) + `references/16S_IMMF_IMMR2.fasta` and the two `16S_Mbak283f_*` files | Aminoglycoside resistance SNPs (e.g. `n.1401A>G`) from ntm-db `variants.csv`. Only ever resistant or undetermined, never susceptible. | `Vec<RrsSnpCall>` |
 | **rrs3end** | `myco_rrs.fasta` + `references/16S_Bact1098s_Bact1525a.fasta` | Anchor call at **1248** (A = *M. marinum*, G = *M. ulcerans*) plus the same SNP logic as `rrs`, stored in `rrs_snp_calls_3end`. Only ever resistant or undetermined. | `Rrs3EndPosition1248`, `Vec<RrsSnpCall3End>` |
 | **rrs_mtb** | `myco_rrs.fasta` + `references/rrs_289_261.fasta`; calls against `rrs/rrs_h37rv.fasta` | WHO-catalogue bases at 1401, 1402, 1403, 1483, 1484, stored in `rrs_mtb_snp_calls` of the top hit and reported in the `rrs_mtb` columns. Only ever resistant or undetermined. | `Vec<RrsMtbSnpCall>` |
-| **hsp65** | `references/hsp65_TB11_TB12.fasta` | Trims Telenti and Patel primer sets, then species ID only (no SNP calls). | — |
+| **hsp65** | `references/hsp65_TB11_TB12.fasta` + `hsp65_TB11_TB12w.fasta` | Trims Telenti and Patel primer sets, then species ID only (no SNP calls). | — |
 | **rpob** | NTM region: `myco_rpob.fasta` + `references/rpoB_2573f_3337r.fasta` (≥ 400 bp). Mtb regions: `references/rpoB_TR1_TR2b.fasta` (RRDR), `rpoB_Tb176f_Tb176r.fasta` (5′), `rpoB_Xpert_*.fasta` (Xpert), no length filter. Rifampicin calls: `rpob/rpob_h37rv.fasta` (H37Rv Rv0667 CDS) | Species ID; for the Mtb regions the read is also aligned to H37Rv and every RRDR codon (426–452), the catalogued codons outside it (V170F, I491F) and RRDR indels are called against the WHO catalogue | `Vec<RpobSnpCall>` (top hit only) |
 | **pnca** | *M. tuberculosis* H37Rv, *M. bovis* AF2122/97, *M. canettii* CIPT 140010059 (CDS + 50 bp promoter) | Parses the WHO catalogue `tbprofiler/mutations.csv` into nucleotide maps (`c.-N` promoter / `c.N`) and codon maps (`p.Xxx123Yyy`), then calls every listed site. | `Vec<PncaSnpCall>` |
 

@@ -95,6 +95,16 @@ output    = "rpob/rpob_h37rv.fasta"
 # fasta     = "myco_erm41.fasta"
 
 
+# --- rrl (23S rRNA) ---
+
+# M. tuberculosis H37Rv rrl (MTB000020, 3138 bp): the WHO catalogue numbers rrl mutations on it.
+[[genome]]
+accession = "NC_000962.3"
+seq_start = 1473658
+seq_stop  = 1476795
+output    = "rrl/rrl_h37rv.fasta"
+
+
 # --- rrs (16S rRNA) ---
 
 # M. tuberculosis H37Rv rrs (MTB000019, 1537 bp): the WHO catalogue numbers rrs mutations on it.
