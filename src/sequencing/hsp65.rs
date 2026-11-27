@@ -121,14 +121,14 @@ mod tests {
     fn pool_includes_tb12w_only_genomes_without_duplicates() {
         let (_, _, _, only_tb12w) = HSP65_REFS
             .iter()
-            .find(|(_, _, desc, _)| desc == "Mycobacterium sp022600695")
+            .find(|(_, _, desc, _)| desc == "Corynebacterium mastitidis")
             .cloned()
             .expect("TB-12w-only genome missing");
         let hits = identify_sequence_hsp65(&only_tb12w);
         assert!(
             hits.iter()
                 .take_while(|h| h.identity > 99.99)
-                .any(|h| h.description == "Mycobacterium sp022600695")
+                .any(|h| h.description == "Corynebacterium mastitidis")
         );
         let unique: std::collections::HashSet<_> = HSP65_REFS
             .iter()

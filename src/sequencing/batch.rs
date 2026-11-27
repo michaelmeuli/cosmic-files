@@ -247,7 +247,8 @@ pub struct SampleSusceptibilityRecord {
 /// 23: pncA changes at unlisted positions (including premature stops) give no verdict instead of
 ///     susceptible.
 /// 24: GTDB M. europaeum_A (GCF_003284975.1) no longer gives a 16S call the simiae complex.
-pub(crate) const ANALYSIS_VERSION: u32 = 24;
+/// 25: placeholder species (GTDB `sp<digits>`, NCBI `sp.`) are left out of the references.
+pub(crate) const ANALYSIS_VERSION: u32 = 25;
 
 impl SampleSusceptibilityRecord {
     /// Highest identity over both reference sources; the report filters on this, so targets

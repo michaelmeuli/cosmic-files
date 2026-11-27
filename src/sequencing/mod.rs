@@ -597,14 +597,27 @@ impl RefSource {
 /// A reference pool: `(source, accession, description, sequence)` per entry.
 pub(crate) type RefPool = Vec<(RefSource, String, String, Vec<u8>)>;
 
+/// `true` if a hit description names no species: NCBI's "Genus sp." (followed by a strain in
+/// the defline) or GTDB's numbered placeholder, e.g. "Mycobacterium sp001672975".
+fn is_placeholder_species(description: &str) -> bool {
+    description
+        .split_whitespace()
+        .nth(1)
+        .and_then(|epithet| epithet.strip_prefix("sp"))
+        .is_some_and(|rest| {
+            rest == "." || (!rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+        })
+}
+
 /// Builds a reference pool from NCBI and GTDB multi-FASTAs. Each source is parsed, filtered by
 /// `keep` and deduplicated ([`dedup_substring_same_desc`]) on its own, so an entry of one
-/// source is never dropped because it is a substring of an entry of the other.
+/// source is never dropped because it is a substring of an entry of the other. Placeholder
+/// species ([`is_placeholder_species`]) are always left out.
 pub(crate) fn ref_pool(ncbi: &[&str], gtdb: &[&str], keep: impl Fn(&[u8]) -> bool) -> RefPool {
     let mut pool = RefPool::new();
     for (source, fastas) in [(RefSource::Ncbi, ncbi), (RefSource::Gtdb, gtdb)] {
         let mut entries: Vec<_> = fastas.iter().flat_map(|f| parse_multi_fasta(f)).collect();
-        entries.retain(|(_, _, seq)| keep(seq));
+        entries.retain(|(_, desc, seq)| !is_placeholder_species(desc) && keep(seq));
         pool.extend(
             dedup_substring_same_desc(entries)
                 .into_iter()
@@ -1764,6 +1777,31 @@ mod tests {
         // NC_2.1 is a substring of NC_1.1 (same source, same species) and is dropped; the GTDB
         // amplicon is a substring of both but belongs to the other source and survives.
         assert_eq!(got, [(Ncbi, "NC_1.1"), (Gtdb, "GCF_1.1")]);
+    }
+
+    #[test]
+    fn placeholder_species_are_recognised() {
+        for description in ["Mycobacterium sp001672975", "Mycobacterium sp."] {
+            assert!(super::is_placeholder_species(description), "{description}");
+        }
+        for description in [
+            "Mycobacterium sphagni",
+            "Mycobacterium kansasii",
+            "Mycobacterium sp",
+            "Mycobacterium",
+        ] {
+            assert!(!super::is_placeholder_species(description), "{description}");
+        }
+    }
+
+    #[test]
+    fn ref_pool_leaves_out_placeholder_species() {
+        let ncbi =
+            ">NC_1.1 Mycobacterium sp. MM-1 16S\nAACC\n>NC_2.1 Mycobacterium sphagni a\nGGTT\n";
+        let gtdb = ">GCF_1.1|amp|1 Mycobacterium sp001672975 [length=4]\nCCGG\n";
+        let pool = super::ref_pool(&[ncbi], &[gtdb], |_| true);
+        let got: Vec<&str> = pool.iter().map(|(_, acc, _, _)| acc.as_str()).collect();
+        assert_eq!(got, ["NC_2.1"]);
     }
 
     #[test]
