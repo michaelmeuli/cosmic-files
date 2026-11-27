@@ -298,6 +298,8 @@ fn zip_extract<R: io::Read + io::Seek, P: AsRef<Path>>(
     for fd in dirty_fds {
         fd.sync_all()?;
     }
+    // Only Unix syncs directories: Windows refuses to open one like a file (access denied).
+    #[cfg(unix)]
     for dir in target_dirs {
         fs::File::open(dir)?.sync_all()?;
     }

@@ -294,6 +294,10 @@ impl Context {
     ) -> Result<(), OperationError> {
         self.flush(std::mem::take(dirty_fds)).await?;
         let dirs: Vec<_> = dirty_dirs.drain().collect();
+        // Only Unix syncs directories: Windows refuses to open one like a file (access denied).
+        #[cfg(not(unix))]
+        drop(dirs);
+        #[cfg(unix)]
         for chunk in dirs.chunks(SYNC_BATCH) {
             let mut fds = Vec::with_capacity(chunk.len());
             for path in chunk {

@@ -9342,9 +9342,11 @@ pub(crate) mod test_utils {
             panic!("Expected tab's location to be a path");
         };
 
+        // The tab keeps canonical paths (`\\?\C:\...` on Windows), so compare in that form.
+        let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
         assert_eq!(
-            path,
-            tab_path,
+            canonical(path),
+            canonical(tab_path),
             "Tab's path is {} instead of being updated to {}",
             tab_path.display(),
             path.display()
