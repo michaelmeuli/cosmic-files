@@ -18,7 +18,6 @@ The data are artificial: never mix them into a folder of patient reads.
 
 import argparse
 import math
-import random
 import struct
 import sys
 from pathlib import Path
@@ -210,7 +209,7 @@ def erm41_cases(cases):
         calls="p.Arg7*: loss of function",
         pane="position 28 anchor lost; susceptible because of loss of function")
     add("abscessus_N28", abscessus, sub(seq, 28, "T", "N"), top="abscessus", verdict="-",
-        calls="Position 28 not found", pane="no verdict")
+        calls="T28N", pane="'erm(41) Position 28 not found', no verdict")
     add("abscessus_T28_revcomp", abscessus, revcomp(seq), top="subsp. abscessus", verdict="R",
         calls="T28", pane="chromatogram marked reverse complement")
 
@@ -228,8 +227,10 @@ def rrl_cases(cases):
     def edit(pos, wt, alt):
         return sub(full, pos, wt, alt)[start:end]
 
-    add("abscessus_wildtype", window, top="abscessus", verdict="S", calls="wildtype",
-        pane="A2058/A2059 wt, susceptible")
+    # M. abscessus ties with M. massiliense in this window; massiliense is listed first, and the
+    # abscessus catalogue applies to it.
+    add("abscessus_wildtype", window, top="massiliense", verdict="S", calls="wildtype",
+        pane="A2058/A2059 wt, susceptible, catalogue SNPs all wt")
     for pos, wt, alt, ecoli, pane in [
         (2269, "A", "G", "A2057G", "position undetermined (anchor); catalogued mutation found"),
         (2270, "A", "G", "A2058G", "mutation in A2058/A2059"),
@@ -237,25 +238,41 @@ def rrl_cases(cases):
         (2281, "G", "A", "G2069A", "position undetermined (anchor); catalogued mutation found"),
         (2293, "A", "G", "A2082G", "A2058/A2059 wt but catalogued mutation"),
     ]:
-        add(f"abscessus_{ecoli}", edit(pos, wt, alt), top="abscessus", verdict="R",
+        add(f"abscessus_{ecoli}", edit(pos, wt, alt), top="massiliense", verdict="R",
             calls=f"E.coli: {ecoli}", pane=pane)
-    add("abscessus_N2058", edit(2270, "A", "N"), top="abscessus", verdict="-",
-        calls="Undetermined", pane="no verdict")
-    add("abscessus_A2058G_revcomp", revcomp(edit(2270, "A", "G")), top="abscessus",
+    add("abscessus_A2058G_revcomp", revcomp(edit(2270, "A", "G")), top="massiliense",
         verdict="R", calls="E.coli: A2058G", pane="chromatogram marked reverse complement")
 
-    for accession, species, pos in [("CP000479", "Mycobacterium avium", 2279),
-                                    ("CP015278", "Mycobacterium intracellulare", 2266)]:
-        h, s = ntm_db("rrl", accession)
-        a2058 = pos
-        offset = a2058 - 2270
-        read = sub(s, a2058, "A", "G")[start + offset:end + offset]
-        add(f"{species.split()[-1]}_A2058G", read, ref=h, species=species,
-            top=species.split()[-1], verdict="R", calls="E.coli: A2058G",
-            pane="resistant, species-specific catalogue")
+    # The M. avium window starts 9 nt later; E. coli 2058 is nt 2279.
+    h, s = ntm_db("rrl", "CP000479")
+
+    def avium_add(case, read, **expect):
+        add(case, read[start + 9:end + 9], ref=h, species="Mycobacterium avium", top="avium",
+            **expect)
+
+    avium_add("avium_wildtype", s, verdict="S", calls="wildtype",
+              pane="susceptible, catalogue SNPs all wt")
+    for pos, wt, alt, ecoli, pane in [
+        (2278, "A", "G", "A2057G", "position undetermined (anchor); catalogued mutation found"),
+        (2279, "A", "G", "A2058G", "mutation in A2058/A2059"),
+        (2280, "A", "G", "A2059G", "mutation in A2058/A2059"),
+        (2290, "G", "A", "G2069A", "position undetermined (anchor); catalogued mutation found"),
+        (2303, "A", "G", "A2082G", "A2058/A2059 wt but catalogued mutation"),
+    ]:
+        avium_add(f"avium_{ecoli}", sub(s, pos, wt, alt), verdict="R",
+                  calls=f"E.coli: {ecoli}", pane=pane)
+    avium_add("avium_N2058", sub(s, 2279, "A", "N"), verdict="-", calls="E.coli: A2058N",
+              pane="position undetermined, no verdict")
+
+    h, s = ntm_db("rrl", "CP015278")
+    add("intracellulare_A2058G", sub(s, 2266, "A", "G")[start - 4:end - 4], ref=h,
+        species="Mycobacterium intracellulare", top="intracellulare", verdict="R",
+        calls="E.coli: A2058G", pane="resistant, species-specific catalogue")
     h, s = amplicon("23S_MCLR19F_MCLR21R", "Mycobacterium kansasii")
-    add("kansasii_wildtype", s, ref=h, species="Mycobacterium kansasii", verdict="S",
-        calls="wildtype", pane="species without a catalogue: position call only, no SNP list")
+    # The app names the kansasii 23S reference "Mycobacterium kansas".
+    add("kansasii_wildtype", s, ref=h, species="Mycobacterium kansasii", top="kansas",
+        verdict="S", calls="wildtype",
+        pane="species without a catalogue: position call only, no SNP list")
 
 
 def rrs3end_cases(cases):
@@ -267,31 +284,42 @@ def rrs3end_cases(cases):
         cases.add("Bact-1098s", case, read, gene="16S 3'-End", ref=ref, sibling=species,
                   **expect)
 
+    # M. abscessus: the top NCBI hit is named "Mycobacteroides abscessus"; the catalogue of the
+    # "Mycobacterium abscessus" reference applies to it.
     add("abscessus_wildtype", full[start:], header, abscessus, top="abscessus",
         pane="amikacin SNPs all wt; no verdict")
-    for pos, wt, alt, ecoli in [(1373, "T", "A", "T1406A"), (1375, "A", "G", "A1408G"),
-                                (1376, "C", "T", "C1409T")]:
-        add(f"abscessus_{ecoli}", sub(full, pos, wt, alt)[start:], header, abscessus,
-            top="abscessus", verdict="R", calls=f"E.coli: {ecoli}",
-            pane="amikacin resistance SNP")
+    add("abscessus_A1408G", sub(full, 1375, "A", "G")[start:], header, abscessus,
+        top="abscessus", verdict="R", calls="E.coli: A1408G", pane="amikacin resistance SNP")
+
+    # M. avium: E. coli 1406 is nt 1386, 13 nt after the abscessus numbering.
+    h, s = ntm_db("rrs", "CP000479")
+    avium = "Mycobacterium avium"
+    add("avium_wildtype", s[start + 13:], h, avium, top="avium", pane="amikacin SNPs all wt")
+    for pos, wt, alt, ecoli in [(1386, "T", "A", "T1406A"), (1388, "A", "G", "A1408G"),
+                                (1389, "C", "T", "C1409T")]:
+        add(f"avium_{ecoli}", sub(s, pos, wt, alt)[start + 13:], h, avium, top="avium",
+            verdict="R", calls=f"E.coli: {ecoli}", pane="amikacin resistance SNP")
 
     anchor = "ACATGCTACAATGGCCGGT"
-    marinum = amplicon("16S_Bact1098s_Bact1525a", "Mycobacterium marinum")
-    h, s = marinum
+    h, s = amplicon("16S_Bact1098s_Bact1525a", "Mycobacterium marinum")
     at = s.index(anchor) + len(anchor)  # 0-based index of position 1248
     assert s[at] == "A"
-    add("marinum_pos1248A", s, h, "Mycobacterium marinum", calls="A1248",
-        pane="position 1248 = A; '16S and 16S 3-End: M. marinum'")
-    g = sub(s, at + 1, "A", "G")
-    add("ulcerans_pos1248G", g, h, "Mycobacterium marinum", calls="G1248",
-        pane="position 1248 = G; '16S and 16S 3-End: M. ulcerans'")
+    heading = "'16S 3\'-End position 1248 = {}'"
+    both = "; '16S and 16S 3\'-End: Mycobacterium {}'"
+
+    def marinum(case, read, **expect):
+        add(case, read, h, "Mycobacterium marinum", **expect)
+
+    marinum("marinum_pos1248A", s, calls="A1248",
+            pane=heading.format("A") + both.format("marinum"))
+    marinum("ulcerans_pos1248G", sub(s, at + 1, "A", "G"), calls="G1248",
+            pane=heading.format("G") + both.format("ulcerans"))
     for alt in "CT":
-        add(f"marinum_pos1248{alt}", sub(s, at + 1, "A", alt), h, "Mycobacterium marinum",
-            calls=f"{alt}1248", pane=f"position 1248 = {alt}")
-    add("marinum_pos1248N", sub(s, at + 1, "A", "N"), h, "Mycobacterium marinum",
-        calls="Position 1248 not found", pane="position 1248 undetermined")
-    add("marinum_pos1248A_revcomp", revcomp(s), h, "Mycobacterium marinum", calls="A1248",
-        pane="chromatogram marked reverse complement")
+        marinum(f"marinum_pos1248{alt}", sub(s, at + 1, "A", alt), calls=f"{alt}1248",
+                pane=heading.format(alt))
+    marinum("marinum_pos1248N", sub(s, at + 1, "A", "N"), pane=heading.format("undetermined"))
+    marinum("marinum_pos1248A_revcomp", revcomp(s), calls="A1248",
+            pane="chromatogram marked reverse complement")
 
 
 def rrs16s_cases(cases):
@@ -305,9 +333,9 @@ def rrs16s_cases(cases):
         header, seq = amplicon("16S_Mbak283f_Mbak264r", species)
         cases.add("Mbak14", f"{species.split()[-1]}_5prime", seq, gene="16S", ref=header,
                   top=species.split()[-1], pane=pane)
-    header, full = ntm_db("rrs", "CU458896")
-    cases.add("Mbak14", "abscessus_fulllength_A1408G", sub(full, 1375, "A", "G"), gene="16S",
-              ref=header, top="abscessus", verdict="R", calls="E.coli: A1408G",
+    header, full = ntm_db("rrs", "CP000479")
+    cases.add("Mbak14", "avium_fulllength_A1408G", sub(full, 1388, "A", "G"), gene="16S",
+              ref=header, top="avium", verdict="R", calls="E.coli: A1408G",
               pane="amikacin SNP block in the 16S pane")
 
 
@@ -428,8 +456,8 @@ def pnca_cases(cases):
     add(f"{untested[0]}_untested", untested[1], verdict="-", calls="(mutation, untested)",
         pane="uncatalogued variant, no verdict")
     i = flank + 150
-    add("frameshift_c.151del", seq[:i] + seq[i + 1:], verdict="*",
-        pane="frameshifts are not called by the pncA module")
+    add("frameshift_c.151del", seq[:i] + seq[i + 1:], verdict="S",
+        pane="APP GAP: frameshifts are not called, read reported susceptible")
     add("partial_read", seq[:330], verdict="-", pane="sites uncovered, no verdict")
     add("Asp12Ala_revcomp", revcomp(aa(12, "Asp", "Ala")), verdict="R", calls="p.Asp12Ala",
         pane="reverse strand")
@@ -500,14 +528,13 @@ def untested_example(seq, flank):
 
 
 def fallback_cases(cases):
-    rng = random.Random(1)
-    noise = "".join(rng.choice("ACGT") for _ in range(500))
-    cases.add("hsp65_TB-11", "unalignable", noise, gene="hsp65", ref="random",
-              pane="'Could not align' (after 'Show alignments below 98%')")
+    # A homopolymer: random bases give short 100 % matches that count as a hit.
+    cases.add("hsp65_TB-11", "unalignable", "A" * 400, gene="hsp65", ref="poly-A",
+              pane="'Could not align'")
     header, full = ntm_db("rrl", "CU458896")
     window = full[2141:2977]
     cases.add("MCLR19F", "short_read", window[90:170], gene="rrl", ref=header, verdict="*",
-              pane="under 100 bases: no result, lengths and quality only")
+              pane="under 100 bases: no result in the preview (the folder scan still calls it S)")
     cases.add("MCLR19F", "low_identity", scatter(window, 25), gene="rrl", ref=header,
               verdict="*", pane="below 98%: 'Show alignments below 98% identity' button")
     cases.add("inhA-rev", "no_analysis", window, gene="", ref=header,
